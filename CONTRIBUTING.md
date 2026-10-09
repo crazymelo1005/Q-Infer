@@ -1,0 +1,156 @@
+# 贡献指南
+
+仓库当前为设计阶段（无实现代码）。以下约定适用于文档与代码的写作、编号与提交；内容口径以 [docs/README.md](docs/README.md)（文档地图）与 [docs/glossary.md](docs/glossary.md)（术语唯一口径）为准。
+
+---
+
+## 1. 文档分层与目录
+
+文档分三层，各层受众不同，互不混装。
+
+| 层 | 目录 | 内容 | 受众 |
+|----|------|------|------|
+| 外部 | [README.md](README.md)、[overview.md](docs/overview.md) | 定位、状态、架构概览 | 外部读者、评审者 |
+| 实现 | `docs/design/` | 引擎规格、接口、门禁、风险、候选方向、ADR | 实现者、测量者 |
+| 台账 | `docs/research/`、[glossary.md](docs/glossary.md)、[hardware.md](docs/hardware.md) | 事实、术语、硬件规格与出处 | 研究者、全体 |
+
+| 文件 | 回答的问题 |
+|------|-----------|
+| [requirements.md](docs/requirements.md) | 要满足什么（目标负载、指标、验收、非目标） |
+| [overview.md](docs/overview.md) | 系统由哪几块组成、边界在哪 |
+| [design/engine.md](docs/design/engine.md) | 每块具体怎么做（规格） |
+| [design/interfaces.md](docs/design/interfaces.md) | 模块之间的对外接口 |
+| [design/gates.md](docs/design/gates.md) | 哪些假设必须先测、怎么测、通过标准 |
+| [design/risks.md](docs/design/risks.md) | 已知风险与对策 |
+| [design/proposals.md](docs/design/proposals.md) | 未验证的候选方向（非规格） |
+| `docs/design/adr/` | 已作出的决策与理由 |
+| `docs/research/` | 事实台账（是什么） |
+| [research/references.md](docs/research/references.md) | 全部出处，按编号登记 |
+
+分层规则：`research/` 不得引用 `design/`；`design/` 的关键论断必须能回指 `research/` 或 [hardware.md](docs/hardware.md)。
+
+新增文件准入：能并入现有文件的一律并入；确需新建的，同时在上表与 [docs/README.md](docs/README.md) 登记。
+
+---
+
+## 2. 写作规范
+
+文档写规格与事实，不写论证过程、不写自我评价、不写修改历史。开篇可以用一句话说明文档范围，其余位置不写自指内容。
+
+禁止出现：
+
+- 第一人称（我、我们）
+- 编辑史与自指元评论：原 X 版、已改写、落地状态、评审告知、复核补注、不改决策、本节已按某处修改
+- 文件级版本号或日期头
+- 行内 emoji（来源等级与复核状态一律用方括号标记，见第 3 节）
+- 疑问句标题
+
+版本号、日期与变更记录只存放在提交历史里。需要说明「当时为什么这么定」时写 ADR，不写文件内注记。
+
+格式约束：
+
+- 加粗只用于术语首次定义与硬约束，密度不超过每 100 行 10 处
+- 数字必须带单位与口径；属于推算的必须写明"推算"，并在实测后回填
+- 术语首次出现给出英文全称；术语以 [glossary.md](docs/glossary.md) 为唯一口径，正文使用的新术语必须同步登记
+- 章节号、编号只增不改，避免外部引用失效
+
+---
+
+## 3. 来源分级与引用
+
+每个数值与事实都要能看出来源层级，禁止把不同来源的数字混成一句结论。
+
+| 等级 | 含义 |
+|------|------|
+| 一手实测 | 读自运行中的引擎 API 或本机 benchmark |
+| 官方一手 | 模型、引擎的官方发布页 / 论文口径 |
+| 硬件规格 | 厂商规格页，是上限而非实测 |
+| 他卡实测 | 社区在其它硬件上的实测，趋势可信、绝对值浮动 |
+| 本机推算 | 由模型估算，须 benchmark 标定后方可当结论 |
+
+复核状态单列，表示查到什么程度：已逐位确认 / 仅标题或摘要 / 来源矛盾已降级。
+
+标记写法：写在数值或事实之后，用方括号，例如 `[本机实测]`、`[官方]`、`[已确认]`。表格可用一行注释统一标注整表的等级。全部标记与定义见 [research/references.md](docs/research/references.md) 第 1、2 节。
+
+每条来源在 [research/references.md](docs/research/references.md) 登记一行：
+
+```
+S-<n> | 等级 | 复核状态 | 来源（URL 或文档路径） | 引用日期
+```
+
+正文引用写作 `[S-n]`。新增来源即追加编号并回填正文；编号只增不改。
+
+`[S-n]` 只用于仓库之外的来源。仓库内部引用一律使用相对链接加章节号，不编 `S-n`。
+
+台账类文档在末尾设「来源」段，用表格列出本文使用的编号与对应章节：
+
+```
+| 编号 | 用于章节 | 内容 |
+```
+
+正文中某个数字若只来自单一来源，可直接在句中标 `[S-n]`；整表或整节的来源由「来源」段承担，避免行内堆砌标记。
+
+---
+
+## 4. 编号体系
+
+| 前缀 | 用途 | 登记位置 | 可变性 |
+|------|------|---------|--------|
+| `ADR-NNN` | 架构决策 | `docs/design/adr/` | 不可修订；改变决策须新开 ADR 并标注取代关系 |
+| `G-NN` | 门禁与待测项 | [design/gates.md](docs/design/gates.md) | 只增不改 |
+| `R-NN` | 风险 | [design/risks.md](docs/design/risks.md) | 只增不改 |
+| `P-NN` | 候选方向 | [design/proposals.md](docs/design/proposals.md) | 只增不改 |
+| `S-N` | 来源 | [research/references.md](docs/research/references.md) | 只增不改 |
+
+新编号必须同时登记到上表指定位置；未登记即视为不存在。
+
+---
+
+## 5. 实测与评测流程
+
+把手上的推算换成实测是当前的主要工作，流程固定如下。
+
+1. 分母口径：同机、同量化档、同任务集、同并发。分母必须是本机实测，不得使用上游估算值。
+2. 每次配置重复不少于 5 次，报中位数与区间，并记录当次机器画像。
+3. 投机与预取类收益必须使用真实任务集，禁用随机 prompt。
+4. 结果写入 `docs/research/` 的对应条目，并回填 [design/gates.md](docs/design/gates.md) 中该 `G-NN` 的实测记录列。
+5. 门禁不成立时砍掉对应子系统，负结果写入 [design/risks.md](docs/design/risks.md) 与 `docs/research/`，不得删除、不得静默保留。
+6. 冷启动与稳态分开记录。引擎的累计窗口随进程重启归零，历史值无法从端点复现，引用时必须写明口径。
+
+---
+
+## 6. 提交与 PR
+
+- 分支命名 `<type>/<short-topic>`。
+- 提交信息首行 `<type>: <祈使句摘要>`，正文写清为什么改、依据哪个 `G-NN` 或 `S-n`。
+  类型：`docs`、`spec`、`research`、`gate`、`adr`、`risk`、`build`、`chore`。
+- 一次提交只做一件事；纯格式整理与内容修改分开提交。
+- 不重写已推送的历史；纠错用新提交。
+- PR 自检清单：新论断有 `[S-n]` 出处？数字带口径？新术语已登记？新编号已登记？没有第 2 节列出的禁用写法？
+- 未经明确授权不得 push 或改动远端。
+
+---
+
+## 7. 代码
+
+仓库当前没有代码。第一行代码落地时补充：语言与构建方式、依赖锁定、测试范围、风格检查工具。测试与评测口径沿用第 5 节。在此之前不写代码规范——零代码阶段的代码规范属于冗余内容。
+
+---
+
+## 8. 许可与第三方内容
+
+代码与文档采用 Apache-2.0，全文见 [LICENSE](LICENSE)。
+
+引用第三方数据、图表、代码片段时，在 [research/references.md](docs/research/references.md) 标注来源与许可状态。
+
+---
+
+## 9. 维护者与当前优先事项
+
+维护者负责合并 PR、裁决编号分配与 ADR 的接受状态。重大决策写入 ADR，不写入提交信息。
+
+当前优先事项，按顺序：
+
+1. 在目标机上建立基线实测，作为全部倍数指标的分母。
+2. 按 [design/gates.md](docs/design/gates.md) 完成门禁测量，失败即砍子系统并记录负结果。
+3. 核验 [research/references.md](docs/research/references.md) 中的来源，把推算换成实测。

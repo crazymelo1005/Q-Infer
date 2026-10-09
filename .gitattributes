@@ -1,0 +1,2 @@
+# 统一按 LF 入库与签出，避免 Windows（core.autocrlf=true）与 WSL 双端产生换行差异
+* text=auto eol=lf

@@ -1,0 +1,66 @@
+# 出处总表
+
+本文登记全部仓库外来源。正文引用写作 `[S-n]`；编号只增不改。仓库内部引用不使用本文，改用相对链接加章节号。
+
+引用日期是引用该来源的文档所记录的日期，不是来源自身的发布时间。
+
+## 1. 来源等级
+
+| 标记 | 含义 |
+|------|------|
+| [本机实测] | 在项目的目标测量机上读自运行中的引擎 API 或本机 benchmark |
+| [官方] | 模型、引擎的官方发布页、官方文档或论文 |
+| [硬件规格] | 厂商规格页，是上限而非实测 |
+| [他卡实测] | 社区在其它硬件上的实测，趋势可信、绝对值浮动 |
+| [推算] | 由模型估算，须标定后方可作为结论 |
+
+## 2. 复核状态
+
+| 标记 | 含义 |
+|------|------|
+| [已确认] | 已逐位确认原文 |
+| [摘要级] | 仅见于标题或摘要 |
+| [存疑] | 来源矛盾，已降级 |
+
+## 3. 来源清单
+
+| 编号 | 等级 | 复核状态 | 来源 | 引用日期 | 使用处 |
+|------|------|---------|------|---------|--------|
+| S-01 | [官方] | [已确认] | vLLM 官方部署配方，https://recipes.vllm.ai/Qwen/Qwen3.8-Flash-Next | 2026-10-09 | research/02、03、04、05 |
+| S-02 | [官方] | [已确认] | 上游引擎仓库与文档 `github.com/Niko1221/Strata`：README、HOW_IT_WORKS、DETAILS、MULTI_GPU、BATCHING、INTEL_ARC、COMMUNITY_BENCHMARKS | 2026-10-09 | research/01、05、design/risks |
+| S-03 | [本机实测] | [已确认] | 目标测量机上运行中的引擎实例 HTTP API（/metrics、/props、/health、/slots；内网地址不入库） | 2026-10-09 | research/01、05、design/engine、requirements |
+| S-04 | [他卡实测] | [已确认] | 2×RTX 2080 Ti + 64 GB + AVX2 Xeon，IQ3_XXS 71 GB，262K，75 tok/s，命中率 97.7% | 2026-10-09 | research/01、05 |
+| S-05 | [他卡实测] | [已确认] | 上游速度表与社区实测汇总（2×2080Ti、RTX 5070、4090 等） | 2026-10-09 | research/01、05 |
+| S-06 | [他卡实测] | [摘要级] | 同类引擎在 RTX 5090 上的实测，社区转载 | 2026-10-09 | research/05 |
+| S-07 | [官方] | [摘要级] | 主案例模型的官方发布与体积口径，https://blog.csdn.net/student_upupgpu/article/details/164122465 | 2026-10-09 | research/02 |
+| S-08 | [摘要级] | [摘要级] | 主案例模型的架构与显存总览，https://intuitionlabs.ai/articles/qwen3-8-flash-next-architecture-memory | 2026-10-09 | research/02 |
+| S-09 | [摘要级] | [摘要级] | 索引器与稀疏注意力几何、卸载路径，https://blog.csdn.net/weixin_55357163/article/details/164209835 | 2026-10-09 | research/02 |
+| S-10 | [摘要级] | [摘要级] | 索引器相对延迟（0.25）与门控公式，https://hyper.ai/cn/papers/Qwen3.8-Flash-Next | 2026-10-09 | research/02 |
+| S-11 | [摘要级] | [摘要级] | 多模态 MoE 综述（外挂 51B n-gram 表），https://m.blog.csdn.net/qq_35812205/article/details/164190103 | 2026-10-09 | research/02 |
+| S-12 | [摘要级] | [摘要级] | 开源发布信息（125B、激活 6B），https://www.toutiao.com/a7680202469007229455/ | 2026-10-09 | research/02 |
+| S-13 | [官方] | [已确认] | Qwen4 时间线与架构预览，https://cellcog.ai/blog/qwen-4-release-date/ | 2026-10-09 | research/03 |
+| S-14 | [官方] | [摘要级] | 官方发布稿（下代架构前期预览），https://techapple.com/archives/62099 | 2026-10-09 | research/03 |
+| S-15 | [摘要级] | [摘要级] | 百科条目，https://baike.baidu.com/item/Qwen3.8-Flash-Next/68707034 | 2026-10-09 | research/03 |
+| S-16 | [摘要级] | [摘要级] | 开源动态（许可证趋势、下代预览），https://aihot.virxact.com/items/cmtatjy570946roamigoxjc29 | 2026-10-09 | research/03 |
+| S-17 | [官方] | [已确认] | 低比特量化方法的算法管道与自测数字，http://www.chenxutan.com/d/3269.html | 2026-10-09 | research/04 |
+| S-18 | [官方] | [摘要级] | 同一量化方法的官方口径（3-bit、6×、8×），https://paooo.com/aigc-news/11107/ | 2026-10-09 | research/04 |
+| S-19 | [摘要级] | [摘要级] | 该量化方法的内存市场影响与社区复现讨论，https://dev.to/yang_goufang_23c7ba674984/its-not-smarter-models-its-cheaper-memory-turboquants-real-impact-wall-street-panic--48jl | 2026-10-09 | research/04 |
+| S-20 | [官方] | [摘要级] | 并行起草模型的模型卡与提速口径，https://huggingface.co/incoai/Qwen3.8-27B-DFlash2 与 https://navxd.com/navigation/tool/qwen3-8-27b-dflash2/ | 2026-10-09 | research/04 |
+| S-21 | [他卡实测] | [摘要级] | 并行起草模型的生产落地实测（2×3090），https://m.blog.csdn.net/chen1415886044/article/details/165364043 | 2026-10-09 | research/04 |
+| S-22 | [摘要级] | [摘要级] | 并行起草的原理与推理框架实现，https://m.blog.csdn.net/weixin_44778145/article/details/163957992 | 2026-10-09 | research/04 |
+| S-23 | [官方] | [已确认] | vLLM 前缀缓存设计文档（块哈希），https://docs.vllm.ai/en/latest/design/prefix_caching.html | 2026-10-09 | research/04 |
+| S-24 | [官方] | [摘要级] | 机制出处论文清单：PagedAttention arXiv:2309.06180、KIVI arXiv:2402.02750、KVQuant arXiv:2401.18079、H2O arXiv:2306.14048、SnapKV arXiv:2404.14469、StreamingLLM arXiv:2309.17453、Quest arXiv:2406.10774、RadixAttention arXiv:2312.07104、Sarathi-Serve arXiv:2308.16369、Orca arXiv:2211.05102、Fiddler arXiv:2407.07001、Mixtral-offload arXiv:2401.10774、HetuMoE arXiv:2305.19759、Roofline DOI 10.1145/1498765.1498785 | 2026-10-09 | research/04 |
+| S-25 | [官方] | [摘要级] | 主案例模型的官方说明：n-gram 表可异步卸载到主机内存并与计算重叠（经 S-01 引述） | 2026-10-09 | design/risks |
+| S-26 | [官方] | [已确认] | KV 上下文虚拟化实现仓库 README，`github.com/kvmem/kvmem-llama.cpp` | 2026-10-09 | design/risks、research/05 |
+| S-27 | [官方] | [摘要级] | KV 上下文虚拟化论文摘要，arXiv 2609.04852 | 2026-10-09 | research/05 |
+| S-28 | [摘要级] | [摘要级] | 预测式专家缓存方向的工作，arXiv 2410.17954（DAC'26） | 2026-10-09 | design/proposals |
+| S-29 | [摘要级] | [摘要级] | 双阶段预取与缓存的专家服务工作，arXiv 2509.07379 | 2026-10-09 | design/proposals |
+| S-30 | [摘要级] | [摘要级] | 学习专家使用模式的缓存项目 colibri（项目页） | 2026-10-09 | design/proposals |
+| S-31 | [硬件规格] | [已确认] | Intel ARK 与 NVIDIA 官方规格页（CPU、GPU、内存、存储） | 2026-10 | hardware.md |
+
+## 4. 登记规则
+
+- 新增来源即分配下一个 `S-n`，填入本表，并回填正文引用。
+- 等级必须等于真实来源层级，不得把不同来源的数字混成一句结论。
+- 同一来源在多个文档使用时共用同一编号。
+- 来源被推翻时，把复核状态改为 [存疑] 或补注矛盾点，不删除编号。
