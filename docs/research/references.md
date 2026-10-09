@@ -58,6 +58,7 @@
 | S-29 | [摘要级] | [摘要级] | 双阶段预取与缓存的专家服务工作，arXiv 2509.07379 | 2026-10-09 | design/proposals |
 | S-30 | [摘要级] | [摘要级] | 学习专家使用模式的缓存项目 colibri（项目页） | 2026-10-09 | design/proposals |
 | S-31 | [硬件规格] | [已确认] | Intel ARK 与 NVIDIA 官方规格页（CPU、GPU、内存、存储） | 2026-10 | hardware.md |
+| S-32 | [官方] | [已确认] | 板卡厂商规格页：RTX 5060 Ti 的总线接口写作「PCI Express Gen 5 x16 (uses x8)」，即电气宽度为 x8，https://www.msi.cn/Graphics-Card/GeForce-RTX-5060-Ti-16G-GAMING-OC/Specification | 2026-10-09 | hardware.md、requirements.md、gates.md |
 
 ## 4. 登记规则
 
