@@ -47,7 +47,7 @@ API / 调度层        OpenAI 兼容接口 · 批调度 · 前缀缓存 · 指�
 
 ## 当前状态
 
-已完成：问题界定、竞品核查、架构设计、九条架构决策记录、门禁实测（13 条已测、G-11 得部分、G-14 部分未判定）、实施顺序序 0 的目标基线（单卡 decode 稳态 64.44、双卡 85.96 至 89.33 tok/s，见 [requirements §3](docs/requirements.md)）与序 1 的自动标定（机器画像，见 [research/01](docs/research/01-strata-engine.md) §10.2）；序 2 已开工，第一片是三层存储的页表（`src/storage/page_table`，CI 里构建并跑不变量回归）。其中 G-04 不通过：记忆表行在去重后无顺序性、亦无近邻复用，故表行预取子系统已砍，退守按需读加有界行缓存（[ADR-007](docs/design/adr/ADR-007-ngram-table-on-demand-read.md)）。G-07 判定未命中专家路径为算力瓶颈，核显分担的前提满足。
+已完成：问题界定、竞品核查、架构设计、九条架构决策记录、门禁实测（13 条已测、G-11 得部分、G-14 部分未判定）、实施顺序序 0 的目标基线（单卡 decode 稳态 64.44、双卡 85.96 至 89.33 tok/s，见 [requirements §3](docs/requirements.md)）与序 1 的自动标定（机器画像，见 [research/01](docs/research/01-strata-engine.md) §10.2）；序 2 已开工，已落两片主机侧骨架：三层存储的页表与 PCIe 字节预算仲裁器（`src/`，CI 里构建并跑不变量回归）。其中 G-04 不通过：记忆表行在去重后无顺序性、亦无近邻复用，故表行预取子系统已砍，退守按需读加有界行缓存（[ADR-007](docs/design/adr/ADR-007-ngram-table-on-demand-read.md)）。G-07 判定未命中专家路径为算力瓶颈，核显分担的前提满足。
 
 下一步：在环境2 上建立基线实测（全部倍数指标的分母）→ 完成门禁测量 → 跑通最小垂直切片。
 
