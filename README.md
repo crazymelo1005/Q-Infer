@@ -80,6 +80,8 @@ API / 调度层        OpenAI 兼容接口 · 批调度 · 前缀缓存 · 指�
 ├── README.md
 ├── CONTRIBUTING.md
 ├── LICENSE
+├── scripts/docs_checks.py             规范自检（CI 与本地共用）
+├── .github/workflows/docs-check.yml   推送与 PR 时执行自检
 └── docs/
     ├── README.md             文档地图
     ├── overview.md           架构概览
@@ -119,6 +121,8 @@ Qwen3.8-Flash-Next 的官方 vLLM 部署配方：<https://recipes.vllm.ai/Qwen/Q
 ## 贡献
 
 见 [CONTRIBUTING.md](CONTRIBUTING.md)。当前最需要的贡献是事实核验（把推算换成实测）与门禁测量。
+
+提交前可在本地运行规范自检：`python3 scripts/docs_checks.py`（CI 使用同一份判据）。
 
 ## 许可
 

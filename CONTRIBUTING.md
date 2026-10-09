@@ -26,10 +26,11 @@
 | `docs/design/adr/` | 已作出的决策与理由 |
 | `docs/research/` | 事实台账（是什么） |
 | [research/references.md](docs/research/references.md) | 全部出处，按编号登记 |
+| [scripts/docs_checks.py](scripts/docs_checks.py) 与 [.github/workflows/docs-check.yml](.github/workflows/docs-check.yml) | 规范自检：把第 2、3、4 节的规则变成可执行检查（非文档） |
 
 分层规则：`research/` 不得引用 `design/`；`design/` 的关键论断必须能回指 `research/` 或 [hardware.md](docs/hardware.md)。
 
-新增文件准入：能并入现有文件的一律并入；确需新建的，同时在上表与 [docs/README.md](docs/README.md) 登记。
+新增文件准入：能并入现有文件的一律并入。新增文档须登记到 [docs/README.md](docs/README.md) 的文档清单；新增任何文件都须登记到上表。
 
 ---
 
@@ -119,13 +120,38 @@ S-<n> | 等级 | 复核状态 | 来源（URL 或文档路径） | 引用日期
 
 ---
 
-## 6. 提交与 PR
+## 6. 提交、分支与发布
 
-- 分支命名 `<type>/<short-topic>`。
+### 6.1 分支
+
+- `main` 是唯一长期分支，也是默认分支。每个提交之后文档集必须自洽：链接可达、编号登记齐全。
+- 非琐碎改动使用短期分支，命名 `<type>/<short-topic>`，合并后删除。单人开发也走 PR，以留下审查痕迹与 CI 结果。
+- 不使用 `develop`、`release/*`、`hotfix/*`：仓库没有构建产物，也没有需要并行维护的旧版本。
+
+### 6.2 标签
+
+标签一律用附注标签（`git tag -a <name> -m <说明>`），创建后须显式推送（`git push origin <tag>`）。分三类：
+
+| 类型 | 命名 | 何时创建 | 用途 |
+|------|------|---------|------|
+| 设计里程碑 | `design-v<主>.<次>` | 规范发生决策级变化：ADR 被取代，或门禁砍掉子系统导致规范改变 | 标注当时的设计立场，供外部引用 |
+| 实测快照 | `measure-<年-月>`；单次门禁可用 `<G-NN>-<年-月-日>` | 每完成一轮基线或门禁实测 | 让 `gates.md` 与 `research/` 中的数字指向不可变的文档状态 |
+| 代码版本 | `v<主>.<次>.<修订>` | 仅在实施顺序序 2 的骨架跑通之后 | 配合 GitHub Release |
+
+设计里程碑用两位号，代码版本才用三位：设计没有补丁级变化，三位号会产生无意义的精度。
+
+### 6.3 发布
+
+- 每个标签都可发一个 GitHub Release。正文写清该状态包含什么、哪几条门禁已通过、哪几条未测、有何已知缺口。
+- 不维护 `CHANGELOG.md`：变更记录由提交信息、标签与 Release 说明承担（文件内不写变更日志，见第 2 节）。
+- 首个 Release 对应 `design-v0.1`：规范冻结、六条 ADR、`G-01` 至 `G-14` 全部未测。
+
+### 6.4 提交与 PR
+
 - 提交信息首行 `<type>: <祈使句摘要>`，正文写清为什么改、依据哪个 `G-NN` 或 `S-n`。
   类型：`docs`、`spec`、`research`、`gate`、`adr`、`risk`、`build`、`chore`。
 - 一次提交只做一件事；纯格式整理与内容修改分开提交。
-- 不重写已推送的历史；纠错用新提交。
+- 已推送的历史不得重写，纠错用新提交。`amend` 只允许用于尚未推送的提交。
 - PR 自检清单：新论断有 `[S-n]` 出处？数字带口径？新术语已登记？新编号已登记？没有第 2 节列出的禁用写法？
 - 未经明确授权不得 push 或改动远端。
 
@@ -133,7 +159,9 @@ S-<n> | 等级 | 复核状态 | 来源（URL 或文档路径） | 引用日期
 
 ## 7. 代码
 
-仓库当前没有代码。第一行代码落地时补充：语言与构建方式、依赖锁定、测试范围、风格检查工具。测试与评测口径沿用第 5 节。在此之前不写代码规范——零代码阶段的代码规范属于冗余内容。
+仓库现有的代码只有规范自检脚本 [scripts/docs_checks.py](scripts/docs_checks.py)：Python 3 标准库，无第三方依赖，无构建步骤，运行方式为 `python3 scripts/docs_checks.py`，并由 [.github/workflows/docs-check.yml](.github/workflows/docs-check.yml) 在推送与 PR 时执行。任一检查失败即非零退出，本地与 CI 使用同一套判据。
+
+引擎实现尚未开始。实施顺序序 2 落地第一行引擎代码时，再补充：语言与构建方式、依赖锁定、测试范围、风格检查工具。测试与评测口径沿用第 5 节。
 
 ---
 

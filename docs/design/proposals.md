@@ -86,4 +86,4 @@
 - 四个方向都应先完成目标基线实测与门禁测量，这些产出与是否自行实现无关。
 - 任何方向的收益主张，分母都必须是本机实测。
 
-各引擎的能力现状见 [`../research/05-engine-landscape.md`](../research/05-engine-landscape.md)，上游近邻的出处见 [`../research/references.md`](../research/references.md) 的 S-28 至 S-30，判定口径见 [`gates.md`](gates.md)。
+各引擎的能力现状见 [`../research/05-engine-landscape.md`](../research/05-engine-landscape.md)，上游近邻的出处见 [`../research/references.md`](../research/references.md) 的 S-28、S-29、S-30，判定口径见 [`gates.md`](gates.md)。
