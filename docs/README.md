@@ -21,7 +21,7 @@
 | [requirements.md](requirements.md) | 目标负载、指标与阈值、验收场景、非目标 | 完成；阈值待实测填入 |
 | [design/engine.md](design/engine.md) | 每块具体怎么做 | 完成；参数待标定 |
 | [design/interfaces.md](design/interfaces.md) | 模块之间的接口契约 | 完成；实现细节待定 |
-| [design/gates.md](design/gates.md) | 哪些假设必须先测、怎么测、通过标准 | G-01、G-02、G-03、G-04、G-05、G-06、G-07、G-08、G-09、G-12、G-13 已测，G-11 得部分；其余未测 |
+| [design/gates.md](design/gates.md) | 哪些假设必须先测、怎么测、通过标准 | 除 G-14 外全部已测（G-11 得部分）；G-04 判否并已执行后果 |
 | [design/risks.md](design/risks.md) | 已知风险与已确认的负结果 | 持续更新 |
 | [design/proposals.md](design/proposals.md) | 未验证的候选方向 | 均为检索级存疑；P-03 已随 G-04 不通过而否决 |
 | [`design/adr/ADR-001`](design/adr/ADR-001-tiered-storage-and-expert-cache.md) | 存储：分层还是全量常驻 | 接受 |
@@ -63,5 +63,5 @@
 | 项 | 阻塞原因 |
 |----|---------|
 | 目标基线实测 | 需要在环境2 上运行 |
-| 其余 `G-NN` 的实测记录（G-10、G-14） | G-10 需构造内存紧张与充足两种 lane 并测表行读往返；G-14 需要质量评测（困惑度与任务集） |
+| 其余 `G-NN` 的实测记录（G-14） | 需要质量评测：困惑度与任务集，且要先定阈值口径 |
 | 引擎接口的实现细节 | 随实现阶段确定 |
