@@ -90,8 +90,19 @@ int main(int argc, char **argv) {
   }
 
   char json_items[2048] = {0};
+  size_t vram_free = 0, vram_total = 0;
+  CHECK(cudaMemGetInfo(&vram_free, &vram_total));
+  if (!json)
+    printf("显存      可用 %zu MiB / 共 %zu MiB（其余被其它进程占用，放不下的档位会跳过）\n",
+           vram_free / mib, vram_total / mib);
+
   for (size_t s = 0; s < sizeof(sizes) / sizeof(sizes[0]); s++) {
     size_t bytes = sizes[s] * mib;
+    if (bytes + 64 * mib > vram_free) {
+      if (!json)
+        printf("%6zu MiB   跳过：可用显存 %zu MiB 不足\n", sizes[s], vram_free / mib);
+      continue;
+    }
     void *h = NULL, *d = NULL;
     CHECK(cudaHostAlloc(&h, bytes, cudaHostAllocDefault));
     CHECK(cudaMalloc(&d, bytes));
@@ -144,18 +155,26 @@ int main(int argc, char **argv) {
   }
 
   if (hold > 0) {
-    if (!json) printf("保持链路负载 %d 秒（同时用 nvidia-smi 观察宽度是否变化）…\n", hold);
-    void *h = NULL, *d = NULL;
-    size_t bytes = 64 * mib;
-    CHECK(cudaHostAlloc(&h, bytes, cudaHostAllocDefault));
-    CHECK(cudaMalloc(&d, bytes));
-    memset(h, 2, bytes);
-    time_t end = time(NULL) + hold;
-    while (time(NULL) < end)
-      CHECK(cudaMemcpy(d, h, bytes, cudaMemcpyHostToDevice));
-    cudaFreeHost(h);
-    cudaFree(d);
-    if (!json) printf("负载结束\n");
+    size_t hold_bytes = 64 * mib, f2 = 0, t2 = 0;
+    CHECK(cudaMemGetInfo(&f2, &t2));
+    if (hold_bytes + 32 * mib > f2) hold_bytes = 16 * mib;
+    if (hold_bytes + 32 * mib > f2) {
+      if (!json)
+        printf("跳过保持负载：可用显存 %zu MiB 不足（其它进程占用过多）\n", f2 / mib);
+    } else {
+      if (!json)
+        printf("保持链路负载 %d 秒（同时用 nvidia-smi 观察宽度与代数是否变化）…\n", hold);
+      void *h = NULL, *d = NULL;
+      CHECK(cudaHostAlloc(&h, hold_bytes, cudaHostAllocDefault));
+      CHECK(cudaMalloc(&d, hold_bytes));
+      memset(h, 2, hold_bytes);
+      time_t end = time(NULL) + hold;
+      while (time(NULL) < end)
+        CHECK(cudaMemcpy(d, h, hold_bytes, cudaMemcpyHostToDevice));
+      cudaFreeHost(h);
+      cudaFree(d);
+      if (!json) printf("负载结束\n");
+    }
   }
 
   char ts[32];
@@ -163,8 +182,9 @@ int main(int argc, char **argv) {
   char json_buf[4096];
   snprintf(json_buf, sizeof(json_buf),
            "{\"measured_at\":\"%s\",\"measure\":\"G-01 PCIe 有效带宽\",\"env\":\"%s\","
-           "\"device\":%d,\"device_count\":%d,\"gpu\":\"%s\",\"repeats\":%d,\"results\":[%s]}",
-           ts, env, device, device_count, prop.name, repeats, json_items);
+           "\"device\":%d,\"device_count\":%d,\"gpu\":\"%s\",\"vram_free_mib\":%zu,"
+           "\"repeats\":%d,\"results\":[%s]}",
+           ts, env, device, device_count, prop.name, vram_free / mib, repeats, json_items);
   if (json) printf("%s\n", json_buf);
   if (out_dir) {
     char path[1024];
