@@ -7,7 +7,7 @@
 //      逐位吻合（前 16 值与 L1 和都一致），故这份夹具可信。
 #include "kernels/iq4nl.hpp"
 
-#include <cassert>
+#include "check.hpp"
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -20,14 +20,14 @@ using namespace qinfer::kernels;
 namespace {
 
 std::vector<std::uint8_t> from_hex(const std::string& hex) {
-    assert(hex.size() % 2 == 0);
+    CHECK(hex.size() % 2 == 0);
     std::vector<std::uint8_t> out;
     out.reserve(hex.size() / 2);
     auto nib = [](char c) -> int {
         if (c >= '0' && c <= '9') return c - '0';
         if (c >= 'a' && c <= 'f') return c - 'a' + 10;
         if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-        assert(false && "bad hex digit");
+        CHECK(false && "bad hex digit");
         return 0;
     };
     for (std::size_t i = 0; i < hex.size(); i += 2) {
@@ -40,7 +40,7 @@ void near(float got, float want, const char* what, int index) {
     const float tol = 1e-6f;
     if (std::fabs(got - want) > tol) {
         std::printf("FAIL %s[%d]: got %.9g want %.9g\n", what, index, got, want);
-        assert(false);
+        CHECK(false);
     }
 }
 
@@ -57,7 +57,7 @@ void test_handmade_row_pins_codebook_and_nibble_order() {
         row.push_back(0x00); row.push_back(0x00);
         for (int j = 0; j < 16; ++j) row.push_back(0xFF);
     }
-    assert(row.size() == 90);
+    CHECK(row.size() == 90);
 
     float out[160];
     dequant_iq4nl_row(row.data(), out);
@@ -72,7 +72,7 @@ void test_handmade_row_pins_codebook_and_nibble_order() {
 void test_model_row_zero_matches_oracle() {
     const std::vector<std::uint8_t> row = from_hex(
         "518c6b846d849ab66ae63757410dbaf31207730c43866d875eb60666bcc9cb0d48961e56510cfa8ecf5409ce789cac3911cc5a5426705e8d5abf604a565ecaa4a565b9bc798b9a860d8c8e79c7834e134b61143c0368d89def7a");
-    assert(row.size() == 90);
+    CHECK(row.size() == 90);
 
     float out[160];
     dequant_iq4nl_row(row.data(), out);
@@ -92,7 +92,7 @@ void test_model_row_zero_matches_oracle() {
     for (int k = 0; k < 160; ++k) l1 += std::fabs(static_cast<double>(out[k]));
     if (std::fabs(l1 - 2.01196) > 1e-4) {
         std::printf("FAIL L1: got %.9g want 2.01196\n", l1);
-        assert(false);
+        CHECK(false);
     }
 }
 

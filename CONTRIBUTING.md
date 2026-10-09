@@ -28,7 +28,7 @@
 | [research/references.md](docs/research/references.md) | 全部出处，按编号登记 |
 | [scripts/docs_checks.py](scripts/docs_checks.py) 与 [.github/workflows/docs-check.yml](.github/workflows/docs-check.yml) | 规范自检：把第 2、3、4 节的规则变成可执行检查（非文档） |
 | [measure/](measure/) | 测量工具与原始结果：机器画像与标定、PCIe 档位与带宽、内存带宽、显存带宽、GGUF 元数据读取、记忆表行访问局部性重放与语料构造、专家路由覆盖曲线、投机 IO 放大、CPU 专家内核与量化 GEMM 微基准、运行中引擎的槽位/命中率/KV 驻留采样、NVMe 往返延迟、KV 精度档的输出一致率（非文档） |
-| [src/](src/) | 引擎实现（C++20）：`storage/page_table`（三层存储与页表）、`scheduling/budget_arbiter`（PCIe 字节预算仲裁）、`kernels/iq4nl`（记忆表行的反量化，含 `kernels/fp16`） |
+| [src/](src/) | 引擎实现（C++20）：`storage/page_table`（三层存储与页表）、`storage/row_cache`（有界行缓存）、`scheduling/budget_arbiter`（PCIe 字节预算仲裁）、`kernels/ngram`（表行索引哈希）、`kernels/iq4nl`（表行反量化，含 `kernels/fp16`）、`kernels/ple_gather`（head-slowest 拼装） |
 | [tests/](tests/) | 引擎实现的回归测试（无第三方框架，`ctest` 驱动） |
 | [CMakeLists.txt](CMakeLists.txt) | 构建入口 |
 | [.github/workflows/build.yml](.github/workflows/build.yml) | 构建与测试（与文档自检并列的第二个 CI 作业） |
@@ -197,7 +197,7 @@ S-<n> | 等级 | 复核状态 | 来源（URL 或文档路径） | 引用日期
 
 - 语言 C++20，构建 CMake（≥3.28），不引包管理器；依赖面为零（第三方内核以裁剪后的子集入库，文件头登记上游路径、提交号与许可，见 [research/references.md](docs/research/references.md)）。
 - GPU 侧用 CUDA，但主机侧代码不得依赖它：CI 在没有 GPU 的 runner 上编译并跑测试。CUDA 部分单独标注、在本机跑。
-- 测试不引第三方框架：`tests/` 下的可执行文件用 `assert`，`ctest` 驱动，CI 与本地同一条命令——`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --test-dir build --output-on-failure`。
+- 测试不引第三方框架：`tests/` 下的可执行文件用 [`tests/check.hpp`](tests/check.hpp) 的 `CHECK`，`ctest` 驱动，CI 与本地同一条命令——`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --test-dir build --output-on-failure`。**不要用 `<cassert>` 的 `assert`**：Release 构建定义 `NDEBUG`，它会把这些检查整个编译掉，测试于是变成空跑，「全绿」不再意味着任何事。
 - 测试范围：主机侧的不变量与确定性算术优先（页表不变量、预算仲裁、标定推导）。涉及 GPU 内核的回归走 [ADR-009](docs/design/adr/ADR-009-correctness-acceptance-criteria.md) 的两档口径（固定开关下逐位；默认真实配置用分布级）。
 
 ---

@@ -5,7 +5,7 @@
 // 「收益 ÷ 字节」降序贪心准入，放不下的弃掉并计入迟到，且不因为前一个放不下就停止尝试。
 #include "scheduling/budget_arbiter.hpp"
 
-#include <cassert>
+#include "check.hpp"
 #include <cstdio>
 #include <vector>
 
@@ -45,7 +45,7 @@ const Decision& decision_of(const Result& res, std::uint32_t tag) {
     for (const Decision& d : res.decisions) {
         if (d.tag == tag) return d;
     }
-    assert(false && "tag not found in decisions");
+    CHECK(false);
     return res.decisions.front();
 }
 
@@ -58,22 +58,22 @@ void test_all_fit() {
                               expert(200'000, 0.001, 3), expert(200'000, 0.001, 4)};
     const Result res = arbitrate(1'000'000, reqs);
 
-    assert(res.decisions.size() == reqs.size());
-    assert(admitted(res, 1) && admitted(res, 2) && admitted(res, 3) && admitted(res, 4));
-    assert(res.admitted_bytes == 500'090);
-    assert(res.overspend_bytes == 0);
-    assert(res.dropped == 0 && res.dropped_bytes == 0);
-    assert(res.admit_order.size() == 4);
+    CHECK(res.decisions.size() == reqs.size());
+    CHECK(admitted(res, 1) && admitted(res, 2) && admitted(res, 3) && admitted(res, 4));
+    CHECK(res.admitted_bytes == 500'090);
+    CHECK(res.overspend_bytes == 0);
+    CHECK(res.dropped == 0 && res.dropped_bytes == 0);
+    CHECK(res.admit_order.size() == 4);
 }
 
 void test_must_is_never_dropped_even_over_budget() {
     std::vector<Request> reqs{kv(8'000, 1), table_row(5'000, 2), expert(1, 1.0, 3)};
     const Result res = arbitrate(10'000, reqs);
 
-    assert(admitted(res, 1) && admitted(res, 2));       // 必需的照进，超出部分记账
-    assert(res.overspend_bytes == 3'000);
-    assert(!admitted(res, 3));                          // 预算已被必需项用尽，预测性全弃
-    assert(res.dropped == 1 && res.dropped_bytes == 1);
+    CHECK(admitted(res, 1) && admitted(res, 2));       // 必需的照进，超出部分记账
+    CHECK(res.overspend_bytes == 3'000);
+    CHECK(!admitted(res, 3));                          // 预算已被必需项用尽，预测性全弃
+    CHECK(res.dropped == 1 && res.dropped_bytes == 1);
 }
 
 void test_required_priority_is_kv_then_table_row() {
@@ -81,9 +81,9 @@ void test_required_priority_is_kv_then_table_row() {
     std::vector<Request> reqs{table_row(40, 7), kv(60, 9)};
     const Result res = arbitrate(1'000, reqs);
 
-    assert(res.admit_order.size() == 2);
-    assert(res.admit_order[0] == 9);
-    assert(res.admit_order[1] == 7);
+    CHECK(res.admit_order.size() == 2);
+    CHECK(res.admit_order[0] == 9);
+    CHECK(res.admit_order[1] == 7);
 }
 
 void test_predictive_sorted_by_benefit_per_byte() {
@@ -91,11 +91,11 @@ void test_predictive_sorted_by_benefit_per_byte() {
     std::vector<Request> reqs{expert(60, 0.01, 1), expert(30, 0.03, 2)};
     const Result res = arbitrate(50, reqs);
 
-    assert(admitted(res, 2));
-    assert(!admitted(res, 1));
-    assert(res.admit_order.size() == 1 && res.admit_order[0] == 2);
-    assert(res.admitted_bytes == 30);
-    assert(res.dropped == 1 && res.dropped_bytes == 60);
+    CHECK(admitted(res, 2));
+    CHECK(!admitted(res, 1));
+    CHECK(res.admit_order.size() == 1 && res.admit_order[0] == 2);
+    CHECK(res.admitted_bytes == 30);
+    CHECK(res.dropped == 1 && res.dropped_bytes == 60);
 }
 
 void test_greedy_keeps_trying_after_a_drop() {
@@ -103,28 +103,28 @@ void test_greedy_keeps_trying_after_a_drop() {
     std::vector<Request> reqs{expert(100, 1.0, 1), expert(20, 0.5, 2)};
     const Result res = arbitrate(50, reqs);
 
-    assert(!admitted(res, 1));
-    assert(admitted(res, 2));
-    assert(res.admitted_bytes == 20);
-    assert(res.dropped == 1);
+    CHECK(!admitted(res, 1));
+    CHECK(admitted(res, 2));
+    CHECK(res.admitted_bytes == 20);
+    CHECK(res.dropped == 1);
 }
 
 void test_equal_ratio_breaks_ties_by_input_order() {
     std::vector<Request> reqs{expert(20, 0.5, 11), expert(20, 0.5, 12), expert(20, 0.5, 13)};
     const Result res = arbitrate(40, reqs);
 
-    assert(res.admit_order.size() == 2);
-    assert(res.admit_order[0] == 11 && res.admit_order[1] == 12);
-    assert(!admitted(res, 13));
+    CHECK(res.admit_order.size() == 2);
+    CHECK(res.admit_order[0] == 11 && res.admit_order[1] == 12);
+    CHECK(!admitted(res, 13));
 }
 
 void test_zero_budget_admits_only_zero_byte_requests() {
     std::vector<Request> reqs{kv(0, 1), expert(1, 1.0, 2)};
     const Result res = arbitrate(0, reqs);
 
-    assert(admitted(res, 1));
-    assert(!admitted(res, 2));
-    assert(res.overspend_bytes == 0);
+    CHECK(admitted(res, 1));
+    CHECK(!admitted(res, 2));
+    CHECK(res.overspend_bytes == 0);
 }
 
 }  // namespace
