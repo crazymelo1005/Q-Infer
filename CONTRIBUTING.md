@@ -28,7 +28,7 @@
 | [research/references.md](docs/research/references.md) | 全部出处，按编号登记 |
 | [scripts/docs_checks.py](scripts/docs_checks.py) 与 [.github/workflows/docs-check.yml](.github/workflows/docs-check.yml) | 规范自检：把第 2、3、4 节的规则变成可执行检查（非文档） |
 | [measure/](measure/) | 测量工具与原始结果：机器画像与标定、PCIe 档位与带宽、内存带宽、显存带宽、GGUF 元数据读取、记忆表行访问局部性重放与语料构造、专家路由覆盖曲线、投机 IO 放大、CPU 专家内核与量化 GEMM 微基准、运行中引擎的槽位/命中率/KV 驻留采样、NVMe 往返延迟、KV 精度档的输出一致率（非文档） |
-| [src/](src/) | 引擎实现（C++20）：`storage/page_table`（三层存储与页表）、`scheduling/budget_arbiter`（PCIe 字节预算仲裁） |
+| [src/](src/) | 引擎实现（C++20）：`storage/page_table`（三层存储与页表）、`scheduling/budget_arbiter`（PCIe 字节预算仲裁）、`kernels/iq4nl`（记忆表行的反量化，含 `kernels/fp16`） |
 | [tests/](tests/) | 引擎实现的回归测试（无第三方框架，`ctest` 驱动） |
 | [CMakeLists.txt](CMakeLists.txt) | 构建入口 |
 | [.github/workflows/build.yml](.github/workflows/build.yml) | 构建与测试（与文档自检并列的第二个 CI 作业） |
@@ -174,6 +174,7 @@ S-<n> | 等级 | 复核状态 | 来源（URL 或文档路径） | 引用日期
 - `python3 measure/calibrate.py [--set KEY=VALUE ...]`：机器画像（engine §10 标定）。把已测的量与模型几何代入，按显式公式推导每步 PCIe 预算、专家槽位、KV 窗口与 §15 的上限，落盘到 `measure/results/*-calibrate-<平台>.json`。默认值即环境2 的实测值，`--set` 可覆盖；`--selftest` 核对推导恒等式。零依赖。
 - `nvcc -O2 -o build/vram_bw measure/vram_bw.cu && ./build/vram_bw --sizes 32,128,512`：显存可用量与带宽（device STREAM），画像的第 1 项输入。产物写在 `build/`。
 - `python3 measure/env_profile.py`：记录机器画像的静态部分。
+- `python3 measure/ple_row_oracle.py --model <shard2.gguf> --rows 0,12345`：从 GGUF 里取记忆表的指定行，输出原始字节与按 IQ4_NL 规则反量化的结果，用作内核回归的 oracle。零依赖；它的输出与本仓库记录过的引擎自带 oracle 向量逐位吻合，可作交叉验证。
 - `python3 measure/pcie_link.py [--watch 秒数]`：读 PCIe 链路档位。加 `--watch` 可在同时施加负载时观察档位是否变化。
 - `python3 measure/mem_bw.py [--size-mb 256] [--procs 8] [--seconds 0.6] [--repeats 5]`：测内存带宽。聚合口径是「各进程屏障同步后在同一时间窗内搬运的字节之和除以时间窗」；不得用各进程中位数相加，那样在进程启动不同步时会虚高，甚至超过内存理论峰值。
 - `nvcc -O2 -o build/pcie_bw measure/pcie_bw.cu && ./build/pcie_bw --repeats 5 --out-dir measure/results`：测 PCIe 有效带宽。产物写在 `build/`，该目录已在 `.gitignore` 中，不入库。`--hold 秒数` 会保持链路流量，便于同时用 `pcie_link.py` 观察宽度与代数是否变化。注意链路**代数会随负载降档**（空闲可低至 gen1），因此"当前档位"必须在持续负载下才可引用。

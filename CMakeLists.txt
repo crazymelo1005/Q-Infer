@@ -19,6 +19,11 @@ add_library(qinfer_scheduling
 )
 target_include_directories(qinfer_scheduling PUBLIC src)
 
+add_library(qinfer_kernels
+  src/kernels/iq4nl.cpp
+)
+target_include_directories(qinfer_kernels PUBLIC src)
+
 # 第一片骨架不含 CUDA：三层存储与页表是主机侧代码，CI 在没有 GPU 的 runner 上也能编译并跑测试。
 # CUDA 内核与图捕获在序 3 之后引入（见 docs/design/adr/ADR-008）。
 add_executable(test_page_table tests/test_page_table.cpp)
@@ -27,6 +32,10 @@ target_link_libraries(test_page_table PRIVATE qinfer_storage)
 add_executable(test_budget_arbiter tests/test_budget_arbiter.cpp)
 target_link_libraries(test_budget_arbiter PRIVATE qinfer_scheduling)
 
+add_executable(test_iq4nl tests/test_iq4nl.cpp)
+target_link_libraries(test_iq4nl PRIVATE qinfer_kernels)
+
 enable_testing()
 add_test(NAME page_table COMMAND test_page_table)
 add_test(NAME budget_arbiter COMMAND test_budget_arbiter)
+add_test(NAME iq4nl COMMAND test_iq4nl)
