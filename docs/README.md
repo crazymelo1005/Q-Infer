@@ -21,7 +21,7 @@
 | [requirements.md](requirements.md) | 目标负载、指标与阈值、验收场景、非目标 | 完成；阈值待实测填入 |
 | [design/engine.md](design/engine.md) | 每块具体怎么做 | 完成；参数待标定 |
 | [design/interfaces.md](design/interfaces.md) | 模块之间的接口契约 | 完成；实现细节待定 |
-| [design/gates.md](design/gates.md) | 哪些假设必须先测、怎么测、通过标准 | G-01、G-02、G-04、G-08、G-09、G-13 已测，G-11 得部分；其余未测 |
+| [design/gates.md](design/gates.md) | 哪些假设必须先测、怎么测、通过标准 | G-01、G-02、G-04、G-07、G-08、G-09、G-13 已测，G-11 得部分；其余未测 |
 | [design/risks.md](design/risks.md) | 已知风险与已确认的负结果 | 持续更新 |
 | [design/proposals.md](design/proposals.md) | 未验证的候选方向 | 均为检索级存疑；P-03 已随 G-04 不通过而否决 |
 | [`design/adr/ADR-001`](design/adr/ADR-001-tiered-storage-and-expert-cache.md) | 存储：分层还是全量常驻 | 接受 |
