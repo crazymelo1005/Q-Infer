@@ -20,6 +20,11 @@ add_library(qinfer_scheduling
 )
 target_include_directories(qinfer_scheduling PUBLIC src)
 
+add_library(qinfer_artifact
+  src/artifact/gguf_table.cpp
+)
+target_include_directories(qinfer_artifact PUBLIC src)
+
 add_library(qinfer_kernels
   src/kernels/iq4nl.cpp
   src/kernels/ngram.cpp
@@ -47,6 +52,9 @@ target_link_libraries(test_row_cache PRIVATE qinfer_storage)
 add_executable(test_ple_read_path tests/test_ple_read_path.cpp)
 target_link_libraries(test_ple_read_path PRIVATE qinfer_storage qinfer_scheduling qinfer_kernels)
 
+add_executable(test_gguf_table tests/test_gguf_table.cpp)
+target_link_libraries(test_gguf_table PRIVATE qinfer_artifact qinfer_kernels)
+
 enable_testing()
 add_test(NAME page_table COMMAND test_page_table)
 add_test(NAME budget_arbiter COMMAND test_budget_arbiter)
@@ -54,3 +62,4 @@ add_test(NAME iq4nl COMMAND test_iq4nl)
 add_test(NAME ngram COMMAND test_ngram)
 add_test(NAME row_cache COMMAND test_row_cache)
 add_test(NAME ple_read_path COMMAND test_ple_read_path)
+add_test(NAME gguf_table COMMAND test_gguf_table)

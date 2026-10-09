@@ -60,7 +60,7 @@
 | S-31 | [硬件规格] | [已确认] | Intel ARK 与 NVIDIA 官方规格页（CPU、GPU、内存、存储） | 2026-10 | hardware.md |
 | S-32 | [官方] | [已确认] | 板卡厂商规格页：RTX 5060 Ti 的总线接口写作「PCI Express Gen 5 x16 (uses x8)」，即电气宽度为 x8，https://www.msi.cn/Graphics-Card/GeForce-RTX-5060-Ti-16G-GAMING-OC/Specification | 2026-10-09 | hardware.md、requirements.md、gates.md |
 | S-33 | [环境2实测] | [已确认] | 模型 GGUF 元数据（由 `measure/gguf_meta.py` 直读文件头，不经第三方库）：`general.architecture=qwen4exp`；主注意力 `head_count` 24 / `head_count_kv` 2 / `key_length` 256 / `value_length` 256 / `embedding_length` 2560；索引器 4×128、`top_k` 2048；`expert_count` 512、`expert_used_count` 10、`block_count` 48、`compress_ratios` 12 个 4；表张量 `per_layer_token_embd.weight` dims [160, 320001536] | 2026-10-09 | research/02、gates.md |
-| S-34 | [官方] | [已确认] | 参考引擎的 n-gram 哈希与 PLE 行读取实现、专家画像与路由轨迹的格式、以及 IQ4_NL 行的码本与分裂式半字节序（其源码，在环境2 上就地读取）：`src/kernels/ngram.cpp` 的 `ngram_rows`、哈希常量与 `kvalues_iq4nl` 码本、`include/strata/kernels/ngram.hpp` 的几何、`src/kernels/ple_oracle_vectors.inc` 的 6 组 oracle 向量、`src/ngram/ple_reader.cpp` 的 8 路组相联行缓存、`tools/make_profile.py` 的 STRP 画像与 `--dump-routing` 轨迹格式、`src/program/generate.cpp` 关于覆盖曲线偏离幂律的自注（称 5,805 对覆盖 94.9%，实测 69.2%） | 2026-10-09 | research/01、research/02、src |
+| S-34 | [官方] | [已确认] | 参考引擎的 n-gram 哈希与 PLE 行读取实现、专家画像与路由轨迹的格式、以及 IQ4_NL 行的码本与分裂式半字节序（其源码，在环境2 上就地读取）：`src/kernels/ngram.cpp` 的 `ngram_rows`、哈希常量与 `kvalues_iq4nl` 码本、`include/strata/kernels/ngram.hpp` 的几何、`src/kernels/ple_oracle_vectors.inc` 的 6 组 oracle 向量、`src/ngram/ple_reader.cpp` 的 8 路组相联行缓存、`tools/gguf_reader.py` 的 GGUF v3 头部与张力信息布局、`tools/make_profile.py` 的 STRP 画像与 `--dump-routing` 轨迹格式、`src/program/generate.cpp` 关于覆盖曲线偏离幂律的自注（称 5,805 对覆盖 94.9%，实测 69.2%） | 2026-10-09 | research/01、research/02、src |
 
 ## 4. 登记规则
 

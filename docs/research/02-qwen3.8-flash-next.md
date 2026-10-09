@@ -97,7 +97,7 @@
 | QSA 层与压缩比 | `attention.compress_ratios` 48 项，每 4 层出现一个 4 → 恰好 12 层 QSA、压缩比 4（其余 0，即 GDN 层） | [环境2实测] |
 | 索引器 | `head_count` 4、`key_length` 128、`top_k` 2048 | [环境2实测] |
 | 块压缩（二手口径） | 4 token → 1 条压缩 key；索引缓存每 4 token 存 1 条 BF16 key；未完成块走 4 槽环形缓冲 | [摘要级] |
-| N-gram 表 | 独立分片中的单个张量 `per_layer_token_embd.weight`，dims = [160, 320,001,536] → 512 亿参数，4-bit 约 28.8 GB；行宽 160 与 `embedding_length_per_layer_input` 一致 | [环境2实测] |
+| N-gram 表 | 独立分片中的单个张量 `per_layer_token_embd.weight`，dims = [160, 320,001,536]、GGUF 类型码 20 = IQ4_NL → 512 亿参数，4-bit 约 28.8 GB；行宽 160 与 `embedding_length_per_layer_input` 一致 | [环境2实测] |
 
 一处口径待核：二手来源称「选 top-512 块 → 展开到 2048 个 token 位置」，而元数据里的 `indexer.top_k` 是 2048——两者可能分别是「块」与「token 位置」两个口径，也可能二手数字有误。引用时须注明是哪个口径。
 
