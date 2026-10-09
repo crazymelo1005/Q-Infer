@@ -27,7 +27,7 @@
 | `docs/research/` | 事实台账（是什么） |
 | [research/references.md](docs/research/references.md) | 全部出处，按编号登记 |
 | [scripts/docs_checks.py](scripts/docs_checks.py) 与 [.github/workflows/docs-check.yml](.github/workflows/docs-check.yml) | 规范自检：把第 2、3、4 节的规则变成可执行检查（非文档） |
-| [measure/](measure/) | 测量工具与原始结果：机器画像、PCIe 档位与带宽、内存带宽、GGUF 元数据读取、记忆表行访问局部性重放与语料构造、专家路由覆盖曲线、投机 IO 放大、CPU 专家内核与量化 GEMM 微基准、运行中引擎的槽位/命中率/KV 驻留采样（非文档） |
+| [measure/](measure/) | 测量工具与原始结果：机器画像、PCIe 档位与带宽、内存带宽、GGUF 元数据读取、记忆表行访问局部性重放与语料构造、专家路由覆盖曲线、投机 IO 放大、CPU 专家内核与量化 GEMM 微基准、运行中引擎的槽位/命中率/KV 驻留采样、NVMe 往返延迟（非文档） |
 
 分层规则：`research/` 不得引用 `design/`；`design/` 的关键论断必须能回指 `research/` 或 [hardware.md](docs/hardware.md)。
 
@@ -165,7 +165,7 @@ S-<n> | 等级 | 复核状态 | 来源（URL 或文档路径） | 引用日期
 
 规范自检，随 CI 执行：[scripts/docs_checks.py](scripts/docs_checks.py)，Python 3 标准库，无第三方依赖，无构建步骤，运行方式 `python3 scripts/docs_checks.py`，由 [.github/workflows/docs-check.yml](.github/workflows/docs-check.yml) 在推送与 PR 时执行。任一检查失败即非零退出，本地与 CI 使用同一套判据。
 
-测量工具，手工执行、不进 CI。分三种语言：`measure/` 下的 Python 3 脚本（多数零第三方依赖，`mem_bw.py` 依赖 numpy）、`measure/pcie_bw.cu`（CUDA C++，用 nvcc 编译）与 `measure/cpu_expert_bench.c`、`measure/cpu_gemm_bench.c`（纯 C，用 `cc -O2 -mavx2 -mfma -pthread` 编译）。三者都没有构建系统，直接调用编译器或解释器。
+测量工具，手工执行、不进 CI。分三种语言：`measure/` 下的 Python 3 脚本（多数零第三方依赖，`mem_bw.py` 依赖 numpy）、`measure/pcie_bw.cu` 与 `measure/io_roundtrip.cu`（CUDA C++，用 nvcc 编译）与 `measure/cpu_expert_bench.c`、`measure/cpu_gemm_bench.c`（纯 C，用 `cc -O2 -mavx2 -mfma -pthread` 编译）。三者都没有构建系统，直接调用编译器或解释器。
 
 - `python3 measure/env_profile.py`：记录机器画像。它是一切测量的记账载体，测量前先跑。
 - `python3 measure/pcie_link.py [--watch 秒数]`：读 PCIe 链路档位。加 `--watch` 可在同时施加负载时观察档位是否变化。
@@ -178,7 +178,8 @@ S-<n> | 等级 | 复核状态 | 来源（URL 或文档路径） | 引用日期
 - `python3 measure/spec_io_amplify.py --log <引擎日志>... [--trace <轨迹>...]`：G-13，从日志的 `speculation` 行取接受率并取倒数，另按轨迹的记录数 ÷ 层数 ÷ 生成 token 数直接数出位置放大。零依赖。
 - `cc -O2 -mavx2 -mfma -pthread -o build/cpu_expert_bench measure/cpu_expert_bench.c && ./build/cpu_expert_bench --size-mib 512 --threads 1,2,4,8,12,16,24`：G-07，在同一字节量上比较纯流式读、4 位码本反量化+FMA、2 位码本反量化+FMA 三个臂的吞吐，判定未命中专家路径是算力瓶颈还是带宽瓶颈。产物写在 `build/`（已 gitignore）。
 - `cc -O2 -mavx2 -mfma -pthread -o build/cpu_gemm_bench measure/cpu_gemm_bench.c && ./build/cpu_gemm_bench --bits 4 --experts 48 --pin 0-14`：G-03，按专家真实几何跑码本反量化 GEMV，用 `--pin` 把线程绑到指定 CPU（环境2 上 P 核 0-7、E 核 8-23），量出每类核与各池规模的吞吐。产物写在 `build/`。
-- `python3 measure/engine_cache_probe.py --engine-dir <引擎目录> --base-config <serve 配置> --prompt <提示.txt> --slots auto|N --out <记录.json>`：G-05 / G-06 / G-12，起一次 serve 实例、发一个真实提示的 greedy 请求、读 `/metrics` 与引擎日志、停服务，产出该配置的专家槽位、解码命中率、PCIe 占比、KV 驻留与 decode 吞吐。`--from-raw` 可把一份原始记录精简重写。需在装有该引擎的环境上运行。
+- `python3 measure/engine_cache_probe.py --engine-dir <引擎目录> --base-config <serve 配置> --prompt <提示.txt> --slots auto|N --out <记录.json>`：G-05 / G-06 / G-12，起一次 serve 实例、发一个真实提示的 greedy 请求、读 `/metrics` 与引擎日志、停服务，产出该配置的专家槽位、解码命中率、PCIe 占比、KV 驻留与 decode 吞吐。加 `--poll-ms N` 会在请求期间轮询 `/metrics` 的 `live.tok_s`，从而给出 decode 步长的分布。`--from-raw` 可把一份原始记录精简重写（幂等）。需在装有该引擎的环境上运行。
+- `nvcc -O2 -o build/io_roundtrip measure/io_roundtrip.cu && ./build/io_roundtrip --file <大文件> --mode direct --lane ample`：G-10，随机取 16 个 4 KiB 页串行读再一次 H2D，给出读腿与整条往返的 P50 / P99；`--mode cached` 走页缓存，`--hold-gib N` 先占住 N GiB 造出内存紧张的 lane。产物写在 `build/`。
 
 测量结果的存放：原始记录写入 `measure/results/<时间戳>-<测点>-<平台>.json`（Python 脚本与 CUDA 程序都自己落盘）；摘要回填 [docs/design/gates.md](docs/design/gates.md) 的实测记录列，以及 [docs/hardware.md](docs/hardware.md) 的实测值表。每条数值必须标注平台：环境1-WSL、环境1-Windows 或环境2。两套环境对比时必须使用同一份脚本与同一组参数。
 

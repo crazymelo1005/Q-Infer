@@ -24,6 +24,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -75,11 +76,41 @@ def mine(log: str) -> dict:
     return out
 
 
+def _pcts(steps: list) -> dict:
+    if not steps:
+        return {"n": 0}
+    steps = sorted(steps)
+    def q(p):
+        return round(steps[min(len(steps) - 1, int(p * (len(steps) - 1) + 0.5))], 3)
+    return {"n": len(steps), "p50_ms": q(0.50), "p90_ms": q(0.90), "p99_ms": q(0.99),
+            "min_ms": round(steps[0], 3), "max_ms": round(steps[-1], 3),
+            "mean_ms": round(sum(steps) / len(steps), 3)}
+
+
+def step_stats(samples: list) -> dict:
+    """步长分布的两个口径。
+
+    `from_tok_s`：引擎自己报的瞬时解码速率 `live.tok_s` 取倒数（毫秒/token），这是引擎口径的真值；
+    `from_delta`：相邻两次采样的 Δt/Δgenerated，受采样间隔与 `generated` 的更新粒度限制，只作对照。
+    """
+    from_ts = [1000.0 / s["tok_s"] for s in samples if s.get("tok_s")]
+    steps = []
+    prev = None
+    for s in samples:
+        if prev is not None and s.get("generated") and prev.get("generated") is not None:
+            dg = s["generated"] - prev["generated"]
+            dt = s["t"] - prev["t"]
+            if dg > 0 and dt > 0:
+                steps.append(1000.0 * dt / dg)
+        prev = s
+    return {"samples": len(samples), "from_tok_s": _pcts(from_ts), "from_delta": _pcts(steps)}
+
+
 def trim(rec: dict) -> dict:
     """只留判据：engine/metrics 的相关字段、本请求、日志判据。去掉 chat template 等无关大块。"""
     ma = rec.get("metrics_after") if isinstance(rec.get("metrics_after"), dict) else {}
     mi = rec.get("metrics_idle") if isinstance(rec.get("metrics_idle"), dict) else {}
-    eng = (ma.get("engine") or mi.get("engine") or {})
+    eng = (ma.get("engine") or mi.get("engine") or rec.get("engine") or {})
     keep_engine = {k: eng.get(k) for k in (
         "model", "version", "context", "max_context", "kv", "kv_resident", "expert_slots",
         "expert_cache_mib", "expert_slots_primary", "expert_cache_primary_mib", "vram_free_mib",
@@ -91,6 +122,19 @@ def trim(rec: dict) -> dict:
     pre_tok_s = None
     if tot.get("prompt_ms") and tot.get("prompt_tokens"):
         pre_tok_s = round(tot["prompt_tokens"] / (tot["prompt_ms"] / 1000.0), 2)
+    this_req = {
+        "prompt_tokens": tot.get("prompt_tokens"),
+        "reused": tot.get("reused"),
+        "output_tokens": tot.get("output_tokens"),
+        "prompt_ms": tot.get("prompt_ms"),
+        "decode_ms": tot.get("decode_ms"),
+        "decode_tok_s": dec_tok_s,
+        "prefill_tok_s": pre_tok_s,
+        "drafts_offered": tot.get("drafts_offered"),
+        "drafts_accepted": tot.get("drafts_accepted"),
+    }
+    if not any(v is not None for v in this_req.values()) and rec.get("this_request"):
+        this_req = rec["this_request"]          # 已经精简过的记录：原样保留（trim 幂等）
     out = {
         "slots_arg": rec.get("slots_arg"),
         "prompt": rec.get("prompt"),
@@ -98,21 +142,14 @@ def trim(rec: dict) -> dict:
         "max_tokens": rec.get("max_tokens"),
         "load_and_listen_s": rec.get("load_and_listen_s"),
         "engine": keep_engine,
-        "this_request": {
-            "prompt_tokens": tot.get("prompt_tokens"),
-            "reused": tot.get("reused"),
-            "output_tokens": tot.get("output_tokens"),
-            "prompt_ms": tot.get("prompt_ms"),
-            "decode_ms": tot.get("decode_ms"),
-            "decode_tok_s": dec_tok_s,
-            "prefill_tok_s": pre_tok_s,
-            "drafts_offered": tot.get("drafts_offered"),
-            "drafts_accepted": tot.get("drafts_accepted"),
-        },
+        "this_request": this_req,
         "error": rec.get("error"),
         "strata_left": rec.get("strata_left"),
     }
     out["mined_from_log"] = mine(rec.get("engine_log_tail", ""))
+    out["step_distribution"] = step_stats(rec.get("live_samples") or [])
+    if rec.get("live_samples"):
+        out["live_samples"] = rec["live_samples"][:2000]
     return out
 
 
@@ -158,11 +195,30 @@ def run_point(a) -> dict:
                 time.sleep(3)
             time.sleep(3)
             rec["metrics_idle"] = get("http://127.0.0.1:%d/metrics" % a.port)
+            samples = []
+            stop = threading.Event()
+            if a.poll_ms > 0:
+                def poll():
+                    t0 = time.time()
+                    while not stop.is_set():
+                        try:
+                            m = get("http://127.0.0.1:%d/metrics" % a.port, timeout=3)
+                            lv = (m or {}).get("live") or {}
+                            samples.append({"t": round(time.time() - t0, 4), "generated": lv.get("generated"),
+                                            "tok_s": lv.get("tok_s"), "elapsed_s": lv.get("elapsed_s"),
+                                            "state": lv.get("state")})
+                        except Exception:
+                            pass
+                        stop.wait(a.poll_ms / 1000.0)
+                threading.Thread(target=poll, daemon=True).start()
             req = urllib.request.Request("http://127.0.0.1:%d/v1/chat/completions" % a.port,
                                          data=json.dumps(body).encode(),
                                          headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=1800) as r:
                 r.read()
+            stop.set()
+            time.sleep(0.2)
+            rec["live_samples"] = samples
             rec["metrics_after"] = get("http://127.0.0.1:%d/metrics" % a.port)
     except Exception as e:
         rec["error"] = "%s: %s" % (type(e).__name__, e)
@@ -196,6 +252,7 @@ def main() -> int:
     ap.add_argument("--slots", default="auto", help="传给 --expert-cache 的值：auto 或整数")
     ap.add_argument("--port", type=int, default=8091)
     ap.add_argument("--max-tokens", type=int, default=128)
+    ap.add_argument("--poll-ms", type=int, default=0, help="请求期间按此间隔轮询 /metrics 的 live 字段，用于取步长分布（0=关）")
     ap.add_argument("--work-dir", help="中间文件目录（默认取 --out 所在目录）")
     ap.add_argument("--from-raw", help="把一份原始记录精简后写出，不起服务")
     ap.add_argument("--env", default="环境2")

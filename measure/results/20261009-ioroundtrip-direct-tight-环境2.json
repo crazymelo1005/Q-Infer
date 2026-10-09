@@ -1,0 +1,8 @@
+{
+  "measured_at": "2026-10-09T22:58:27+0800",
+  "measure": "G-10 NVMe->DRAM->VRAM 往返延迟（微基准）",
+  "env": "环境2",
+  "lane": "tight",
+  "config": {"file": "/home/crazymelo/projects/strata_models/sc117-iq2_xs/Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ2_XS-00002-of-00002.gguf", "file_gib": 26.8, "mode": "direct", "fanout_pages": 16, "page_bytes": 4096, "iters": 300, "hold_gib": 44.0},
+  "result_us": {"read_p50": 1479, "read_p99": 2083, "roundtrip_p50": 1487, "roundtrip_p99": 2097, "h2d_p50": 9}
+}
