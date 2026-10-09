@@ -27,7 +27,7 @@
 | `docs/research/` | 事实台账（是什么） |
 | [research/references.md](docs/research/references.md) | 全部出处，按编号登记 |
 | [scripts/docs_checks.py](scripts/docs_checks.py) 与 [.github/workflows/docs-check.yml](.github/workflows/docs-check.yml) | 规范自检：把第 2、3、4 节的规则变成可执行检查（非文档） |
-| [measure/](measure/) | 测量工具与原始结果：机器画像、PCIe 档位与带宽、内存带宽、GGUF 元数据读取、记忆表行访问局部性重放与语料构造、专家路由覆盖曲线、投机 IO 放大、CPU 专家内核与量化 GEMM 微基准、运行中引擎的槽位/命中率/KV 驻留采样、NVMe 往返延迟（非文档） |
+| [measure/](measure/) | 测量工具与原始结果：机器画像、PCIe 档位与带宽、内存带宽、GGUF 元数据读取、记忆表行访问局部性重放与语料构造、专家路由覆盖曲线、投机 IO 放大、CPU 专家内核与量化 GEMM 微基准、运行中引擎的槽位/命中率/KV 驻留采样、NVMe 往返延迟、KV 精度档的输出一致率（非文档） |
 
 分层规则：`research/` 不得引用 `design/`；`design/` 的关键论断必须能回指 `research/` 或 [hardware.md](docs/hardware.md)。
 
@@ -180,6 +180,7 @@ S-<n> | 等级 | 复核状态 | 来源（URL 或文档路径） | 引用日期
 - `cc -O2 -mavx2 -mfma -pthread -o build/cpu_gemm_bench measure/cpu_gemm_bench.c && ./build/cpu_gemm_bench --bits 4 --experts 48 --pin 0-14`：G-03，按专家真实几何跑码本反量化 GEMV，用 `--pin` 把线程绑到指定 CPU（环境2 上 P 核 0-7、E 核 8-23），量出每类核与各池规模的吞吐。产物写在 `build/`。
 - `python3 measure/engine_cache_probe.py --engine-dir <引擎目录> --base-config <serve 配置> --prompt <提示.txt> --slots auto|N --out <记录.json>`：G-05 / G-06 / G-12，起一次 serve 实例、发一个真实提示的 greedy 请求、读 `/metrics` 与引擎日志、停服务，产出该配置的专家槽位、解码命中率、PCIe 占比、KV 驻留与 decode 吞吐。加 `--poll-ms N` 会在请求期间轮询 `/metrics` 的 `live.tok_s`，从而给出 decode 步长的分布。`--from-raw` 可把一份原始记录精简重写（幂等）。需在装有该引擎的环境上运行。
 - `nvcc -O2 -o build/io_roundtrip measure/io_roundtrip.cu && ./build/io_roundtrip --file <大文件> --mode direct --lane ample`：G-10，随机取 16 个 4 KiB 页串行读再一次 H2D，给出读腿与整条往返的 P50 / P99；`--mode cached` 走页缓存，`--hold-gib N` 先占住 N GiB 造出内存紧张的 lane。产物写在 `build/`。
+- `python3 measure/kv_quality.py --run fp16=<log> --run int8=<log> --run k8v4=<log> --run q4_0=<log> --baseline fp16`：G-14 的 top-1 一致率，比对同一提示、同一采样下不同 KV 精度档的贪心输出序列（一致率 = 公共前缀 ÷ 较短长度）。输入是引擎 `generate` 的日志；比对时必须带一条**同配置的对照 run**，并给引擎加 `--adapt-every 0`，否则自适应换入的舍入差异会与精度差异混在一起。零依赖。
 
 测量结果的存放：原始记录写入 `measure/results/<时间戳>-<测点>-<平台>.json`（Python 脚本与 CUDA 程序都自己落盘）；摘要回填 [docs/design/gates.md](docs/design/gates.md) 的实测记录列，以及 [docs/hardware.md](docs/hardware.md) 的实测值表。每条数值必须标注平台：环境1-WSL、环境1-Windows 或环境2。两套环境对比时必须使用同一份脚本与同一组参数。
 

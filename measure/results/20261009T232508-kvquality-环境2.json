@@ -1,0 +1,56 @@
+{
+  "measured_at": "2026-10-09T23:25:08+08:00",
+  "measure": "G-14 KV 精度档的 top-1 一致率（同提示贪心输出序列比对）",
+  "env": "环境2",
+  "method": "同一提示、greedy 生成同一长度，逐位置比对输出序列；一致率 = 公共前缀 ÷ 较短长度",
+  "result": {
+    "baseline": "fp16a",
+    "runs": {
+      "fp16a": {
+        "n": 512,
+        "decode_tok_s": 63.95,
+        "log": "/home/crazymelo/qinfer-g14/det-fp16a.log"
+      },
+      "fp16b": {
+        "n": 512,
+        "decode_tok_s": 68.31,
+        "log": "/home/crazymelo/qinfer-g14/det-fp16b.log",
+        "common_prefix": 40,
+        "shorter_len": 512,
+        "agreement": 0.0781,
+        "identical": false,
+        "first_divergence_at": 40
+      },
+      "int8": {
+        "n": 512,
+        "decode_tok_s": 72.81,
+        "log": "/home/crazymelo/qinfer-g14/det-int8.log",
+        "common_prefix": 40,
+        "shorter_len": 512,
+        "agreement": 0.0781,
+        "identical": false,
+        "first_divergence_at": 40
+      },
+      "k8v4": {
+        "n": 512,
+        "decode_tok_s": 67.57,
+        "log": "/home/crazymelo/qinfer-g14/det-k8v4.log",
+        "common_prefix": 40,
+        "shorter_len": 512,
+        "agreement": 0.0781,
+        "identical": false,
+        "first_divergence_at": 40
+      },
+      "q4_0": {
+        "n": 512,
+        "decode_tok_s": 62.89,
+        "log": "/home/crazymelo/qinfer-g14/det-q4_0.log",
+        "common_prefix": 13,
+        "shorter_len": 512,
+        "agreement": 0.0254,
+        "identical": false,
+        "first_divergence_at": 13
+      }
+    }
+  }
+}
