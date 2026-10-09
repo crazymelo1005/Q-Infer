@@ -1,0 +1,128 @@
+{
+  "measured_at": "2026-10-09T22:03:12+08:00",
+  "measure": "G-13 投机导致的 IO 放大系数",
+  "env": "环境2",
+  "method": "接受率取倒数（引擎日志的 speculation 行）；另按轨迹记录数/48 层/生成 token 数直接数出位置放大",
+  "config": {
+    "logs": [
+      "/home/crazymelo/qinfer-g09/run-4k.log",
+      "/home/crazymelo/qinfer-g09/run-4k-long.log",
+      "/home/crazymelo/qinfer-g09/run-p0.log",
+      "/home/crazymelo/qinfer-g09/run-p64k.log",
+      "/home/crazymelo/qinfer-g09/run-p131k.log",
+      "/home/crazymelo/qinfer-g09/run-p196k.log"
+    ],
+    "traces": [
+      "/home/crazymelo/qinfer-g09/trace-4k.bin",
+      "/home/crazymelo/qinfer-g09/trace-4k-long.bin",
+      "/home/crazymelo/qinfer-g09/trace-p0.bin",
+      "/home/crazymelo/qinfer-g09/trace-p64k.bin",
+      "/home/crazymelo/qinfer-g09/trace-p131k.bin",
+      "/home/crazymelo/qinfer-g09/trace-p196k.bin"
+    ]
+  },
+  "result": {
+    "runs": [
+      {
+        "log": "/home/crazymelo/qinfer-g09/run-4k.log",
+        "rounds": 6,
+        "window": 6,
+        "accepted": 11,
+        "proposed": 14,
+        "acceptance": 0.786,
+        "amplify_from_acceptance": 1.2723,
+        "generated_tokens": 16,
+        "trace": "/home/crazymelo/qinfer-g09/trace-4k.bin",
+        "records": 960,
+        "lookups": 9600,
+        "positions": 20,
+        "amplify_from_position": 1.25
+      },
+      {
+        "log": "/home/crazymelo/qinfer-g09/run-4k-long.log",
+        "rounds": 371,
+        "window": 6,
+        "accepted": 654,
+        "proposed": 784,
+        "acceptance": 0.834,
+        "amplify_from_acceptance": 1.199,
+        "generated_tokens": 1024,
+        "trace": "/home/crazymelo/qinfer-g09/trace-4k-long.bin",
+        "records": 55440,
+        "lookups": 554400,
+        "positions": 1155,
+        "amplify_from_position": 1.1279
+      },
+      {
+        "log": "/home/crazymelo/qinfer-g09/run-p0.log",
+        "rounds": 220,
+        "window": 6,
+        "accepted": 293,
+        "proposed": 365,
+        "acceptance": 0.803,
+        "amplify_from_acceptance": 1.2453,
+        "generated_tokens": 512,
+        "trace": "/home/crazymelo/qinfer-g09/trace-p0.bin",
+        "records": 28080,
+        "lookups": 280800,
+        "positions": 585,
+        "amplify_from_position": 1.1426
+      },
+      {
+        "log": "/home/crazymelo/qinfer-g09/run-p64k.log",
+        "rounds": 218,
+        "window": 6,
+        "accepted": 296,
+        "proposed": 362,
+        "acceptance": 0.818,
+        "amplify_from_acceptance": 1.2225,
+        "generated_tokens": 512,
+        "trace": "/home/crazymelo/qinfer-g09/trace-p64k.bin",
+        "records": 27840,
+        "lookups": 278400,
+        "positions": 580,
+        "amplify_from_position": 1.1328
+      },
+      {
+        "log": "/home/crazymelo/qinfer-g09/run-p131k.log",
+        "rounds": 170,
+        "window": 6,
+        "accepted": 344,
+        "proposed": 366,
+        "acceptance": 0.94,
+        "amplify_from_acceptance": 1.0638,
+        "generated_tokens": 512,
+        "trace": "/home/crazymelo/qinfer-g09/trace-p131k.bin",
+        "records": 25728,
+        "lookups": 257280,
+        "positions": 536,
+        "amplify_from_position": 1.0469
+      },
+      {
+        "log": "/home/crazymelo/qinfer-g09/run-p196k.log",
+        "rounds": 178,
+        "window": 6,
+        "accepted": 337,
+        "proposed": 396,
+        "acceptance": 0.851,
+        "amplify_from_acceptance": 1.1751,
+        "generated_tokens": 512,
+        "trace": "/home/crazymelo/qinfer-g09/trace-p196k.bin",
+        "records": 27552,
+        "lookups": 275520,
+        "positions": 574,
+        "amplify_from_position": 1.1211
+      }
+    ],
+    "amplify_from_acceptance_range": {
+      "min": 1.0638,
+      "median": 1.2225,
+      "max": 1.2723
+    },
+    "amplify_from_position_range": {
+      "min": 1.0469,
+      "median": 1.1328,
+      "max": 1.25
+    }
+  }
+}
