@@ -50,7 +50,7 @@ static void stamp(char *out, size_t n) {
 }
 
 int main(int argc, char **argv) {
-  int repeats = 5, hold = 0, json = 0;
+  int repeats = 5, hold = 0, json = 0, device = 0;
   const char *env = NULL;
   const char *out_dir = NULL;
   for (int i = 1; i < argc; i++) {
@@ -59,19 +59,31 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--json")) json = 1;
     else if (!strcmp(argv[i], "--env") && i + 1 < argc) env = argv[++i];
     else if (!strcmp(argv[i], "--out-dir") && i + 1 < argc) out_dir = argv[++i];
+    else if (!strcmp(argv[i], "--device") && i + 1 < argc) device = atoi(argv[++i]);
   }
   if (!env) env = detect_env();
 
-  int dev = 0;
+  int device_count = 0;
+  CHECK(cudaGetDeviceCount(&device_count));
+  if (device_count < 1) {
+    fprintf(stderr, "没有可见的 CUDA 设备\n");
+    return 1;
+  }
+  if (device < 0 || device >= device_count) {
+    fprintf(stderr, "设备 %d 不存在，可见设备数 %d\n", device, device_count);
+    return 1;
+  }
+  CHECK(cudaSetDevice(device));
+
   cudaDeviceProp prop;
-  CHECK(cudaGetDeviceProperties(&prop, dev));
+  CHECK(cudaGetDeviceProperties(&prop, device));
 
   const size_t mib = 1024 * 1024;
   size_t sizes[] = {1, 4, 16, 64, 256};
 
   if (!json) {
     printf("平台      %s\n", env);
-    printf("GPU       %s\n", prop.name);
+    printf("GPU       #%d %s（可见设备 %d 个）\n", device, prop.name, device_count);
     printf("口径      pinned 主机内存与大块显存互拷，cudaEvent 计时，每档重复 %d 次报中位数与区间\n",
            repeats);
     printf("说明      链路宽度与代数由 measure/pcie_link.py 读取；本程序只测有效带宽\n");
@@ -151,12 +163,12 @@ int main(int argc, char **argv) {
   char json_buf[4096];
   snprintf(json_buf, sizeof(json_buf),
            "{\"measured_at\":\"%s\",\"measure\":\"G-01 PCIe 有效带宽\",\"env\":\"%s\","
-           "\"gpu\":\"%s\",\"repeats\":%d,\"results\":[%s]}",
-           ts, env, prop.name, repeats, json_items);
+           "\"device\":%d,\"device_count\":%d,\"gpu\":\"%s\",\"repeats\":%d,\"results\":[%s]}",
+           ts, env, device, device_count, prop.name, repeats, json_items);
   if (json) printf("%s\n", json_buf);
   if (out_dir) {
     char path[1024];
-    snprintf(path, sizeof(path), "%s/%s-pciebw-%s.json", out_dir, ts, env);
+    snprintf(path, sizeof(path), "%s/%s-pciebw-gpu%d-%s.json", out_dir, ts, device, env);
     FILE *fp = fopen(path, "w");
     if (!fp) {
       fprintf(stderr, "无法写入 %s\n", path);

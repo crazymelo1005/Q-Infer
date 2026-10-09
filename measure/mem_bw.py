@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RESULTS = ROOT / "measure" / "results"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from env_profile import detect_env, mem_total_gib  # noqa: E402
+from env_profile import canonical_env, detect_env, mem_total_gib  # noqa: E402
 
 
 def available_gib() -> float | None:
@@ -119,7 +119,7 @@ def main() -> int:
     record = {
         "measured_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
         "measure": "G-02 主机内存有效带宽",
-        "env": args.env or detect_env(),
+        "env": canonical_env(args.env) if args.env else detect_env(),
         "config": {"size_mib_per_array": args.size_mb, "procs": procs,
                    "seconds": args.seconds, "repeats": args.repeats},
         "result_gbps": summary,

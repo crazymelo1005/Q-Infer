@@ -21,6 +21,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS = ROOT / "measure" / "results"
 
+# 命令行可能经历 Git Bash → wsl.exe → ssh 多层转发，中文参数会被按控制台代码页编码而损坏，
+# 因此允许用 ASCII 代号指定平台，落盘时仍写规范的平台名。
+ENV_ALIASES = {"1w": "环境1-Windows", "1l": "环境1-WSL", "2": "环境2"}
+
+
+def canonical_env(value: str) -> str:
+    return ENV_ALIASES.get(value, value)
+
 
 def run(cmd: list[str]) -> str:
     try:
@@ -132,14 +140,14 @@ def git_rev() -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", help="平台标签，缺省自动判定")
+    parser.add_argument("--env", help="平台标签，缺省自动判定。也可用 ASCII 代号 1w（环境1-Windows）/ 1l（环境1-WSL）/ 2（环境2）")
     parser.add_argument("--note", default="", help="本次测量的补充说明")
     args = parser.parse_args()
 
     now = datetime.now(timezone.utc).astimezone()
     profile = {
         "measured_at": now.isoformat(timespec="seconds"),
-        "env": args.env or detect_env(),
+        "env": canonical_env(args.env) if args.env else detect_env(),
         "hostname": platform.node(),
         "os": f"{platform.system()} {platform.release()} {platform.version()}",
         "cpu": cpu_info(),

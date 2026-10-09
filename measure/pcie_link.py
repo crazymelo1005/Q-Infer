@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RESULTS = ROOT / "measure" / "results"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from env_profile import detect_env  # noqa: E402
+from env_profile import canonical_env, detect_env  # noqa: E402
 
 QUERY = ("name,memory.total,driver_version,"
          "pcie.link.gen.max,pcie.link.gen.current,pcie.link.width.max,pcie.link.width.current")
@@ -82,7 +82,7 @@ def main() -> int:
     record = {
         "measured_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
         "measure": "G-01 PCIe 链路档位",
-        "env": args.env or detect_env(),
+        "env": canonical_env(args.env) if args.env else detect_env(),
         "watch_seconds": args.watch,
         "samples": samples,
         "changed_during_watch": changed,
