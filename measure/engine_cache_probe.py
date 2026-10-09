@@ -106,6 +106,26 @@ def step_stats(samples: list) -> dict:
     return {"samples": len(samples), "from_tok_s": _pcts(from_ts), "from_delta": _pcts(steps)}
 
 
+def summarize_requests(reqs: list) -> dict:
+    """冷启动（第 1 次）与稳态（第 2 次起）分开报中位数与区间——口径要求两者不得互相替代。
+
+    prefill 报的是 `prefill_read_tok_s`：把被前缀复用命中的 token 从分子里扣掉，否则第二次起
+    `prompt_ms` 很小而 `prompt_tokens` 仍是全量，会算出上万 tok/s 的假值。
+    """
+    out = {}
+    for label, group in (("cold", reqs[:1]), ("steady", reqs[1:])):
+        if not group:
+            continue
+        g = {}
+        for key in ("decode_tok_s", "prefill_read_tok_s"):
+            vals = sorted(v[key] for v in group if v.get(key))
+            if vals:
+                g[key] = {"n": len(vals), "median": vals[len(vals) // 2], "min": vals[0], "max": vals[-1],
+                          "all": vals}
+        out[label] = g
+    return out
+
+
 def trim(rec: dict) -> dict:
     """只留判据：engine/metrics 的相关字段、本请求、日志判据。去掉 chat template 等无关大块。"""
     ma = rec.get("metrics_after") if isinstance(rec.get("metrics_after"), dict) else {}
@@ -148,6 +168,9 @@ def trim(rec: dict) -> dict:
     }
     out["mined_from_log"] = mine(rec.get("engine_log_tail", ""))
     out["step_distribution"] = step_stats(rec.get("live_samples") or [])
+    if rec.get("requests"):
+        out["requests"] = rec["requests"]
+        out["summary"] = summarize_requests(rec["requests"])
     if rec.get("live_samples"):
         out["live_samples"] = rec["live_samples"][:2000]
     return out
@@ -157,11 +180,18 @@ def run_point(a) -> dict:
     base = Path(a.base_config).expanduser()
     cfg = json.loads(base.read_text(encoding="utf-8"))
     args = list(cfg["args"])
+    for name in (a.drop_arg or []):
+        if name in args:
+            i = args.index(name)
+            del args[i:i + 2]                      # 丢掉 "flag value"
     if "--expert-cache" in args:
         args[args.index("--expert-cache") + 1] = a.slots
     else:
         args += ["--expert-cache", a.slots]
     cfg["args"] = args
+    if a.gpu:
+        cfg["gpu"] = [int(x) for x in a.gpu.split(",")]
+        cfg["gpus_asked"] = True
     cfg["port"] = a.port
     tag = "%s-%s" % (a.slots, Path(a.prompt).stem)
     work = Path(a.work_dir or Path(a.out).parent)
@@ -195,29 +225,54 @@ def run_point(a) -> dict:
                 time.sleep(3)
             time.sleep(3)
             rec["metrics_idle"] = get("http://127.0.0.1:%d/metrics" % a.port)
+            per_request = []
             samples = []
-            stop = threading.Event()
-            if a.poll_ms > 0:
-                def poll():
-                    t0 = time.time()
-                    while not stop.is_set():
-                        try:
-                            m = get("http://127.0.0.1:%d/metrics" % a.port, timeout=3)
-                            lv = (m or {}).get("live") or {}
-                            samples.append({"t": round(time.time() - t0, 4), "generated": lv.get("generated"),
-                                            "tok_s": lv.get("tok_s"), "elapsed_s": lv.get("elapsed_s"),
-                                            "state": lv.get("state")})
-                        except Exception:
-                            pass
-                        stop.wait(a.poll_ms / 1000.0)
-                threading.Thread(target=poll, daemon=True).start()
-            req = urllib.request.Request("http://127.0.0.1:%d/v1/chat/completions" % a.port,
-                                         data=json.dumps(body).encode(),
-                                         headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=1800) as r:
-                r.read()
-            stop.set()
-            time.sleep(0.2)
+            prev_tot = ((rec["metrics_idle"] or {}).get("totals")) or {}
+            for r in range(max(1, a.repeat)):
+                stop = threading.Event()
+                if a.poll_ms > 0:
+                    def poll(t_base=time.time()):
+                        while not stop.is_set():
+                            try:
+                                m = get("http://127.0.0.1:%d/metrics" % a.port, timeout=3)
+                                lv = (m or {}).get("live") or {}
+                                samples.append({"t": round(time.time() - t_base, 4), "generated": lv.get("generated"),
+                                                "tok_s": lv.get("tok_s"), "elapsed_s": lv.get("elapsed_s"),
+                                                "state": lv.get("state")})
+                            except Exception:
+                                pass
+                            stop.wait(a.poll_ms / 1000.0)
+                    threading.Thread(target=poll, daemon=True).start()
+                req = urllib.request.Request("http://127.0.0.1:%d/v1/chat/completions" % a.port,
+                                            data=json.dumps(body).encode(),
+                                            headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=1800) as resp:
+                    resp.read()
+                stop.set()
+                time.sleep(0.2)
+                m = get("http://127.0.0.1:%d/metrics" % a.port)
+                tot = (m or {}).get("totals") or {}
+                dt_dec = (tot.get("decode_ms", 0) - prev_tot.get("decode_ms", 0))
+                dt_pre = (tot.get("prompt_ms", 0) - prev_tot.get("prompt_ms", 0))
+                ng = tot.get("output_tokens", 0) - prev_tot.get("output_tokens", 0)
+                npr = tot.get("prompt_tokens", 0) - prev_tot.get("prompt_tokens", 0)
+                d_re = tot.get("reused", 0) - prev_tot.get("reused", 0)
+                read_pr = npr - d_re
+                per_request.append({
+                    "i": r, "output_tokens": ng, "prompt_tokens": npr, "reused": d_re,
+                    "prefill_read_tokens": read_pr,
+                    "decode_ms": round(dt_dec, 1), "prompt_ms": round(dt_pre, 1),
+                    "decode_tok_s": round(ng / (dt_dec / 1000.0), 2) if dt_dec > 0 else None,
+                    "prefill_read_tok_s": round(read_pr / (dt_pre / 1000.0), 2)
+                    if dt_pre > 0 and read_pr > 0 else None,
+                    "prefill_tok_s_raw": round(npr / (dt_pre / 1000.0), 2) if dt_pre > 0 else None,
+                })
+                prev_tot = tot
+                print("  run %d: decode %s tok/s, prefill(read) %s tok/s (reused %s)" % (
+                    r, per_request[-1]["decode_tok_s"], per_request[-1]["prefill_read_tok_s"],
+                    per_request[-1]["reused"]), flush=True)
+                time.sleep(2)
+            rec["requests"] = per_request
             rec["live_samples"] = samples
             rec["metrics_after"] = get("http://127.0.0.1:%d/metrics" % a.port)
     except Exception as e:
@@ -253,6 +308,9 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=8091)
     ap.add_argument("--max-tokens", type=int, default=128)
     ap.add_argument("--poll-ms", type=int, default=0, help="请求期间按此间隔轮询 /metrics 的 live 字段，用于取步长分布（0=关）")
+    ap.add_argument("--repeat", type=int, default=1, help="同一实例内连发几次请求（基线口径要求 ≥5 次并报中位数与区间）")
+    ap.add_argument("--gpu", help="覆盖配置里的 GPU 列表，如 0 或 0,1")
+    ap.add_argument("--drop-arg", action="append", default=[], help="从配置的 args 里删掉某个旗标（连同它的值），如 --layer-split")
     ap.add_argument("--work-dir", help="中间文件目录（默认取 --out 所在目录）")
     ap.add_argument("--from-raw", help="把一份原始记录精简后写出，不起服务")
     ap.add_argument("--env", default="环境2")

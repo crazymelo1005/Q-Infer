@@ -1,0 +1,174 @@
+{
+  "measured_at": "2026-10-10T00:06:45+08:00",
+  "measure": "G-05 专家槽位 / G-06 命中率到吞吐 / G-12 KV 驻留（一次 serve 实例的一个采样点）",
+  "env": "环境2",
+  "method": "起 serve、发一个真实提示的 greedy 请求、读 /metrics 与引擎日志",
+  "slots_arg": "auto",
+  "prompt": "prompt-32k.txt",
+  "prompt_chars": 108393,
+  "max_tokens": 256,
+  "load_and_listen_s": 32.0,
+  "engine": {
+    "model": "sc117-iq2_xs",
+    "version": "0.1.41",
+    "context": 262144,
+    "max_context": 262144,
+    "kv": "int8",
+    "kv_resident": 32768,
+    "expert_slots": 11967,
+    "expert_cache_mib": 16416,
+    "expert_slots_primary": 6529,
+    "expert_cache_primary_mib": 8816,
+    "vram_free_mib": 313,
+    "arena_mib": 17395,
+    "pool_workers": 15,
+    "pcie_frac": "0.55",
+    "spec": 6,
+    "mtp_max": 4,
+    "batch_slots": 4,
+    "batch_groups": 2
+  },
+  "this_request": {
+    "prompt_tokens": 160330,
+    "reused": 128244,
+    "output_tokens": 1280,
+    "prompt_ms": 17437.4,
+    "decode_ms": 15202.2,
+    "decode_tok_s": 84.2,
+    "prefill_tok_s": 9194.6,
+    "drafts_offered": 1047,
+    "drafts_accepted": 709
+  },
+  "error": null,
+  "strata_left": "0",
+  "mined_from_log": {
+    "hit_rate_pct": 96.0,
+    "hits": 147431,
+    "lookups": 153522,
+    "offloaded": 2958,
+    "pcie_share_pct": 1.9,
+    "routed": 156480,
+    "kv_vram_hit_pct": 96.32,
+    "kv_block_reads": 1016766,
+    "kv_ram_mib": 150.9
+  },
+  "step_distribution": {
+    "samples": 0,
+    "from_tok_s": {
+      "n": 0
+    },
+    "from_delta": {
+      "n": 0
+    }
+  },
+  "requests": [
+    {
+      "i": 0,
+      "output_tokens": 256,
+      "prompt_tokens": 32066,
+      "reused": 0,
+      "prefill_read_tokens": 32066,
+      "decode_ms": 3470.6,
+      "prompt_ms": 17285.0,
+      "decode_tok_s": 73.76,
+      "prefill_read_tok_s": 1855.13,
+      "prefill_tok_s_raw": 1855.13
+    },
+    {
+      "i": 1,
+      "output_tokens": 256,
+      "prompt_tokens": 32066,
+      "reused": 32061,
+      "prefill_read_tokens": 5,
+      "decode_ms": 2919.5,
+      "prompt_ms": 36.2,
+      "decode_tok_s": 87.69,
+      "prefill_read_tok_s": 138.12,
+      "prefill_tok_s_raw": 885801.1
+    },
+    {
+      "i": 2,
+      "output_tokens": 256,
+      "prompt_tokens": 32066,
+      "reused": 32061,
+      "prefill_read_tokens": 5,
+      "decode_ms": 3231.6,
+      "prompt_ms": 36.2,
+      "decode_tok_s": 79.22,
+      "prefill_read_tok_s": 138.12,
+      "prefill_tok_s_raw": 885801.1
+    },
+    {
+      "i": 3,
+      "output_tokens": 256,
+      "prompt_tokens": 32066,
+      "reused": 32061,
+      "prefill_read_tokens": 5,
+      "decode_ms": 2865.8,
+      "prompt_ms": 34.7,
+      "decode_tok_s": 89.33,
+      "prefill_read_tok_s": 144.09,
+      "prefill_tok_s_raw": 924092.22
+    },
+    {
+      "i": 4,
+      "output_tokens": 256,
+      "prompt_tokens": 32066,
+      "reused": 32061,
+      "prefill_read_tokens": 5,
+      "decode_ms": 2714.7,
+      "prompt_ms": 45.3,
+      "decode_tok_s": 94.3,
+      "prefill_read_tok_s": 110.38,
+      "prefill_tok_s_raw": 707858.72
+    }
+  ],
+  "summary": {
+    "cold": {
+      "decode_tok_s": {
+        "n": 1,
+        "median": 73.76,
+        "min": 73.76,
+        "max": 73.76,
+        "all": [
+          73.76
+        ]
+      },
+      "prefill_read_tok_s": {
+        "n": 1,
+        "median": 1855.13,
+        "min": 1855.13,
+        "max": 1855.13,
+        "all": [
+          1855.13
+        ]
+      }
+    },
+    "steady": {
+      "decode_tok_s": {
+        "n": 4,
+        "median": 89.33,
+        "min": 79.22,
+        "max": 94.3,
+        "all": [
+          79.22,
+          87.69,
+          89.33,
+          94.3
+        ]
+      },
+      "prefill_read_tok_s": {
+        "n": 4,
+        "median": 138.12,
+        "min": 110.38,
+        "max": 144.09,
+        "all": [
+          110.38,
+          138.12,
+          138.12,
+          144.09
+        ]
+      }
+    }
+  }
+}
