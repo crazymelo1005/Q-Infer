@@ -37,7 +37,7 @@
 | 前缀缓存 / prefix cache | 多个请求共享相同前缀（如 system prompt）时，复用已算好的 KV，避免重复 prefill |
 | RadixAttention / Radix 树 | SGLang 的前缀复用实现，用基数树管理共享前缀 |
 | PagedAttention | vLLM 的 KV 分页方案：把 KV 切成块（page），像操作系统管理内存一样按需分配，消除碎片 |
-| 批调度 / batch slots | 同时处理多个请求。Strata 默认 1，上限 8；本机已开 4 槽 |
+| 批调度 / batch slots | 同时处理多个请求。Strata 默认 1，上限 8；环境2 已开 4 槽 |
 | Roofline（带宽上限） | 用「有效带宽 ÷ 每 token 字节量」推出的 decode 理论天花板。实测低于它，说明瓶颈在别处 |
 | lane / 会话 lane | KVMem 里为每个并发会话独立分配的 KV 工作区（如 `--kvmem-conversations N`） |
 
@@ -54,7 +54,7 @@
 | AWQ / GPTQ | 两种主流量化算法（权重分组的 4-bit 量化） |
 | KV 量化 | 对 KV cache 量化（如 `--kv-cache-dtype fp8`），长上下文的省显存关键 |
 | indexer_kv_dtype | vLLM 里单独给索引器 KV 设精度的旋钮 → 说明「索引器精度」是一个独立维度 |
-| 4-bit / 3-bit（TurboQuant、SAW-INT4） | 更低比特的实验档；3-bit 类方法需融合核 + 本机标定 |
+| 4-bit / 3-bit（TurboQuant、SAW-INT4） | 更低比特的实验档；3-bit 类方法需融合核 + 环境2 标定 |
 | perplexity（困惑度） | 语言模型质量的经典指标。越低越好，但对量化差异不敏感，须辅以任务集 |
 | 贪婪解码友好 | 某些量化方法的残差方差会改变 top-1（贪心）选择；需专门测，不能只看平均误差 |
 
@@ -96,16 +96,16 @@
 
 | 术语 | 含义 |
 |------|------|
-| VRAM / 显存 | GPU 板载内存。本机单卡 16GB（其他进程占用后可用 ≈13.5–14GB） |
-| Host RAM / 主存 | 系统内存。本机 64GB DDR5-4400（有效带宽 ≈70GB/s） |
+| VRAM / 显存 | GPU 板载内存。环境2 单卡 16GB（其他进程占用后可用 ≈13.5–14GB） |
+| Host RAM / 主存 | 系统内存。环境2 为 64GB DDR5-4400（有效带宽 ≈70GB/s） |
 | pinned memory（页锁定内存） | 不会被操作系统换出的主机内存，GPU 可直接 DMA 读写，是 offload 的常驻区 |
-| PCIe | 显卡与主机的总线。本机 5.0 x8+x8；是所有「搬数据」动作的公共瓶颈 |
+| PCIe | 显卡与主机的总线。环境2 为 5.0 x8+x8；是所有「搬数据」动作的公共瓶颈 |
 | B_step / PCIe 预算 | 每个 decode 步允许搬运的字节数上限（由标定确定），用来给多路流量排优先级 |
 | io_uring / OVERLAPPED | Linux / Windows 的异步批量 IO 接口 |
 | mmap / MADV_WILLNEED | 把文件直接映射进地址空间 / 提示内核提前读入，避免「先读进 RAM 再拷贝」 |
 | CUDA Graph | 把一串 kernel 调用捕获成图一次提交，消除小 batch 下的 launch 开销 |
-| AVX2 / AVX-512 / AMX | CPU SIMD 指令集。本机（Arrow Lake）只有 AVX2，无 AVX-512/AMX → CPU 侧是明确上限 |
-| P-core / E-core | 性能核 / 能效核。本机 285K 为 8 P + 16 E，内核需按核型分池 |
+| AVX2 / AVX-512 / AMX | CPU SIMD 指令集。两套环境均为 Arrow Lake，只有 AVX2，无 AVX-512/AMX → CPU 侧是明确上限 |
+| P-core / E-core | 性能核 / 能效核。环境2 的 285K 为 8 P + 16 E（环境1 的 265K 为 8 P + 12 E），内核需按核型分池 |
 | iGPU / 核显 | CPU 集成的显卡（Intel Xe）。与 CPU 共享内存总线 → 不增加带宽，但可分担算力 |
 | NPU / Intel AI Boost | 低功耗神经网络加速器（≈13 TOPS INT8）。只用于视觉/小模型，不参与专家计算 |
 | XMX / DP4a | Intel 核显的矩阵/整数点积指令（`DP4a` 是低精度点积） |
@@ -117,13 +117,13 @@
 
 | 记号 | 含义 |
 |------|------|
-| [本机实测] / [硬件规格] / [官方] / [他卡实测] / [推算] | 五级来源等级，定义见 [research/references.md](research/references.md) 第 1 节 |
+| [环境2实测] / [环境1实测] / [硬件规格] / [官方] / [他卡实测] / [推算] | 六级来源等级，定义见 [research/references.md](research/references.md) 第 1 节 |
 | [已确认] / [摘要级] / [存疑] | 三级复核状态，定义见 [research/references.md](research/references.md) 第 2 节 |
 | `S-n` | 仓库外来源编号，登记于 [research/references.md](research/references.md) |
 | `ADR-NNN` | 架构决策记录，位于 [`design/adr/`](design/adr/)；不可修订，改变决策须新开一条 |
 | `G-NN` | 门禁与待测项，登记于 [design/gates.md](design/gates.md)；六条门禁为 G-04、G-07、G-08、G-09、G-10、G-11 |
 | `R-NN` | 风险，登记于 [design/risks.md](design/risks.md) |
 | `P-NN` | 候选方向，登记于 [design/proposals.md](design/proposals.md) |
-| 基线（分母） | 在目标机上实测的参考引擎性能，作为全部倍数指标的分母 |
+| 基线（分母） | 在环境2 上实测的参考引擎性能，作为全部倍数指标的分母 |
 | 评测口径（尺子） | 固定任务集与随机种子、每配置重复不少于 5 次、报中位数与区间 |
 | 负结果 | 被实测证伪的假设，必须写入 [design/risks.md](design/risks.md) 与 `research/`，不得删除 |

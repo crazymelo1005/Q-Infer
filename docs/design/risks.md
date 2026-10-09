@@ -44,4 +44,4 @@
 
 ## 4. 依据
 
-表中涉及的量级取自 [`../research/02-qwen3.8-flash-next.md`](../research/02-qwen3.8-flash-next.md)（表体积）、[`../research/01-strata-engine.md`](../research/01-strata-engine.md) §10（本机内存占用与常驻区）、[`../hardware.md`](../hardware.md)（内存与 PCIe 规格），判断口径见 [`gates.md`](gates.md)。
+表中涉及的量级取自 [`../research/02-qwen3.8-flash-next.md`](../research/02-qwen3.8-flash-next.md)（表体积）、[`../research/01-strata-engine.md`](../research/01-strata-engine.md) §10（环境2 内存占用与常驻区）、[`../hardware.md`](../hardware.md)（内存与 PCIe 规格），判断口径见 [`gates.md`](gates.md)。

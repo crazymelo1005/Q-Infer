@@ -20,7 +20,7 @@ vLLM 的官方 recipe 已证实：索引器的 KV 也需要单独量化（`--att
 
 | 旋钮 | 默认 | 备选 | 依据 |
 |------|------|------|------|
-| 权重 | NVFP4（Blackwell 第五代 Tensor Core 原生加速） | IQ2_XS / IQ3_XXS（GGUF 生态）、IQ4_XS、三值 | 本机 sm_120 对 NVFP4 有硬件路径 → 优先；GGUF 档兼容 llama.cpp 生态复用 |
+| 权重 | NVFP4（Blackwell 第五代 Tensor Core 原生加速） | IQ2_XS / IQ3_XXS（GGUF 生态）、IQ4_XS、三值 | 环境2 sm_120 对 NVFP4 有硬件路径 → 优先；GGUF 档兼容 llama.cpp 生态复用 |
 | KV（QSA 主 KV） | FP8 | 4-bit（SAW-INT4 类，兼容 paged 布局）；3-bit（TurboQuant 类）仅实验档 | 反量化必须融进 attention 核，否则把省下的带宽又读回来 |
 | 索引器 KV | FP8（独立旋钮） | 4-bit | 对质量更敏感、体积更小 → 可单独调 |
 | 累加精度 C | FP32（稳定） | BF16（更快） | 由自动标定决定 |
@@ -28,7 +28,7 @@ vLLM 的官方 recipe 已证实：索引器的 KV 也需要单独量化（`--att
 ## 备选方案
 
 1. 单一精度档（权重+KV 一套） —— 否决：混淆「权重轴」与「KV 轴」会同时错判显存占用与速度上限（研究 04 §2）。
-2. 全部 FP8 —— 部分否决：体积太大装不下；且本机 native NVFP4 硬件路径被浪费。
+2. 全部 FP8 —— 部分否决：体积太大装不下；且环境2 native NVFP4 硬件路径被浪费。
 3. 激进统一降到 3-bit 权重 + 3-bit KV —— 否决为默认：质量未达标前不进默认档。
 4. 分轴独立旋钮 —— 采纳。
 

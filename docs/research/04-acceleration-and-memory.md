@@ -1,7 +1,7 @@
 # 推理加速与显存优化技术综述
 
 > 目的：把「能让推理更快 / 更省显存 / 保持质量」的技术分轴摆开，逐条回答三个问题：改的是哪个瓶颈？代价是什么？在本项目硬件上值不值得上？
-> 本机约束：2× RTX 5060 Ti 16GB（每卡 448 GB/s，PCIe 5.0 x8；2026-10-09 起本机为双卡，见 [01-strata-engine.md](01-strata-engine.md) §9.3）、Core Ultra 9 285K（无 AVX-512/AMX）、64GB DDR5-4400（有效带宽约 70GB/s）、SSD 顺序读约 7GB/s。
+> 环境2 约束：2× RTX 5060 Ti 16GB（每卡 448 GB/s，PCIe 5.0 x8；2026-10-09 起环境2 为双卡，见 [01-strata-engine.md](01-strata-engine.md) §9.3）、Core Ultra 9 285K（无 AVX-512/AMX）、64GB DDR5-4400（有效带宽约 70GB/s）、SSD 顺序读约 7GB/s。
 
 复核状态标记：[已确认] 逐位确认 · [摘要级] 仅标题或摘要 · [存疑] 来源矛盾已降级。
 
@@ -39,7 +39,7 @@ Flash-Next 让这套坐标系多出一个子轴：QSA 的「挑块打分」用�
 | MXFP4 | 块 32 + E8M0 幂次共享缩放 | 免 | OCP 跨厂商标准，更省、实现更简单 |
 | 三值/二值 | {-1,0,+1}（1.585 bpw）或 {-1,+1} | 视方案 | BitNet b1.58（QAT）/ Ternary Bonsai 2（PTQ，27B→约 5.9GB，保留 98.2%，[官方] 项目方口径）；靠专用/LUT 核，非 Blackwell 原生 FP4 路径 |
 
-本机取向：本机是 Blackwell sm_120，NVFP4 有硬件加速 → 权重侧优先走 NVFP4；三值只能走 LUT 核，收益偏容量而非速度。
+环境2 取向：环境2 是 Blackwell sm_120，NVFP4 有硬件加速 → 权重侧优先走 NVFP4；三值只能走 LUT 核，收益偏容量而非速度。
 
 ---
 
@@ -116,7 +116,7 @@ KV 是动态张量：量化必须把反量化融进注意力核（fused dequant 
 | Medusa | 多头预测 + 树验证 | 需训练 |
 
 理论关系：接受率 α、草稿长度 k 下的期望产出 ≈ `(1-α^{k+1})/(1-α)`。所以要同时优化 α 与 k，而不是无脑加长。
-- 实测参照（本机一手）：MTP 接受率 72.2% / 74.1%，对应平均 2.4–3.2 token/步。
+- 实测参照（环境2 实测）：MTP 接受率 72.2% / 74.1%，对应平均 2.4–3.2 token/步。
 - 官方提醒：测 MTP 收益必须用 SPEED-Bench 类真实负载，随机 prompt 的接受率严重偏离，会把结论做反。
 
 ---
@@ -131,9 +131,9 @@ KV 是动态张量：量化必须把反量化融进注意力核（fused dequant 
 | chunked prefill | 长 prefill 阻塞 decode | 切块与 decode 混批 | 中 |
 | continuous batching | 吞吐 / GPU 占用 | 每步迭代换出完成请求、补入新请求 | 中（受并发上限约束） |
 | LMCache / Mooncake | KV 复用与分离式服务 | KV 落 CPU/NVMe 跨请求复用 | 中（需宿主引擎配合） |
-| 分层 KV offload | 容量 | GPU HBM / CPU RAM / NVMe 三级 | 高（本机主线） |
+| 分层 KV offload | 容量 | GPU HBM / CPU RAM / NVMe 三级 | 高（环境2 主线） |
 
-边界：continuous batching 提升的是吞吐与占用率，不降单请求延迟；batch 变大才使 decode 从 GEMV（带宽瓶颈）转向 GEMM（算力瓶颈）——这正是服务端划算、本机 4–8 并发体感有限的原因。
+边界：continuous batching 提升的是吞吐与占用率，不降单请求延迟；batch 变大才使 decode 从 GEMV（带宽瓶颈）转向 GEMM（算力瓶颈）——这正是服务端划算、环境2 4–8 并发体感有限的原因。
 
 ### 5.1 上下文复用：三条实现路线（[官方]）
 
@@ -145,7 +145,7 @@ KV 是动态张量：量化必须把反量化融进注意力核（fused dequant 
 | 基数树前缀 | SGLang RadixAttention | token 级前缀树节点 | 树节点共享 | 自动、跨请求 | 需维护基数树与树的淘汰 |
 | 检查点 + 槽位 + 停车 | Strata | 检查点（每轮 / 每 16K token，约 118 MB × 最多 6） | 逐 token（含图片）完全匹配才能用 | ① 槽位 = 对话级；② system-root 检查点被同客户端所有对话共享；③ parking 可跨 stage 恢复 | 默认关（`--conversation-cache-mib 0`）；只认精确前缀；一次 1 个 pinned prefix |
 
-读数：vLLM 是「内容寻址、块粒度、全自动」，Strata 是「检查点/会话级、token 精确、半手动」。前者在多租户 / 共享前缀的高并发服务里更通用；后者在单机 agent 多轮里省的是「重读十几万 token 的历史」，收益同样巨大。本机一手 `reused ≈85%`（见 [01-strata-engine.md](01-strata-engine.md) §7.1）就是这个红利的直接体现。
+读数：vLLM 是「内容寻址、块粒度、全自动」，Strata 是「检查点/会话级、token 精确、半手动」。前者在多租户 / 共享前缀的高并发服务里更通用；后者在单机 agent 多轮里省的是「重读十几万 token 的历史」，收益同样巨大。环境2 实测 `reused ≈85%`（见 [01-strata-engine.md](01-strata-engine.md) §7.1）就是这个红利的直接体现。
 
 ---
 
@@ -154,7 +154,7 @@ KV 是动态张量：量化必须把反量化融进注意力核（fused dequant 
 | 方案 | 机制 | 关键差异 |
 |------|------|---------|
 | llama.cpp offload | 按层把权重经 PCIe 搬回 GPU 再算 | 每层都在等搬运；对 MoE 无命中率概念 |
-| KTransformers | 专家级卸载 + NUMA 感知 + AMX/AVX512 内核 | 性能强依赖 AMX/AVX512；本机 Arrow Lake 两者都没有 |
+| KTransformers | 专家级卸载 + NUMA 感知 + AMX/AVX512 内核 | 性能强依赖 AMX/AVX512；环境2 的 Arrow Lake 两者都没有 |
 | Fiddler / Mixtral-Inference offload / HetuMoE | 学术界的专家放置/卸载 | 提供「同类机制已发表」的佐证 |
 | Strata | 专家 pinned 在 RAM，未命中就地 CPU 算，与 GPU 并行 | 把 PCIe 从关键路径摘掉；CPU 算力成新上限 |
 
@@ -165,9 +165,9 @@ KV 是动态张量：量化必须把反量化融进注意力核（fused dequant 
 ## 7. CPU / 异构内核（对象 = 主机侧算力）
 
 - 指令集是关键前提：AMX / AVX-512 才有高性能 CPU 侧 GEMM；只有 AVX2 时吞吐显著下降。
-- 本机现实：Core Ultra 9 285K 属 Arrow Lake 桌面，无 AVX-512 / AMX（[硬件规格] 硬件规格）→ CPU 侧只能走 AVX2，与「仅 AVX2 的老 Xeon」同档。
-- 含义：本机 CPU 侧是「可用的第二算力」，但不是「免费的算力」——设计上要限制 CPU 承担的比例，并优先让 GPU 算热专家。
-- NUMA 感知在大内存多路平台上重要；本机单路桌面，影响小。
+- 环境2 现实：Core Ultra 9 285K 属 Arrow Lake 桌面，无 AVX-512 / AMX（[硬件规格] 硬件规格）→ CPU 侧只能走 AVX2，与「仅 AVX2 的老 Xeon」同档。
+- 含义：环境2 CPU 侧是「可用的第二算力」，但不是「免费的算力」——设计上要限制 CPU 承担的比例，并优先让 GPU 算热专家。
+- NUMA 感知在大内存多路平台上重要；环境2 单路桌面，影响小。
 
 ---
 
@@ -181,24 +181,24 @@ KV 是动态张量：量化必须把反量化融进注意力核（fused dequant 
 
 ---
 
-## 9. 汇总矩阵：技术 × 作用瓶颈 × 本机优先级
+## 9. 汇总矩阵：技术 × 作用瓶颈 × 环境2 优先级
 
 | 技术 | 作用瓶颈 | 单/多卡 | 本项目优先级 |
 |------|---------|--------|------------|
-| NVFP4 权重量化 | 容量 + 带宽 | 单卡 | 高（本机原生加速） |
+| NVFP4 权重量化 | 容量 + 带宽 | 单卡 | 高（环境2 原生加速） |
 | 三值权重量化 | 容量 | 单卡 | 中（需 LUT 核，有损工具调用） |
 | KV 量化 FP8 | 容量 + KV 带宽 | 单卡 | 高（低风险首选） |
 | KV 量化 4-bit | 容量 + KV 带宽 | 单卡 | 高（256K×并发） |
-| KV 量化 3-bit（TurboQuant 类） | 容量 + KV 带宽 | 单卡 | 中（待融合核 + 本机标定） |
+| KV 量化 3-bit（TurboQuant 类） | 容量 + KV 带宽 | 单卡 | 中（待融合核 + 环境2 标定） |
 | 稀疏 KV 检索（Quest 类） | KV 读带宽 | 单卡 | 低（QSA 已内置） |
 | 投机解码（MTP / DFlash2） | 带宽（降延迟） | 单卡 | 高（MoE 卸载场景必选） |
 | PagedAttention | KV 显存利用率 | 单卡 | 高 |
 | 前缀缓存（Radix） | 重复 prefill | 单卡 | 高（agent 多轮） |
-| 分层 offload（专家/KV） | 容量不足 | 单卡 → CPU/SSD | 最高（本机唯一可行主线） |
+| 分层 offload（专家/KV） | 容量不足 | 单卡 → CPU/SSD | 最高（环境2 唯一可行主线） |
 | continuous batching | 吞吐 | 单/多卡 | 中 |
 | FlashAttention | attention 带宽/往返 | 单卡 | 中 |
 | CUDA Graph | launch 开销 | 单卡 | 低 |
-| 激活量化 W8A8 | 算力（batch>1） | 单卡 | 低（本机带宽瓶颈） |
+| 激活量化 W8A8 | 算力（batch>1） | 单卡 | 低（环境2 带宽瓶颈） |
 
 ---
 

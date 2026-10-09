@@ -29,7 +29,7 @@
 - 两个算力单元真正并行。
 
 负面
-- CPU 算力成为新上限：本机 Arrow Lake 无 AVX-512/AMX，只能走 AVX2 → 未命中比例不能太高。
+- CPU 算力成为新上限：环境2 的 Arrow Lake 无 AVX-512/AMX，只能走 AVX2 → 未命中比例不能太高。
 - 需要良好的线程分池（P-core / E-core）与量化 GEMM 内核。
 
 ## 与本项目的关联
