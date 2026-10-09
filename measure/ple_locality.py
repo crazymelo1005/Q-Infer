@@ -302,10 +302,41 @@ def read_sequences(path: Path) -> list:
     return sequences
 
 
+def emit_vectors(n_cases: int) -> int:
+    """生成哈希回归向量（token 序列 -> 每个位置的 16 个行索引），供 C++ 实现对照。
+
+    本实现已与参考引擎自带的 6 组 oracle 向量逐位比对通过（见 selftest），故它生成的就是可信 oracle。
+    """
+    rng = 0x9E3779B97F4A7C15
+
+    def nxt(mod):
+        nonlocal rng
+        rng ^= (rng << 13) & MASK64
+        rng ^= rng >> 7
+        rng ^= (rng << 17) & MASK64
+        return rng % mod
+
+    for c in range(n_cases):
+        n = 3 + c % 4
+        seq = [nxt(250000) for _ in range(n)]
+        # 混入几个边界：EOS 本身、token 0、以及序列开头缺前序
+        if c % 3 == 1:
+            seq[0] = PLE_EOS_TOKEN_ID
+        if c % 3 == 2:
+            seq[-1] = 0
+        rows = ngram_rows(seq, build_prev(seq))
+        print("  // case %d: %d tokens" % (c, n))
+        print("  {std::vector<std::int32_t>{%s}," % ", ".join(str(t) for t in seq))
+        print("   std::vector<std::uint32_t>{%s}}," % ", ".join(str(r) for r in rows))
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tokens", help="token id 序列文件（空白分隔；空行=序列边界）")
     ap.add_argument("--selftest", action="store_true", help="与参考引擎的 oracle 向量逐位比对")
+    ap.add_argument("--emit-vectors", type=int, default=0, metavar="N",
+                    help="生成 N 组哈希回归向量（token 序列 + 期望的 16 个行索引），供 C++ 实现对照")
     ap.add_argument("--env", default="环境2")
     ap.add_argument("--out-dir", default="measure/results")
     ap.add_argument("--cache-sizes", default="0,65536,262144,1048576,4194304",
@@ -315,6 +346,8 @@ def main() -> int:
 
     if args.selftest:
         return selftest()
+    if args.emit_vectors:
+        return emit_vectors(args.emit_vectors)
 
     if not args.tokens:
         ap.error("需要 --tokens 或 --selftest")

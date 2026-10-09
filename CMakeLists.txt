@@ -11,6 +11,7 @@ endif()
 
 add_library(qinfer_storage
   src/storage/page_table.cpp
+  src/storage/row_cache.cpp
 )
 target_include_directories(qinfer_storage PUBLIC src)
 
@@ -21,6 +22,8 @@ target_include_directories(qinfer_scheduling PUBLIC src)
 
 add_library(qinfer_kernels
   src/kernels/iq4nl.cpp
+  src/kernels/ngram.cpp
+  src/kernels/ple_gather.cpp
 )
 target_include_directories(qinfer_kernels PUBLIC src)
 
@@ -35,7 +38,19 @@ target_link_libraries(test_budget_arbiter PRIVATE qinfer_scheduling)
 add_executable(test_iq4nl tests/test_iq4nl.cpp)
 target_link_libraries(test_iq4nl PRIVATE qinfer_kernels)
 
+add_executable(test_ngram tests/test_ngram.cpp)
+target_link_libraries(test_ngram PRIVATE qinfer_kernels)
+
+add_executable(test_row_cache tests/test_row_cache.cpp)
+target_link_libraries(test_row_cache PRIVATE qinfer_storage)
+
+add_executable(test_ple_read_path tests/test_ple_read_path.cpp)
+target_link_libraries(test_ple_read_path PRIVATE qinfer_storage qinfer_scheduling qinfer_kernels)
+
 enable_testing()
 add_test(NAME page_table COMMAND test_page_table)
 add_test(NAME budget_arbiter COMMAND test_budget_arbiter)
 add_test(NAME iq4nl COMMAND test_iq4nl)
+add_test(NAME ngram COMMAND test_ngram)
+add_test(NAME row_cache COMMAND test_row_cache)
+add_test(NAME ple_read_path COMMAND test_ple_read_path)
