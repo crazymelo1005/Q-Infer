@@ -1,0 +1,20 @@
+{
+  "provenance": "由 measure/gguf_meta.py 在环境2 上直读模型文件头产生（经 ssh 从环境1 调用，未经第三方库）。命名只精确到日期，未记录精确时刻。",
+  "command": "ssh crazymelo@192.168.68.102 \"python3 - --model <ple-shard>.gguf --json --tensors\" < measure/gguf_meta.py",
+  "measure": "n-gram 表分片的形状（GGUF 元数据 + 张量维度）",
+  "env": "环境2",
+  "file": "Qwen3.8-Flash-Next-GSQ-RCO-abliterated-IQ2_XS-00002-of-00002.gguf",
+  "size_bytes": 28800138432,
+  "gguf_version": 3,
+  "tensor_count": 1,
+  "kv_count": 3,
+  "kv_selected": {
+    "split.no": 1,
+    "split.count": 2,
+    "split.tensors.count": 1224
+  },
+  "tensors": [
+    { "name": "per_layer_token_embd.weight", "dims": [160, 320001536], "elements": 51200245760, "type_id": 20 }
+  ],
+  "note": "整个 26.8 GiB 分片只有这一个张量：512 亿参数、行宽 160（与 embedding_length_per_layer_input 一致）。按 28.8 GB 文件大小折算约 4 bit/权重，与台账的「4-bit ≈28.8GB」吻合，而非 FP8 档。表是独立文件、单一连续张量，行可直接按偏移寻址——对 §4.2 的表行预取是干净边界。"
+}

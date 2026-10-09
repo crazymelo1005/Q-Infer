@@ -8,7 +8,7 @@
 
 | 标记 | 含义 |
 |------|------|
-| [环境2实测] | 在环境2 上读自运行中的引擎 API，或在其上跑本地 benchmark |
+| [环境2实测] | 在环境2 上读自运行中的引擎 API、本地 benchmark，或直接读取其上的模型与配置文件 |
 | [环境1实测] | 在本机（环境1）上同口径取得。其平台是 Windows 宿主内的 WSL2，引用时必须写明测在 WSL 内还是 Windows 宿主上 |
 | [硬件规格] | 厂商规格页，是上限而非实测 |
 | [官方] | 模型、引擎的官方发布页、官方文档或论文 |
@@ -59,6 +59,7 @@
 | S-30 | [摘要级] | [摘要级] | 学习专家使用模式的缓存项目 colibri（项目页） | 2026-10-09 | design/proposals |
 | S-31 | [硬件规格] | [已确认] | Intel ARK 与 NVIDIA 官方规格页（CPU、GPU、内存、存储） | 2026-10 | hardware.md |
 | S-32 | [官方] | [已确认] | 板卡厂商规格页：RTX 5060 Ti 的总线接口写作「PCI Express Gen 5 x16 (uses x8)」，即电气宽度为 x8，https://www.msi.cn/Graphics-Card/GeForce-RTX-5060-Ti-16G-GAMING-OC/Specification | 2026-10-09 | hardware.md、requirements.md、gates.md |
+| S-33 | [环境2实测] | [已确认] | 模型 GGUF 元数据（由 `measure/gguf_meta.py` 直读文件头，不经第三方库）：`general.architecture=qwen4exp`；主注意力 `head_count` 24 / `head_count_kv` 2 / `key_length` 256 / `value_length` 256 / `embedding_length` 2560；索引器 4×128、`top_k` 2048；`expert_count` 512、`expert_used_count` 10、`block_count` 48、`compress_ratios` 12 个 4；表张量 `per_layer_token_embd.weight` dims [160, 320001536] | 2026-10-09 | research/02、gates.md |
 
 ## 4. 登记规则
 

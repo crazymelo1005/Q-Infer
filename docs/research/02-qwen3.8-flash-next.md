@@ -17,7 +17,9 @@
 | 外挂 | 51B N-gram 嵌入表 + 4B MTP 头 | [已确认] |
 | 部署口径 | 常写作约 176B | [官方] |
 | 层数 | 48 层 | [官方] |
-| MoE | 每层 512 专家 → 共约 24,576 专家，top-10 路由 | [官方] |
+| MoE | 每层 512 专家（GGUF 元数据 `expert_count`）→ × 48 层 = 24,576；每 token top-10，`expert_feed_forward_length` 640 | [环境2实测] |
+| 架构标识 | `qwen4exp`（GGUF `general.architecture`，与上游 llama.cpp 的 `qwen4exp` 分支同名） | [环境2实测] |
+| 实际部署的实例 | 社区量化 `GSQ-RCO-abliterated` 的 IQ2_XS 版本（不是官方检查点）：主权重分片 37 GiB + 表分片 26.8 GiB（4-bit）+ 视觉 mmproj 866 MiB | [环境2实测] |
 | 上下文 | 原生 262,144，YaRN 可扩至 1,000,000 | [已确认] |
 | 模态 | 文本 / 图像 / 视频（带 vision encoder） | [官方] |
 | 协议 | qwen-community-1.0（非 Apache） | [官方] |
@@ -84,27 +86,31 @@
 - 拉高并发则两条一起涨。vLLM 上 `--max-num-seqs` 一调大就报 Mamba-cache capacity error，就是第一种撞墙。
 - 索引器的 KV 也可量化：vLLM 官方配置除 `--kv-cache-dtype fp8` 外还要 `--attention-config.indexer_kv_dtype fp8`——即 QSA「挑块打分」用的那份表示单独还有一个精度旋钮。
 
-### 3.1 索引器与稀疏注意力的几何（[摘要级]）
+### 3.1 索引器与稀疏注意力的几何
 
-> 来源：CSDN 部署实战文（[摘要级] 二手）+ hyper.ai 论文页（[摘要级]）。主注意力的头数 / head_dim / hidden_size 仍未取到（HF `Qwen/Qwen3.8-Flash-Next` 的 config.json 当前不可达）→ 这三项仍是台账缺口。
+主注意力与索引器的几何现已直接从 GGUF 元数据取到（无需 HuggingFace 的 `config.json`）[S-33]：
 
-| 项 | 值 |
-|----|----|
-| QSA 索引器头 | 4 个 128 维 query 头 + 1 个共享 key 头（MQA 式） |
-| 块压缩 | 4 token → 1 条压缩 key（FP32 平均池化，取首 token 的 MRoPE） |
-| 索引缓存 | 每 4 token 存 1 条 BF16 压缩 key；未完成块的原始 key 放 4 槽环形缓冲；开销 ↓ 约 80% |
-| 打分范围 | 扫描约 L/4 个压缩块 → 选 top-512 块 → 展开到 2048 个 token 位置（+0–3 尾）→ 单次最大 2051 位置 |
-| 存增长的 K/V 的层 | 仅 12 层 QSA（36 层 GDN 为固定状态） |
-| N-gram 表 | 51.2B 参数、BF16 约 95.4 GiB；8 个 2-gram + 8 个 3-gram 哈希头；查 16 行 → 2560 维向量 |
+| 项 | 值 | 来源 |
+|----|----|------|
+| 主注意力 | `head_count` 24、`head_count_kv` 2（GQA 24:2）、`key_length` 256、`value_length` 256（即 head_dim 256）、`embedding_length` 2560 | [环境2实测] |
+| RoPE | `dimension_count` 64、`dimension_sections` [11, 11, 10, 0]、`freq_base` 1e7 | [环境2实测] |
+| QSA 层与压缩比 | `attention.compress_ratios` 48 项，每 4 层出现一个 4 → 恰好 12 层 QSA、压缩比 4（其余 0，即 GDN 层） | [环境2实测] |
+| 索引器 | `head_count` 4、`key_length` 128、`top_k` 2048 | [环境2实测] |
+| 块压缩（二手口径） | 4 token → 1 条压缩 key；索引缓存每 4 token 存 1 条 BF16 key；未完成块走 4 槽环形缓冲 | [摘要级] |
+| N-gram 表 | 独立分片中的单个张量 `per_layer_token_embd.weight`，dims = [160, 320,001,536] → 512 亿参数，4-bit 约 28.8 GB；行宽 160 与 `embedding_length_per_layer_input` 一致 | [环境2实测] |
 
-由此给 G-12 一个可算的输入（[推算] 推算，待实测）：262K 上下文下，索引器的稠密扫描每 token 读字节 ≈ `(262144 ÷ 4) × 128 维 × 字节 × 12 层`：
+一处口径待核：二手来源称「选 top-512 块 → 展开到 2048 个 token 位置」，而元数据里的 `indexer.top_k` 是 2048——两者可能分别是「块」与「token 位置」两个口径，也可能二手数字有误。引用时须注明是哪个口径。
+
+由此给 G-12 一个可算的输入（[推算]，几何为实测）：262K 上下文下，索引器的稠密扫描每 token 读字节 ≈ `(262144 ÷ 4) × 128 维 × 字节 × 12 层`：
 
 | 索引器 KV 精度 | 每 token 扫描字节 |
 |---|---|
 | BF16（上游默认） | ≈ 192 MiB |
 | FP8 / int8 | ≈ 96 MiB |
 
-→ 对照每 token 激活权重读（IQ2_XS ≈1.8 GB），索引器扫描约为其 5–11%（96 MiB/1.8 GB≈5.6%、192 MiB/1.8 GB≈11.2%）：不主导、但不可忽略（A2 的担心方向成立，量级待实测校准）。
+对照每 token 激活权重读（IQ2_XS ≈1.8 GB），索引器扫描约为其 5–11%：不主导、但不可忽略。
+
+但真正决定 A2 成立与否的不是字节量，而是这 192 MiB 从哪里读：全部 12 层的索引键合计约 192 MiB，本可常驻显存；若实现上不常驻、要走 PCIe，则按实测单向带宽 26.6 GB/s 折算约 7.4 ms/token，而实测步长约 11.6 ms（86 tok/s）——那样它就主导了。因此「瓶颈不在带宽」这一条的正确验证方式是索引键的驻留率（读 `kv_resident` 与 `pcie_share`），而不是只算字节量。见 `design/gates.md` 的 G-12。
 
 ---
 

@@ -27,7 +27,7 @@
 | `docs/research/` | 事实台账（是什么） |
 | [research/references.md](docs/research/references.md) | 全部出处，按编号登记 |
 | [scripts/docs_checks.py](scripts/docs_checks.py) 与 [.github/workflows/docs-check.yml](.github/workflows/docs-check.yml) | 规范自检：把第 2、3、4 节的规则变成可执行检查（非文档） |
-| [measure/](measure/) | 测量工具与原始结果：机器画像、PCIe 档位与带宽、内存带宽（非文档） |
+| [measure/](measure/) | 测量工具与原始结果：机器画像、PCIe 档位与带宽、内存带宽、GGUF 元数据读取（非文档） |
 
 分层规则：`research/` 不得引用 `design/`；`design/` 的关键论断必须能回指 `research/` 或 [hardware.md](docs/hardware.md)。
 
@@ -170,7 +170,8 @@ S-<n> | 等级 | 复核状态 | 来源（URL 或文档路径） | 引用日期
 - `python3 measure/env_profile.py`：记录机器画像。它是一切测量的记账载体，测量前先跑。
 - `python3 measure/pcie_link.py [--watch 秒数]`：读 PCIe 链路档位。加 `--watch` 可在同时施加负载时观察档位是否变化。
 - `python3 measure/mem_bw.py [--size-mb 256] [--procs 8] [--seconds 0.6] [--repeats 5]`：测内存带宽。聚合口径是「各进程屏障同步后在同一时间窗内搬运的字节之和除以时间窗」；不得用各进程中位数相加，那样在进程启动不同步时会虚高，甚至超过内存理论峰值。
-- `nvcc -O2 -o build/pcie_bw measure/pcie_bw.cu && ./build/pcie_bw --repeats 5 --out-dir measure/results`：测 PCIe 有效带宽。产物写在 `build/`，该目录已在 `.gitignore` 中，不入库。`--hold 秒数` 会保持链路流量，便于同时用 `pcie_link.py` 观察宽度是否变化。
+- `nvcc -O2 -o build/pcie_bw measure/pcie_bw.cu && ./build/pcie_bw --repeats 5 --out-dir measure/results`：测 PCIe 有效带宽。产物写在 `build/`，该目录已在 `.gitignore` 中，不入库。`--hold 秒数` 会保持链路流量，便于同时用 `pcie_link.py` 观察宽度与代数是否变化。注意链路**代数会随负载降档**（空闲可低至 gen1），因此"当前档位"必须在持续负载下才可引用。
+- `python3 measure/gguf_meta.py --model <file.gguf> [--tensors] [--all]`：直读 GGUF 元数据与张力维度，用于取模型几何（头数、维度、层数、专家数、表形状），不必依赖 HuggingFace 的 `config.json`。零依赖，可经 `ssh host "python3 - --model …" < measure/gguf_meta.py` 在远端的模型文件上直接运行。
 
 测量结果的存放：原始记录写入 `measure/results/<时间戳>-<测点>-<平台>.json`（Python 脚本与 CUDA 程序都自己落盘）；摘要回填 [docs/design/gates.md](docs/design/gates.md) 的实测记录列，以及 [docs/hardware.md](docs/hardware.md) 的实测值表。每条数值必须标注平台：环境1-WSL、环境1-Windows 或环境2。两套环境对比时必须使用同一份脚本与同一组参数。
 
