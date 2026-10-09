@@ -31,6 +31,8 @@
 | [`design/adr/ADR-005`](design/adr/ADR-005-igpu-npu-as-coprocessor.md) | 核显与 NPU：是否参与专家计算 | 接受（条件性：G-07） |
 | [`design/adr/ADR-006`](design/adr/ADR-006-precision-policy-nvfp4-fp8-kv.md) | 精度：权重、KV 与索引器的档位选择 | 接受 |
 | [`design/adr/ADR-007`](design/adr/ADR-007-ngram-table-on-demand-read.md) | 表行访问：预取还是按需读 | 接受（取代 ADR-003） |
+| [`design/adr/ADR-008`](design/adr/ADR-008-implementation-stack-and-kernel-reuse.md) | 实现栈、内核复用口径与许可 | 接受 |
+| [`design/adr/ADR-009`](design/adr/ADR-009-correctness-acceptance-criteria.md) | 正确性验收：逐位还是分布级 | 接受 |
 | [glossary.md](glossary.md) | 术语的唯一口径 | 完成 |
 | [hardware.md](hardware.md) | 两套测试环境的硬件规格 | 完成 |
 | [research/01-strata-engine.md](research/01-strata-engine.md) | 参考范本引擎的原理与边界 | 完成 |
