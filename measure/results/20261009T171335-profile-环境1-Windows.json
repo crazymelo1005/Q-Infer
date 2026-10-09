@@ -1,0 +1,27 @@
+{
+  "measured_at": "2026-10-09T17:13:35+08:00",
+  "env": "环境1-Windows",
+  "hostname": "DESKTOP-P7AC2PN",
+  "os": "Windows 11 10.0.26300",
+  "cpu": {
+    "model": "Intel(R) Core(TM) Ultra 7 265K",
+    "cores": 20
+  },
+  "mem_total_gib": 47.4,
+  "gpus": [
+    {
+      "name": "NVIDIA GeForce RTX 5060 Ti",
+      "vram_mib": "16311 MiB",
+      "driver": "617.14",
+      "pcie_gen_max": "5",
+      "pcie_gen_current": "5",
+      "pcie_width_max": "16",
+      "pcie_width_current": "8"
+    }
+  ],
+  "python": "3.12.7",
+  "numpy": "2.4.4",
+  "cuda": "Build cuda_12.8.r12.8/compiler.35583870_0",
+  "repo_rev": "7658713",
+  "note": ""
+}

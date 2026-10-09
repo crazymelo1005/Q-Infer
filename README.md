@@ -81,6 +81,7 @@ API / 调度层        OpenAI 兼容接口 · 批调度 · 前缀缓存 · 指�
 ├── CONTRIBUTING.md
 ├── LICENSE
 ├── scripts/docs_checks.py             规范自检（CI 与本地共用）
+├── measure/                           测量工具与原始结果
 ├── .github/workflows/docs-check.yml   推送与 PR 时执行自检
 └── docs/
     ├── README.md             文档地图

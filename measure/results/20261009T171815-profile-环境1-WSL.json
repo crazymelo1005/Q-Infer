@@ -1,0 +1,27 @@
+{
+  "measured_at": "2026-10-09T17:18:15+08:00",
+  "env": "环境1-WSL",
+  "hostname": "DESKTOP-P7AC2PN",
+  "os": "Linux 6.6.87.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun  5 18:30:46 UTC 2025",
+  "cpu": {
+    "model": "Intel(R) Core(TM) Ultra 7 265K",
+    "cores": 20
+  },
+  "mem_total_gib": 15.6,
+  "gpus": [
+    {
+      "name": "NVIDIA GeForce RTX 5060 Ti",
+      "vram_mib": "16311 MiB",
+      "driver": "617.14",
+      "pcie_gen_max": "5",
+      "pcie_gen_current": "5",
+      "pcie_width_max": "16",
+      "pcie_width_current": "8"
+    }
+  ],
+  "python": "3.12.3",
+  "numpy": "2.3.5",
+  "cuda": "13.3.0",
+  "repo_rev": "7658713",
+  "note": ""
+}
