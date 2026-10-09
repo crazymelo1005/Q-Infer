@@ -1,0 +1,15 @@
+{
+  "provenance": "转录自操作者在环境2 上的控制台输出（2026-10-09）。原始 JSON 位于该机 /tmp/q-infer-measure/measure/results/，未回传；本文件为忠实转录，非原始文件。",
+  "measured_at": "2026-10-09T17:35:37",
+  "measure": "G-01 PCIe 链路档位",
+  "env": "环境2",
+  "watch_seconds": 10,
+  "samples": [
+    { "t": "2026-10-09T17:35:37", "gpus": [
+      { "name": "NVIDIA GeForce RTX 5060 Ti", "vram_mib": "16311 MiB", "driver": "595.99.02", "gen_max": "5", "gen_current": "5", "width_max": "8", "width_current": "8" },
+      { "name": "NVIDIA GeForce RTX 5060 Ti", "vram_mib": "16311 MiB", "driver": "595.99.02", "gen_max": "5", "gen_current": "5", "width_max": "8", "width_current": "8" }
+    ]}
+  ],
+  "changed_during_watch": false,
+  "note": "10 秒内共采样 22 次，两卡均为 gen5 x8 且未变。原始输出逐行重复同一行，此处压缩为一次采样记录。"
+}

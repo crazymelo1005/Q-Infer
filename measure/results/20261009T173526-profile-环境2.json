@@ -1,0 +1,18 @@
+{
+  "provenance": "转录自操作者在环境2 上的控制台输出（2026-10-09）。原始 JSON 位于该机 /tmp/q-infer-measure/measure/results/，未回传；本文件为忠实转录，非原始文件。",
+  "measured_at": "2026-10-09T17:35:26",
+  "env": "环境2",
+  "hostname": "crazymelo-Ubuntu",
+  "os": "Linux 7.0.0-38-generic (原生 Ubuntu)",
+  "cpu": { "model": "Intel(R) Core(TM) Ultra 9 285K", "cores": 24 },
+  "mem_total_gib": 61.0,
+  "gpus": [
+    { "name": "NVIDIA GeForce RTX 5060 Ti", "vram_mib": "16311 MiB", "driver": "595.99.02", "pcie_gen_max": "5", "pcie_gen_current": "5", "pcie_width_max": "8", "pcie_width_current": "8" },
+    { "name": "NVIDIA GeForce RTX 5060 Ti", "vram_mib": "16311 MiB", "driver": "595.99.02", "pcie_gen_max": "5", "pcie_gen_current": "5", "pcie_width_max": "8", "pcie_width_current": "8" }
+  ],
+  "python": "未记录",
+  "numpy": "2.3.5",
+  "cuda": "13.2.20260623",
+  "repo_rev": "69c22f5",
+  "note": "两卡的 pcie.width.max 报 8；环境1（驱动 617.14）报 16——同一型号显卡、不同平台报告不同，印证 width.max 是槽位或平台口径，不是显卡电气宽度。"
+}

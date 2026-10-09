@@ -1,0 +1,12 @@
+{
+  "provenance": "转录自操作者在环境2 上的控制台输出（2026-10-09）。原始 JSON 位于该机 /tmp/q-infer-measure/measure/results/，未回传；本文件为忠实转录，非原始文件。",
+  "measured_at": "2026-10-09T17:36:10",
+  "measure": "G-02 主机内存有效带宽",
+  "env": "环境2",
+  "config": { "size_mib_per_array": 256, "procs": 8, "seconds": 0.6, "repeats": 5 },
+  "result_gbps": {
+    "copy_gbps": { "median": 60.8, "min": 50.1, "max": 64.4, "all": [55.5, 61.7, 60.8, 50.1, 64.4] },
+    "triad_gbps": { "median": 42.9, "min": 40.3, "max": 42.9, "all": [42.9, 42.9, 42.9, 40.3, 42.9] }
+  },
+  "note": "与环境1 用同一脚本、同一组参数。理论峰值 70.4 GB/s（DDR5-4400 双通道）。测量时引擎是否在服务未记录——若在服务，数值可能偏低、两侧比值会被高估。"
+}
