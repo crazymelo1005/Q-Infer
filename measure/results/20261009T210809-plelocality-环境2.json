@@ -1,0 +1,169 @@
+{
+  "measured_at": "2026-10-09T21:08:09+08:00",
+  "measure": "G-04 记忆表行的访问局部性（离线重放）",
+  "env": "环境2",
+  "host_independent": true,
+  "method": "用参考引擎的 n-gram 哈希重放表行索引；哈希经 oracle 向量逐位校验",
+  "config": {
+    "tokens_file": "/home/crazymelo/qinfer-g04/haystack-262k.ids",
+    "cache_sizes_rows": [
+      0,
+      65536,
+      262144,
+      1048576,
+      4194304
+    ],
+    "row_bytes": 90,
+    "page_bytes": 4096
+  },
+  "result": {
+    "n_tokens": 262144,
+    "n_sequences": 1,
+    "n_requests": 4194304,
+    "requests_per_token": 16,
+    "distinct_rows": 1704915,
+    "row_repeat_rate": 0.5935165882110596,
+    "distinct_pages_4k": 1502859,
+    "page_repeat_rate": 0.6416904926300049,
+    "same_page_consecutive_rate": 0.0,
+    "first_touch_same_page_rate": 0.0,
+    "io_bytes_per_token": 1440,
+    "distinct_rows_share_of_table": 0.005327833801397753,
+    "per_head": [
+      {
+        "head": 0,
+        "is_trigram": false,
+        "space_rows": 20000003,
+        "requests": 262144,
+        "distinct_rows": 74071
+      },
+      {
+        "head": 1,
+        "is_trigram": false,
+        "space_rows": 20000023,
+        "requests": 262144,
+        "distinct_rows": 74078
+      },
+      {
+        "head": 2,
+        "is_trigram": false,
+        "space_rows": 20000033,
+        "requests": 262144,
+        "distinct_rows": 74090
+      },
+      {
+        "head": 3,
+        "is_trigram": false,
+        "space_rows": 20000047,
+        "requests": 262144,
+        "distinct_rows": 74068
+      },
+      {
+        "head": 4,
+        "is_trigram": false,
+        "space_rows": 20000059,
+        "requests": 262144,
+        "distinct_rows": 74091
+      },
+      {
+        "head": 5,
+        "is_trigram": false,
+        "space_rows": 20000063,
+        "requests": 262144,
+        "distinct_rows": 74075
+      },
+      {
+        "head": 6,
+        "is_trigram": false,
+        "space_rows": 20000069,
+        "requests": 262144,
+        "distinct_rows": 74058
+      },
+      {
+        "head": 7,
+        "is_trigram": false,
+        "space_rows": 20000077,
+        "requests": 262144,
+        "distinct_rows": 74061
+      },
+      {
+        "head": 8,
+        "is_trigram": true,
+        "space_rows": 20000081,
+        "requests": 262144,
+        "distinct_rows": 139030
+      },
+      {
+        "head": 9,
+        "is_trigram": true,
+        "space_rows": 20000093,
+        "requests": 262144,
+        "distinct_rows": 139048
+      },
+      {
+        "head": 10,
+        "is_trigram": true,
+        "space_rows": 20000107,
+        "requests": 262144,
+        "distinct_rows": 139019
+      },
+      {
+        "head": 11,
+        "is_trigram": true,
+        "space_rows": 20000147,
+        "requests": 262144,
+        "distinct_rows": 139041
+      },
+      {
+        "head": 12,
+        "is_trigram": true,
+        "space_rows": 20000153,
+        "requests": 262144,
+        "distinct_rows": 139023
+      },
+      {
+        "head": 13,
+        "is_trigram": true,
+        "space_rows": 20000159,
+        "requests": 262144,
+        "distinct_rows": 139070
+      },
+      {
+        "head": 14,
+        "is_trigram": true,
+        "space_rows": 20000161,
+        "requests": 262144,
+        "distinct_rows": 139036
+      },
+      {
+        "head": 15,
+        "is_trigram": true,
+        "space_rows": 20000171,
+        "requests": 262144,
+        "distinct_rows": 139056
+      }
+    ],
+    "reuse_distance": {
+      "repeats": 2489389,
+      "p10": 336,
+      "p50": 10240,
+      "p90": 521744,
+      "p99": 1938464,
+      "max": 4141440,
+      "frac_within_window": {
+        "1": 0.0,
+        "16": 0.0013690106287125073,
+        "64": 0.010595370992641167,
+        "256": 0.0790037234036143,
+        "4096": 0.38932565380501
+      }
+    },
+    "engine_row_cache_hit_rate": {
+      "0": 0.0,
+      "65536": 0.4204862117767334,
+      "262144": 0.5069892406463623,
+      "1048576": 0.5778336524963379,
+      "4194304": 0.5934634208679199
+    }
+  }
+}

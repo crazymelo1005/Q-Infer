@@ -1,0 +1,169 @@
+{
+  "measured_at": "2026-10-09T21:08:02+08:00",
+  "measure": "G-04 记忆表行的访问局部性（离线重放）",
+  "env": "环境2",
+  "host_independent": true,
+  "method": "用参考引擎的 n-gram 哈希重放表行索引；哈希经 oracle 向量逐位校验",
+  "config": {
+    "tokens_file": "/home/crazymelo/qinfer-g04/haystack-32k.ids",
+    "cache_sizes_rows": [
+      0,
+      65536,
+      262144,
+      1048576,
+      4194304
+    ],
+    "row_bytes": 90,
+    "page_bytes": 4096
+  },
+  "result": {
+    "n_tokens": 32768,
+    "n_sequences": 1,
+    "n_requests": 524288,
+    "requests_per_token": 16,
+    "distinct_rows": 303857,
+    "row_repeat_rate": 0.4204387664794922,
+    "distinct_pages_4k": 297197,
+    "page_repeat_rate": 0.43314170837402344,
+    "same_page_consecutive_rate": 0.0,
+    "first_touch_same_page_rate": 0.0,
+    "io_bytes_per_token": 1440,
+    "distinct_rows_share_of_table": 0.0009495485671668776,
+    "per_head": [
+      {
+        "head": 0,
+        "is_trigram": false,
+        "space_rows": 20000003,
+        "requests": 32768,
+        "distinct_rows": 14830
+      },
+      {
+        "head": 1,
+        "is_trigram": false,
+        "space_rows": 20000023,
+        "requests": 32768,
+        "distinct_rows": 14828
+      },
+      {
+        "head": 2,
+        "is_trigram": false,
+        "space_rows": 20000033,
+        "requests": 32768,
+        "distinct_rows": 14828
+      },
+      {
+        "head": 3,
+        "is_trigram": false,
+        "space_rows": 20000047,
+        "requests": 32768,
+        "distinct_rows": 14830
+      },
+      {
+        "head": 4,
+        "is_trigram": false,
+        "space_rows": 20000059,
+        "requests": 32768,
+        "distinct_rows": 14833
+      },
+      {
+        "head": 5,
+        "is_trigram": false,
+        "space_rows": 20000063,
+        "requests": 32768,
+        "distinct_rows": 14829
+      },
+      {
+        "head": 6,
+        "is_trigram": false,
+        "space_rows": 20000069,
+        "requests": 32768,
+        "distinct_rows": 14827
+      },
+      {
+        "head": 7,
+        "is_trigram": false,
+        "space_rows": 20000077,
+        "requests": 32768,
+        "distinct_rows": 14828
+      },
+      {
+        "head": 8,
+        "is_trigram": true,
+        "space_rows": 20000081,
+        "requests": 32768,
+        "distinct_rows": 23160
+      },
+      {
+        "head": 9,
+        "is_trigram": true,
+        "space_rows": 20000093,
+        "requests": 32768,
+        "distinct_rows": 23148
+      },
+      {
+        "head": 10,
+        "is_trigram": true,
+        "space_rows": 20000107,
+        "requests": 32768,
+        "distinct_rows": 23152
+      },
+      {
+        "head": 11,
+        "is_trigram": true,
+        "space_rows": 20000147,
+        "requests": 32768,
+        "distinct_rows": 23156
+      },
+      {
+        "head": 12,
+        "is_trigram": true,
+        "space_rows": 20000153,
+        "requests": 32768,
+        "distinct_rows": 23144
+      },
+      {
+        "head": 13,
+        "is_trigram": true,
+        "space_rows": 20000159,
+        "requests": 32768,
+        "distinct_rows": 23154
+      },
+      {
+        "head": 14,
+        "is_trigram": true,
+        "space_rows": 20000161,
+        "requests": 32768,
+        "distinct_rows": 23153
+      },
+      {
+        "head": 15,
+        "is_trigram": true,
+        "space_rows": 20000171,
+        "requests": 32768,
+        "distinct_rows": 23157
+      }
+    ],
+    "reuse_distance": {
+      "repeats": 220431,
+      "p10": 336,
+      "p50": 9408,
+      "p90": 123440,
+      "p99": 348928,
+      "max": 501808,
+      "frac_within_window": {
+        "1": 0.0,
+        "16": 0.0023953073750969693,
+        "64": 0.01694861430561037,
+        "256": 0.0804968448176527,
+        "4096": 0.39198207148722275
+      }
+    },
+    "engine_row_cache_hit_rate": {
+      "0": 0.0,
+      "65536": 0.33994483947753906,
+      "262144": 0.41080665588378906,
+      "1048576": 0.4204216003417969,
+      "4194304": 0.4204387664794922
+    }
+  }
+}

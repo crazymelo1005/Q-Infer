@@ -1,0 +1,169 @@
+{
+  "measured_at": "2026-10-09T21:08:11+08:00",
+  "measure": "G-04 记忆表行的访问局部性（离线重放）",
+  "env": "环境2",
+  "host_independent": true,
+  "method": "用参考引擎的 n-gram 哈希重放表行索引；哈希经 oracle 向量逐位校验",
+  "config": {
+    "tokens_file": "/home/crazymelo/qinfer-g04/requests.ids",
+    "cache_sizes_rows": [
+      0,
+      65536,
+      262144,
+      1048576,
+      4194304
+    ],
+    "row_bytes": 90,
+    "page_bytes": 4096
+  },
+  "result": {
+    "n_tokens": 80241,
+    "n_sequences": 48,
+    "n_requests": 1283856,
+    "requests_per_token": 16,
+    "distinct_rows": 653280,
+    "row_repeat_rate": 0.49115788686581674,
+    "distinct_pages_4k": 622976,
+    "page_repeat_rate": 0.5147617801373363,
+    "same_page_consecutive_rate": 0.0,
+    "first_touch_same_page_rate": 0.0,
+    "io_bytes_per_token": 1440,
+    "distinct_rows_share_of_table": 0.002041490200847036,
+    "per_head": [
+      {
+        "head": 0,
+        "is_trigram": false,
+        "space_rows": 20000003,
+        "requests": 80241,
+        "distinct_rows": 30950
+      },
+      {
+        "head": 1,
+        "is_trigram": false,
+        "space_rows": 20000023,
+        "requests": 80241,
+        "distinct_rows": 30954
+      },
+      {
+        "head": 2,
+        "is_trigram": false,
+        "space_rows": 20000033,
+        "requests": 80241,
+        "distinct_rows": 30950
+      },
+      {
+        "head": 3,
+        "is_trigram": false,
+        "space_rows": 20000047,
+        "requests": 80241,
+        "distinct_rows": 30952
+      },
+      {
+        "head": 4,
+        "is_trigram": false,
+        "space_rows": 20000059,
+        "requests": 80241,
+        "distinct_rows": 30949
+      },
+      {
+        "head": 5,
+        "is_trigram": false,
+        "space_rows": 20000063,
+        "requests": 80241,
+        "distinct_rows": 30953
+      },
+      {
+        "head": 6,
+        "is_trigram": false,
+        "space_rows": 20000069,
+        "requests": 80241,
+        "distinct_rows": 30942
+      },
+      {
+        "head": 7,
+        "is_trigram": false,
+        "space_rows": 20000077,
+        "requests": 80241,
+        "distinct_rows": 30943
+      },
+      {
+        "head": 8,
+        "is_trigram": true,
+        "space_rows": 20000081,
+        "requests": 80241,
+        "distinct_rows": 50703
+      },
+      {
+        "head": 9,
+        "is_trigram": true,
+        "space_rows": 20000093,
+        "requests": 80241,
+        "distinct_rows": 50704
+      },
+      {
+        "head": 10,
+        "is_trigram": true,
+        "space_rows": 20000107,
+        "requests": 80241,
+        "distinct_rows": 50705
+      },
+      {
+        "head": 11,
+        "is_trigram": true,
+        "space_rows": 20000147,
+        "requests": 80241,
+        "distinct_rows": 50718
+      },
+      {
+        "head": 12,
+        "is_trigram": true,
+        "space_rows": 20000153,
+        "requests": 80241,
+        "distinct_rows": 50724
+      },
+      {
+        "head": 13,
+        "is_trigram": true,
+        "space_rows": 20000159,
+        "requests": 80241,
+        "distinct_rows": 50710
+      },
+      {
+        "head": 14,
+        "is_trigram": true,
+        "space_rows": 20000161,
+        "requests": 80241,
+        "distinct_rows": 50708
+      },
+      {
+        "head": 15,
+        "is_trigram": true,
+        "space_rows": 20000171,
+        "requests": 80241,
+        "distinct_rows": 50715
+      }
+    ],
+    "reuse_distance": {
+      "repeats": 630576,
+      "p10": 272,
+      "p50": 6640,
+      "p90": 194576,
+      "p99": 644528,
+      "max": 1222784,
+      "frac_within_window": {
+        "1": 0.0,
+        "16": 0.002486615411940829,
+        "64": 0.01414579685874502,
+        "256": 0.09875415493136434,
+        "4096": 0.4403275735200832
+      }
+    },
+    "engine_row_cache_hit_rate": {
+      "0": 0.0,
+      "65536": 0.3825234294188756,
+      "262144": 0.4591909061452375,
+      "1048576": 0.49070222828728455,
+      "4194304": 0.49115788686581674
+    }
+  }
+}
