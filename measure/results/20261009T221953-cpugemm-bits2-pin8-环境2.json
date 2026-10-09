@@ -1,0 +1,9 @@
+{
+  "measured_at": "2026-10-09T22:19:53+0800",
+  "measure": "G-03 CPU 量化 GEMM 实测算力（AVX2 码本反量化 + 点积）",
+  "env": "环境2",
+  "config": {"bits": 2, "experts": 48, "reps": 3, "pin": "8", "ncpu": 1,
+              "expert_shape": {"gate_up": [640, 2560], "down": [2560, 640]},
+              "footprint_mib": 70.3, "macs_per_expert": 4915200.0},
+  "result": {"gmac_per_s": 2.326, "weight_gbps": 0.73, "secs_per_rep": 0.1014}
+}
