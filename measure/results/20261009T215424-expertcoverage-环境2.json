@@ -1,0 +1,438 @@
+{
+  "measured_at": "2026-10-09T21:54:24+08:00",
+  "measure": "G-09 专家路由集中度与覆盖曲线",
+  "env": "环境2",
+  "method": "统计参考引擎 --dump-routing 轨迹里的 (层, 专家) 激活频次，给出 top-N 覆盖曲线",
+  "config": {
+    "traces": [
+      "/home/crazymelo/qinfer-g09/trace-p0.bin",
+      "/home/crazymelo/qinfer-g09/trace-p64k.bin",
+      "/home/crazymelo/qinfer-g09/trace-p131k.bin",
+      "/home/crazymelo/qinfer-g09/trace-p196k.bin",
+      "/home/crazymelo/qinfer-g09/trace-4k-long.bin"
+    ],
+    "profile": "/home/crazymelo/projects/strata-run/data/expert-profile.bin",
+    "recipe": "./engine/strata --pack <pack> --native <shard1> --ple-gguf <shard2> --expert-profile data/expert-profile.bin --resident-experts --prefill auto --spec 4 --spec-min-p 0.5 --mtp <mtp/rt> --max-context 65536 --kv int8 --gpu 0 --pool-workers 15 --tokens-file <4K prompt.ids> --max-new N --dump-routing <trace.bin>",
+    "note": "轨迹来自解码（专家池）路径；批量预填路径不写轨迹"
+  },
+  "result": {
+    "records": 164640,
+    "bad_records": 0,
+    "traces": [
+      {
+        "trace": 0,
+        "lookups": 280800,
+        "distinct_pairs": 15578,
+        "coverage_top1000": 0.3676,
+        "coverage_top5000": 0.787
+      },
+      {
+        "trace": 1,
+        "lookups": 278400,
+        "distinct_pairs": 14890,
+        "coverage_top1000": 0.3706,
+        "coverage_top5000": 0.8098
+      },
+      {
+        "trace": 2,
+        "lookups": 257280,
+        "distinct_pairs": 14801,
+        "coverage_top1000": 0.3994,
+        "coverage_top5000": 0.8185
+      },
+      {
+        "trace": 3,
+        "lookups": 275520,
+        "distinct_pairs": 15160,
+        "coverage_top1000": 0.3853,
+        "coverage_top5000": 0.8246
+      },
+      {
+        "trace": 4,
+        "lookups": 554400,
+        "distinct_pairs": 18342,
+        "coverage_top1000": 0.3283,
+        "coverage_top5000": 0.7433
+      }
+    ],
+    "lookups": 1646400,
+    "distinct_pairs": 21380,
+    "pairs_total": 24576,
+    "distinct_share": 0.87,
+    "pairs_unused": 3196,
+    "pairs_seen_once": 1081,
+    "coverage_by_rank": {
+      "1": 0.001,
+      "10": 0.0087,
+      "100": 0.0589,
+      "1000": 0.2861,
+      "2000": 0.4238,
+      "5000": 0.6799,
+      "8106": 0.8352,
+      "10000": 0.8964,
+      "20000": 0.999,
+      "24576": 1.0
+    },
+    "rank_for_coverage": {
+      "0.5": 2721,
+      "0.8": 7253,
+      "0.9": 10134,
+      "0.95": 12541,
+      "0.99": 16674
+    },
+    "per_layer": [
+      {
+        "layer": 0,
+        "lookups": 34300,
+        "distinct_pairs": 483,
+        "coverage_top10": 0.0675,
+        "coverage_top100": 0.4534
+      },
+      {
+        "layer": 1,
+        "lookups": 34300,
+        "distinct_pairs": 477,
+        "coverage_top10": 0.1053,
+        "coverage_top100": 0.5118
+      },
+      {
+        "layer": 2,
+        "lookups": 34300,
+        "distinct_pairs": 484,
+        "coverage_top10": 0.0964,
+        "coverage_top100": 0.5095
+      },
+      {
+        "layer": 3,
+        "lookups": 34300,
+        "distinct_pairs": 447,
+        "coverage_top10": 0.2147,
+        "coverage_top100": 0.6908
+      },
+      {
+        "layer": 4,
+        "lookups": 34300,
+        "distinct_pairs": 433,
+        "coverage_top10": 0.1741,
+        "coverage_top100": 0.6559
+      },
+      {
+        "layer": 5,
+        "lookups": 34300,
+        "distinct_pairs": 441,
+        "coverage_top10": 0.1785,
+        "coverage_top100": 0.6654
+      },
+      {
+        "layer": 6,
+        "lookups": 34300,
+        "distinct_pairs": 454,
+        "coverage_top10": 0.1608,
+        "coverage_top100": 0.6001
+      },
+      {
+        "layer": 7,
+        "lookups": 34300,
+        "distinct_pairs": 453,
+        "coverage_top10": 0.1646,
+        "coverage_top100": 0.6156
+      },
+      {
+        "layer": 8,
+        "lookups": 34300,
+        "distinct_pairs": 430,
+        "coverage_top10": 0.1722,
+        "coverage_top100": 0.6838
+      },
+      {
+        "layer": 9,
+        "lookups": 34300,
+        "distinct_pairs": 404,
+        "coverage_top10": 0.188,
+        "coverage_top100": 0.7336
+      },
+      {
+        "layer": 10,
+        "lookups": 34300,
+        "distinct_pairs": 450,
+        "coverage_top10": 0.1569,
+        "coverage_top100": 0.6396
+      },
+      {
+        "layer": 11,
+        "lookups": 34300,
+        "distinct_pairs": 422,
+        "coverage_top10": 0.1492,
+        "coverage_top100": 0.7078
+      },
+      {
+        "layer": 12,
+        "lookups": 34300,
+        "distinct_pairs": 440,
+        "coverage_top10": 0.1392,
+        "coverage_top100": 0.6286
+      },
+      {
+        "layer": 13,
+        "lookups": 34300,
+        "distinct_pairs": 443,
+        "coverage_top10": 0.1379,
+        "coverage_top100": 0.6487
+      },
+      {
+        "layer": 14,
+        "lookups": 34300,
+        "distinct_pairs": 432,
+        "coverage_top10": 0.1762,
+        "coverage_top100": 0.679
+      },
+      {
+        "layer": 15,
+        "lookups": 34300,
+        "distinct_pairs": 385,
+        "coverage_top10": 0.3017,
+        "coverage_top100": 0.8449
+      },
+      {
+        "layer": 16,
+        "lookups": 34300,
+        "distinct_pairs": 402,
+        "coverage_top10": 0.2309,
+        "coverage_top100": 0.7864
+      },
+      {
+        "layer": 17,
+        "lookups": 34300,
+        "distinct_pairs": 437,
+        "coverage_top10": 0.1824,
+        "coverage_top100": 0.675
+      },
+      {
+        "layer": 18,
+        "lookups": 34300,
+        "distinct_pairs": 465,
+        "coverage_top10": 0.1635,
+        "coverage_top100": 0.6042
+      },
+      {
+        "layer": 19,
+        "lookups": 34300,
+        "distinct_pairs": 459,
+        "coverage_top10": 0.1752,
+        "coverage_top100": 0.6593
+      },
+      {
+        "layer": 20,
+        "lookups": 34300,
+        "distinct_pairs": 468,
+        "coverage_top10": 0.188,
+        "coverage_top100": 0.6646
+      },
+      {
+        "layer": 21,
+        "lookups": 34300,
+        "distinct_pairs": 489,
+        "coverage_top10": 0.1346,
+        "coverage_top100": 0.5727
+      },
+      {
+        "layer": 22,
+        "lookups": 34300,
+        "distinct_pairs": 486,
+        "coverage_top10": 0.1338,
+        "coverage_top100": 0.5378
+      },
+      {
+        "layer": 23,
+        "lookups": 34300,
+        "distinct_pairs": 477,
+        "coverage_top10": 0.2069,
+        "coverage_top100": 0.68
+      },
+      {
+        "layer": 24,
+        "lookups": 34300,
+        "distinct_pairs": 458,
+        "coverage_top10": 0.1792,
+        "coverage_top100": 0.6642
+      },
+      {
+        "layer": 25,
+        "lookups": 34300,
+        "distinct_pairs": 405,
+        "coverage_top10": 0.2008,
+        "coverage_top100": 0.7199
+      },
+      {
+        "layer": 26,
+        "lookups": 34300,
+        "distinct_pairs": 444,
+        "coverage_top10": 0.1382,
+        "coverage_top100": 0.6163
+      },
+      {
+        "layer": 27,
+        "lookups": 34300,
+        "distinct_pairs": 436,
+        "coverage_top10": 0.1511,
+        "coverage_top100": 0.6908
+      },
+      {
+        "layer": 28,
+        "lookups": 34300,
+        "distinct_pairs": 460,
+        "coverage_top10": 0.1698,
+        "coverage_top100": 0.6491
+      },
+      {
+        "layer": 29,
+        "lookups": 34300,
+        "distinct_pairs": 466,
+        "coverage_top10": 0.1486,
+        "coverage_top100": 0.6573
+      },
+      {
+        "layer": 30,
+        "lookups": 34300,
+        "distinct_pairs": 435,
+        "coverage_top10": 0.1438,
+        "coverage_top100": 0.6646
+      },
+      {
+        "layer": 31,
+        "lookups": 34300,
+        "distinct_pairs": 406,
+        "coverage_top10": 0.2519,
+        "coverage_top100": 0.8138
+      },
+      {
+        "layer": 32,
+        "lookups": 34300,
+        "distinct_pairs": 439,
+        "coverage_top10": 0.1888,
+        "coverage_top100": 0.7316
+      },
+      {
+        "layer": 33,
+        "lookups": 34300,
+        "distinct_pairs": 457,
+        "coverage_top10": 0.1446,
+        "coverage_top100": 0.6336
+      },
+      {
+        "layer": 34,
+        "lookups": 34300,
+        "distinct_pairs": 484,
+        "coverage_top10": 0.1453,
+        "coverage_top100": 0.5917
+      },
+      {
+        "layer": 35,
+        "lookups": 34300,
+        "distinct_pairs": 465,
+        "coverage_top10": 0.1464,
+        "coverage_top100": 0.6164
+      },
+      {
+        "layer": 36,
+        "lookups": 34300,
+        "distinct_pairs": 449,
+        "coverage_top10": 0.1661,
+        "coverage_top100": 0.6691
+      },
+      {
+        "layer": 37,
+        "lookups": 34300,
+        "distinct_pairs": 452,
+        "coverage_top10": 0.1396,
+        "coverage_top100": 0.6193
+      },
+      {
+        "layer": 38,
+        "lookups": 34300,
+        "distinct_pairs": 471,
+        "coverage_top10": 0.1359,
+        "coverage_top100": 0.5693
+      },
+      {
+        "layer": 39,
+        "lookups": 34300,
+        "distinct_pairs": 417,
+        "coverage_top10": 0.2204,
+        "coverage_top100": 0.7943
+      },
+      {
+        "layer": 40,
+        "lookups": 34300,
+        "distinct_pairs": 455,
+        "coverage_top10": 0.2596,
+        "coverage_top100": 0.7879
+      },
+      {
+        "layer": 41,
+        "lookups": 34300,
+        "distinct_pairs": 445,
+        "coverage_top10": 0.183,
+        "coverage_top100": 0.6973
+      },
+      {
+        "layer": 42,
+        "lookups": 34300,
+        "distinct_pairs": 445,
+        "coverage_top10": 0.1193,
+        "coverage_top100": 0.6071
+      },
+      {
+        "layer": 43,
+        "lookups": 34300,
+        "distinct_pairs": 448,
+        "coverage_top10": 0.2436,
+        "coverage_top100": 0.7464
+      },
+      {
+        "layer": 44,
+        "lookups": 34300,
+        "distinct_pairs": 412,
+        "coverage_top10": 0.2432,
+        "coverage_top100": 0.7474
+      },
+      {
+        "layer": 45,
+        "lookups": 34300,
+        "distinct_pairs": 423,
+        "coverage_top10": 0.2258,
+        "coverage_top100": 0.7363
+      },
+      {
+        "layer": 46,
+        "lookups": 34300,
+        "distinct_pairs": 427,
+        "coverage_top10": 0.2235,
+        "coverage_top100": 0.7383
+      },
+      {
+        "layer": 47,
+        "lookups": 34300,
+        "distinct_pairs": 420,
+        "coverage_top10": 0.1927,
+        "coverage_top100": 0.7423
+      }
+    ],
+    "profile_ranking_as_curve": {
+      "profile_pairs": 24576,
+      "coverage_by_profile_rank": {
+        "1": 0.0,
+        "10": 0.0026,
+        "100": 0.0172,
+        "1000": 0.1111,
+        "2000": 0.1904,
+        "5000": 0.4104,
+        "8106": 0.606,
+        "10000": 0.7082,
+        "20000": 0.938,
+        "24576": 1.0
+      },
+      "note": "引擎自带的画像排名只有顺序、没有频次；把它当频次曲线用会高估覆盖率"
+    }
+  }
+}

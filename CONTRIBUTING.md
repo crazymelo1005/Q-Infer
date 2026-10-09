@@ -27,7 +27,7 @@
 | `docs/research/` | 事实台账（是什么） |
 | [research/references.md](docs/research/references.md) | 全部出处，按编号登记 |
 | [scripts/docs_checks.py](scripts/docs_checks.py) 与 [.github/workflows/docs-check.yml](.github/workflows/docs-check.yml) | 规范自检：把第 2、3、4 节的规则变成可执行检查（非文档） |
-| [measure/](measure/) | 测量工具与原始结果：机器画像、PCIe 档位与带宽、内存带宽、GGUF 元数据读取、记忆表行访问局部性重放与语料构造（非文档） |
+| [measure/](measure/) | 测量工具与原始结果：机器画像、PCIe 档位与带宽、内存带宽、GGUF 元数据读取、记忆表行访问局部性重放与语料构造、专家路由覆盖曲线（非文档） |
 
 分层规则：`research/` 不得引用 `design/`；`design/` 的关键论断必须能回指 `research/` 或 [hardware.md](docs/hardware.md)。
 
@@ -174,6 +174,7 @@ S-<n> | 等级 | 复核状态 | 来源（URL 或文档路径） | 引用日期
 - `python3 measure/gguf_meta.py --model <file.gguf> [--tensors] [--all]`：直读 GGUF 元数据与张力维度，用于取模型几何（头数、维度、层数、专家数、表形状），不必依赖 HuggingFace 的 `config.json`。零依赖，可经 `ssh host "python3 - --model …" < measure/gguf_meta.py` 在远端的模型文件上直接运行。
 - `python3 measure/ple_locality.py --tokens <token_ids.txt> [--env 环境2]`：G-04，离线重放记忆表行的访问局部性。输入是分词后的 token id 序列（空白分隔，空行表示序列边界），输出行分布、重复率、去重后顺序性与行缓存命中率，并落盘 JSON。`--selftest` 把重放实现与参考引擎自带的 oracle 向量逐位比对。零依赖；与机器无关，分词需在被测环境上由该引擎的 tokenizer 完成。
 - `python3 measure/make_ple_corpus.py --engine-dir <引擎目录> --native-gguf <分片.gguf> --out <目录>`：构造 G-04 的语料（token id 序列，每份记录 token 数与 sha256）。需在参考引擎环境内运行，因为它调用该引擎自带的 tokenizer（依赖第三方 `regex`），故不属零依赖工具；重放侧仍由 `ple_locality.py` 完成。
+- `python3 measure/expert_coverage.py --trace <dump-routing 轨迹>... [--profile <画像.bin>]`：G-09，统计路由轨迹里的 (层, 专家) 激活频次并给出 top-N 覆盖曲线；`--profile` 时另把引擎画像的排名当频次曲线用，量化该代用造成的偏差。轨迹由参考引擎的 `--dump-routing` 生成（格式见其 `tools/make_profile.py`）。零依赖。
 
 测量结果的存放：原始记录写入 `measure/results/<时间戳>-<测点>-<平台>.json`（Python 脚本与 CUDA 程序都自己落盘）；摘要回填 [docs/design/gates.md](docs/design/gates.md) 的实测记录列，以及 [docs/hardware.md](docs/hardware.md) 的实测值表。每条数值必须标注平台：环境1-WSL、环境1-Windows 或环境2。两套环境对比时必须使用同一份脚本与同一组参数。
 
