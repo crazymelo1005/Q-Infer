@@ -28,6 +28,16 @@ static int cmp_double(const void *a, const void *b) {
   return x < y ? -1 : (x > y ? 1 : 0);
 }
 
+// 命令行可能经多层转发（Git Bash 到 wsl.exe 再到 ssh），中文参数会被控制台代码页损坏，
+// 故接受 ASCII 代号；落盘时写规范平台名，与 Python 侧保持同一套代号。
+static const char *canonical_env(const char *v) {
+  if (!v) return NULL;
+  if (!strcmp(v, "1w")) return "环境1-Windows";
+  if (!strcmp(v, "1l")) return "环境1-WSL";
+  if (!strcmp(v, "2")) return "环境2";
+  return v;
+}
+
 static const char *detect_env(void) {
   FILE *fp = fopen("/proc/version", "r");
   if (!fp) return "环境1-Windows 或环境2";
@@ -62,6 +72,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--device") && i + 1 < argc) device = atoi(argv[++i]);
   }
   if (!env) env = detect_env();
+  env = canonical_env(env);
 
   int device_count = 0;
   CHECK(cudaGetDeviceCount(&device_count));

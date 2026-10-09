@@ -1,0 +1,38 @@
+{
+  "measured_at": "2026-10-09T20:39:16+08:00",
+  "measure": "G-02 主机内存有效带宽",
+  "env": "环境2",
+  "config": {
+    "size_mib_per_array": 256,
+    "procs": 8,
+    "seconds": 0.6,
+    "repeats": 5
+  },
+  "result_gbps": {
+    "copy_gbps": {
+      "median": 64.4,
+      "min": 64.4,
+      "max": 64.4,
+      "all": [
+        64.4,
+        64.4,
+        64.4,
+        64.4,
+        64.4
+      ]
+    },
+    "triad_gbps": {
+      "median": 53.7,
+      "min": 53.7,
+      "max": 53.7,
+      "all": [
+        53.7,
+        53.7,
+        53.7,
+        53.7,
+        53.7
+      ]
+    }
+  },
+  "note": ""
+}
