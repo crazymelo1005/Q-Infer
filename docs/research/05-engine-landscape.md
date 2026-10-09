@@ -83,7 +83,7 @@
 | KVMem | 分页 KV 虚拟化 + 索引选块 + 多会话 lane + 长上下文任务效用评测口径（LongMemEval / AgentLongBench，见 §7.1） |
 | KTransformers | 专家级卸载 + NUMA 意识 |
 | LMCache | KV 作为一等公民的独立缓存层 |
-| 无人提供（0.2 版修正） | ~~外挂记忆表（n-gram）的显式预取与双缓冲~~ —— 已被 vLLM 与模型官方占位（§7.2）。剩下的是「专家 + 表行 + KV 三类流量在同一步内的显式同步预算」，该框架未找到公开实现（[摘要级] 存疑） |
+| 无人提供（0.2 版修正） | ~~外挂记忆表（n-gram）的显式预取与双缓冲~~ —— 已被 vLLM 与模型官方占位（§7.2），且其实测收益前提不成立（[02-qwen3.8-flash-next.md](02-qwen3.8-flash-next.md) §3.2）。剩下的是「专家 + 必需表行 + KV 三类流量在同一步内的显式同步预算」，该框架未找到公开实现（[摘要级] 存疑） |
 
 ---
 
@@ -105,12 +105,12 @@
 ### 7.2 表行异步预取已被实现
 
 - vLLM 官方 recipe：`VLLM_PLE_CPU_OFFLOAD=1` —「把 51B N-gram 查找内存留在 host RAM，异步预取所需行」；在 4×H100 上 plain TP4 启动即 OOM，靠它把表甩到主存（host 内存需求 ≥51GB）；且 Pipeline-Parallel 与该表初始不兼容。
-- Qwen 官方 README：该表「可异步卸载到主机内存并与计算重叠」。→ 「表行异步预取」不再是本项目的独占差异点；可主张的只剩「VRAM 侧双缓冲 + 精确行索引提前一步 + 与专家/KV 三类流量的统一预算」，且这部分未获一手确认（[摘要级]）。
+- Qwen 官方 README：该表「可异步卸载到主机内存并与计算重叠」。→ 「表行异步预取」不再是本项目的独占差异点；原拟主张的「VRAM 侧双缓冲 + 精确行索引提前一步」也被 [02-qwen3.8-flash-next.md](02-qwen3.8-flash-next.md) §3.2 的实测否定（行访问去重后无顺序性、近邻复用仅约 0.1%），只剩「专家 + 必需表行 + KV 三类流量的统一预算」这一条，且未获一手确认（[摘要级]）。
 
 ### 7.3 其它结论修正
 
 - NInfer 的 offload 缺口正在被外部填补：KVMem 提供 NInfer 后端的预发布版（`v0.18.0-ninfer-rc2`，Windows RTX 30/40/50）。「无 offload」仍是 NInfer 官方形态的事实，但已不是这条生态的终局。
-- 预取在低内存 lane 上是负收益：Strata 实测暂存预取在 16GB 内存 lane −32.6%、Radeon 780M 核显 −19%；详见 [01-strata-engine.md](01-strata-engine.md) §13.3。这条直接影响本项目「表行预取」赌注的期望值。
+- 预取在低内存 lane 上是负收益：Strata 实测暂存预取在 16GB 内存 lane −32.6%、Radeon 780M 核显 −19%；详见 [01-strata-engine.md](01-strata-engine.md) §13.3。这条与本项目的表行预取赌注同向：该赌注已经因局部性不成立而撤回（见 [02-qwen3.8-flash-next.md](02-qwen3.8-flash-next.md) §3.2）。
 
 ---
 

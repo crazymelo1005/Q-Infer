@@ -61,7 +61,7 @@
 | 权重流 | NVMe / RAM 到 VRAM | 专家缓存未命中 | PCIe | 预测 + 预算化 + 分块 |
 | 专家流 | RAM 到 CPU 内核 | 路由未命中显存 | 内存总线 | 量化内核 + 与 GPU 并行 |
 | KV 流 | RAM 与 VRAM 之间 | 上下文超出常驻窗口 | PCIe | 常驻热窗 + 块级预取 |
-| 记忆表流 | NVMe / RAM 到 VRAM | n-gram 查表 | PCIe | 显式预取 + 双缓冲 |
+| 记忆表流 | NVMe / RAM 到 VRAM | n-gram 查表 | PCIe | 按需读 + 有界行缓存 |
 
 ## 5. 三类 PCIe 流量
 
@@ -69,12 +69,11 @@
 
 1. 本步必需的 KV 换入（正确性）
 2. 本步必需的表行（正确性）
-3. 下一至二步可能用到的表行（预测）
-4. 预测的专家（按收益除以字节排序）
+3. 预测的专家（按收益除以字节排序）
 
 专家流不在此列：未命中专家在 CPU 侧就地计算，只走内存总线。
 
-预算化是设计里唯一未被上游占据的机制，其成立依赖门禁 G-04（表行局部性）、G-10（单步时长与预取往返延迟）、G-13（投机导致的 IO 放大）。
+预算化是设计里唯一未被上游占据的机制（见 [design/proposals.md](design/proposals.md) 的 P-01）。G-04 已于 2026-10-09 不通过，表行一侧的预取被砍（[ADR-007](design/adr/ADR-007-ngram-table-on-demand-read.md)），表行只余本步必需的按需读；预算化的对象收缩为权重、KV 与必需表行三类，其成立改由 G-10（单步时长）、G-13（表行 IO 放大）与 P-01 自身的门禁判定。
 
 ## 6. 预测的两种性质
 
@@ -82,7 +81,7 @@
 
 | 路径 | 性质 | 预算策略 | 依据 |
 |------|------|---------|------|
-| 记忆表行索引 | 确定性：由上一 token 唯一决定 | 按必需分配 | 模型把表放在第 2 层，即为让预取与计算并行 |
+| 记忆表行索引 | 确定性：由上一 token 唯一决定 | 按必需分配 | 模型把表放在第 2 层，是为让读取与第 1 层计算重叠；但该确定性不带来可利用的相邻性或近邻复用（G-04 不通过），故只按需读 |
 | 专家共现 | 概率性：会话层面的统计稳定性 | 有余额才投 | 收益有天花板，须先过门禁 G-09 |
 
 ## 7. 单卡与双卡
@@ -99,7 +98,7 @@
 |------|------|------|
 | 三层存储与专家缓存 | 采用分层存储而非权重全量常驻 | [ADR-001](design/adr/ADR-001-tiered-storage-and-expert-cache.md) |
 | 未命中专家的处理 | CPU 就地计算，不搬回显存 | [ADR-002](design/adr/ADR-002-compute-unhit-experts-in-place.md) |
-| n-gram 表访问 | 显式索引预计算加双缓冲预取，不依赖页缓存 | [ADR-003](design/adr/ADR-003-ngram-table-explicit-prefetch.md) |
+| n-gram 表访问 | 按需读加有界行缓存（ADR-003 的显式预取与双缓冲已被 G-04 否定） | [ADR-007](design/adr/ADR-007-ngram-table-on-demand-read.md)（取代 [ADR-003](design/adr/ADR-003-ngram-table-explicit-prefetch.md)） |
 | 双卡并行方式 | 禁用每层同步的张量并行 | [ADR-004](design/adr/ADR-004-consumer-dual-gpu-no-tensor-parallel.md) |
 | 核显与 NPU 定位 | 条件性协处理器，不参与专家主计算 | [ADR-005](design/adr/ADR-005-igpu-npu-as-coprocessor.md) |
 | 精度策略 | NVFP4 权重、FP8 KV、索引器独立精度档 | [ADR-006](design/adr/ADR-006-precision-policy-nvfp4-fp8-kv.md) |

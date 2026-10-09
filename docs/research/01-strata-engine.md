@@ -41,7 +41,7 @@ Strata 的攻击点正是「每层都在等搬运」这个 IO 循环。
 |----|--------|------|
 | VRAM | 每个 token 必用的稠密部分：注意力与 DeltaNet mixer、gated-residual 权重、router、共享专家、输出头、MTP 草稿层、KV（≥64K 时只常驻最常读的部分，其余从 RAM 流入）；剩余显存全部用作专家缓存 | [官方] `docs/HOW_IT_WORKS.md` |
 | RAM | 全部 24,576 个专家 pinned 锁页常驻；CPU 用 AVX-512 / AVX2 内核就地计算未命中专家 | [官方] |
-| SSD | 28.8 GB n-gram 表，每 token 只读若干小行，走 OS page cache | [官方] |
+| SSD | 28.8 GB n-gram 表；每 token 读 16 行、共 1,440 字节，走 OS page cache，无专用预取器 [S-34] | [官方] |
 
 关键设计取向：显存不屯权重，屯「最热的专家」。VRAM 剩余多少决定能常驻多少专家，直接决定命中率，进而决定速度。
 

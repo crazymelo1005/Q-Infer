@@ -208,7 +208,7 @@ KV 是动态张量：量化必须把反量化融进注意力核（fused dequant 
 2. 带宽层：NVFP4 权重 + FP8/4-bit KV + 索引器 KV 独立精度。
 3. 延迟层：MTP 投机（基线）+ prompt lookup + 可选的 DFlash2 类并行草稿。
 4. 复用层：Radix 前缀缓存 + PagedAttention。
-5. 差异层：n-gram 记忆表的显式预取与双缓冲（已被 vLLM 官方 recipe 与 Qwen 官方 README 占位，不再是空白——见 [05-engine-landscape.md](05-engine-landscape.md) §7.2）。
+5. 差异层：n-gram 记忆表的显式预取与双缓冲（已被 vLLM 官方 recipe 与 Qwen 官方 README 占位，不再是空白——见 [05-engine-landscape.md](05-engine-landscape.md) §7.2；且 [02-qwen3.8-flash-next.md](02-qwen3.8-flash-next.md) §3.2 实测其收益前提不成立，两个理由都指向放弃该差异点）。
 
 ---
 

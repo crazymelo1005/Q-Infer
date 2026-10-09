@@ -75,9 +75,10 @@
 | machine profile | 自动标定产出的机器画像（PCIe 带宽、内存带宽、内核吞吐等落盘参数） |
 | 预测性预取 | 在数据被需要之前主动把它搬到位（如提前 1 步算表行索引） |
 | 双缓冲（double buffering） | 用两块缓冲轮流：一块服务当前步，另一块在后台被填充 |
+| 行缓存（row cache） | 有界缓存，按行号哈希定组、组内轮转替换，保留最近读过的表行。吃下长距离复现，不吃顺序性（见 G-04）。默认 1,048,576 行（IQ4_NL 约 90 MB） |
 | lookahead / `STRATA_LOOKAHEAD` | Strata 的跨层预测性预取开关；深度由 `STRATA_LOOKAHEAD_K` 定 |
 | `STRATA_IO_PREFETCH` / `STRATA_IO_PF_STAGE` | Strata 的文件层整块预取与「暂存式」预取变体。后者在 16GB 内存 lane 实测 −32.6%、32GB lane +25.7%，故默认关闭（见 [design/gates.md](design/gates.md) 的 G-10） |
-| 共现图 / co-occurrence | 维护「同一 token 或同一会话内被一起激活」的专家对统计，作为专家替换策略的输入。属概率性预测，与 §4.2 的确定性预取不同级 |
+| 共现图 / co-occurrence | 维护「同一 token 或同一会话内被一起激活」的专家对统计，作为专家替换策略的输入。属概率性预测，与 §4 的确定性表行索引不同级 |
 | 三类流量 | 过 PCIe 的三类搬运：专家权重、n-gram 表行、KV。区别于「四条数据流」——「专家流（RAM→CPU）」走内存总线，不过 PCIe。§4.1 的字节预算仲裁的对象就是这三类 |
 | scatter-add | 把 CPU 与 GPU 各自算出的专家结果按专家 slot 累加合并到同一输出缓冲区（[engine.md](design/engine.md) §6） |
 | prompt lookup / suffix | 一种投机起草：从上下文已有文本里抄若干 token 当草稿（最多 5）。代码改写类提速 6–11%，其它文本基本不变（`research/01` §6 / `research/04`） |
