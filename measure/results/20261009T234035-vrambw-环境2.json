@@ -1,0 +1,9 @@
+{
+  "measured_at": "2026-10-09T23:40:35+0800",
+  "measure": "显存可用量与带宽（device STREAM）",
+  "env": "环境2",
+  "config": {"device": 0, "device_name": "NVIDIA GeForce RTX 5060 Ti", "sizes_mib": [32, 128, 512], "reps": 5},
+  "vram_total_mib": 15849, "vram_free_mib": 15679,
+  "stream_gbps": [{"size_mib": 32, "copy": 391.2, "triad": 398.2}, {"size_mib": 128, "copy": 389.0, "triad": 397.3}, {"size_mib": 512, "copy": 389.2, "triad": 398.1}],
+  "peak_triad_gbps": 398.2
+}

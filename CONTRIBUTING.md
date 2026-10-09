@@ -27,7 +27,7 @@
 | `docs/research/` | 事实台账（是什么） |
 | [research/references.md](docs/research/references.md) | 全部出处，按编号登记 |
 | [scripts/docs_checks.py](scripts/docs_checks.py) 与 [.github/workflows/docs-check.yml](.github/workflows/docs-check.yml) | 规范自检：把第 2、3、4 节的规则变成可执行检查（非文档） |
-| [measure/](measure/) | 测量工具与原始结果：机器画像、PCIe 档位与带宽、内存带宽、GGUF 元数据读取、记忆表行访问局部性重放与语料构造、专家路由覆盖曲线、投机 IO 放大、CPU 专家内核与量化 GEMM 微基准、运行中引擎的槽位/命中率/KV 驻留采样、NVMe 往返延迟、KV 精度档的输出一致率（非文档） |
+| [measure/](measure/) | 测量工具与原始结果：机器画像与标定、PCIe 档位与带宽、内存带宽、显存带宽、GGUF 元数据读取、记忆表行访问局部性重放与语料构造、专家路由覆盖曲线、投机 IO 放大、CPU 专家内核与量化 GEMM 微基准、运行中引擎的槽位/命中率/KV 驻留采样、NVMe 往返延迟、KV 精度档的输出一致率（非文档） |
 
 分层规则：`research/` 不得引用 `design/`；`design/` 的关键论断必须能回指 `research/` 或 [hardware.md](docs/hardware.md)。
 
@@ -165,9 +165,11 @@ S-<n> | 等级 | 复核状态 | 来源（URL 或文档路径） | 引用日期
 
 规范自检，随 CI 执行：[scripts/docs_checks.py](scripts/docs_checks.py)，Python 3 标准库，无第三方依赖，无构建步骤，运行方式 `python3 scripts/docs_checks.py`，由 [.github/workflows/docs-check.yml](.github/workflows/docs-check.yml) 在推送与 PR 时执行。任一检查失败即非零退出，本地与 CI 使用同一套判据。
 
-测量工具，手工执行、不进 CI。分三种语言：`measure/` 下的 Python 3 脚本（多数零第三方依赖，`mem_bw.py` 依赖 numpy）、`measure/pcie_bw.cu` 与 `measure/io_roundtrip.cu`（CUDA C++，用 nvcc 编译）与 `measure/cpu_expert_bench.c`、`measure/cpu_gemm_bench.c`（纯 C，用 `cc -O2 -mavx2 -mfma -pthread` 编译）。三者都没有构建系统，直接调用编译器或解释器。
+测量工具，手工执行、不进 CI。分三种语言：`measure/` 下的 Python 3 脚本（多数零第三方依赖，`mem_bw.py` 依赖 numpy）、`measure/pcie_bw.cu`、`measure/io_roundtrip.cu` 与 `measure/vram_bw.cu`（CUDA C++，用 nvcc 编译）与 `measure/cpu_expert_bench.c`、`measure/cpu_gemm_bench.c`（纯 C，用 `cc -O2 -mavx2 -mfma -pthread` 编译）。三者都没有构建系统，直接调用编译器或解释器。
 
-- `python3 measure/env_profile.py`：记录机器画像。它是一切测量的记账载体，测量前先跑。
+- `python3 measure/calibrate.py [--set KEY=VALUE ...]`：机器画像（engine §10 标定）。把已测的量与模型几何代入，按显式公式推导每步 PCIe 预算、专家槽位、KV 窗口与 §15 的上限，落盘到 `measure/results/*-calibrate-<平台>.json`。默认值即环境2 的实测值，`--set` 可覆盖；`--selftest` 核对推导恒等式。零依赖。
+- `nvcc -O2 -o build/vram_bw measure/vram_bw.cu && ./build/vram_bw --sizes 32,128,512`：显存可用量与带宽（device STREAM），画像的第 1 项输入。产物写在 `build/`。
+- `python3 measure/env_profile.py`：记录机器画像的静态部分。
 - `python3 measure/pcie_link.py [--watch 秒数]`：读 PCIe 链路档位。加 `--watch` 可在同时施加负载时观察档位是否变化。
 - `python3 measure/mem_bw.py [--size-mb 256] [--procs 8] [--seconds 0.6] [--repeats 5]`：测内存带宽。聚合口径是「各进程屏障同步后在同一时间窗内搬运的字节之和除以时间窗」；不得用各进程中位数相加，那样在进程启动不同步时会虚高，甚至超过内存理论峰值。
 - `nvcc -O2 -o build/pcie_bw measure/pcie_bw.cu && ./build/pcie_bw --repeats 5 --out-dir measure/results`：测 PCIe 有效带宽。产物写在 `build/`，该目录已在 `.gitignore` 中，不入库。`--hold 秒数` 会保持链路流量，便于同时用 `pcie_link.py` 观察宽度与代数是否变化。注意链路**代数会随负载降档**（空闲可低至 gen1），因此"当前档位"必须在持续负载下才可引用。

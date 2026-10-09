@@ -1,0 +1,183 @@
+{
+  "measured_at": "2026-10-09T23:43:27+08:00",
+  "measure": "机器画像（engine §10 标定）",
+  "env": "环境2",
+  "inputs": {
+    "vram_total_mib": {
+      "value": 15849.0,
+      "unit": "MiB",
+      "source": "-vrambw-"
+    },
+    "vram_free_mib": {
+      "value": 15679.0,
+      "unit": "MiB",
+      "source": "-vrambw-"
+    },
+    "vram_triad_gbps": {
+      "value": 398.2,
+      "unit": "GB/s",
+      "source": "-vrambw-"
+    },
+    "pcie_h2d_gbps": {
+      "value": 28.64,
+      "unit": "GB/s",
+      "source": "-pciebw- GPU0"
+    },
+    "pcie_d2h_gbps": {
+      "value": 19.96,
+      "unit": "GB/s",
+      "source": "-pciebw- GPU0"
+    },
+    "host_triad_gbps": {
+      "value": 53.7,
+      "unit": "GB/s",
+      "source": "-membw-"
+    },
+    "host_copy_gbps": {
+      "value": 64.4,
+      "unit": "GB/s",
+      "source": "-membw-"
+    },
+    "cpu_p_gmac": {
+      "value": 2.81,
+      "unit": "GMAC/s",
+      "source": "-cpugemm- bits4 pin0"
+    },
+    "cpu_e_gmac": {
+      "value": 2.29,
+      "unit": "GMAC/s",
+      "source": "-cpugemm- bits4 pin8"
+    },
+    "cpu_pool15_gmac": {
+      "value": 32.6,
+      "unit": "GMAC/s",
+      "source": "-cpugemm- bits4 pin0_14"
+    },
+    "step_p50_ms": {
+      "value": 12.74,
+      "unit": "ms",
+      "source": "-stepprobe-"
+    },
+    "cache_slots_total": {
+      "value": 11967.0,
+      "unit": "槽位",
+      "source": "-cacheprobe- auto-4k"
+    },
+    "cache_slots_primary": {
+      "value": 6529.0,
+      "unit": "槽位",
+      "source": "-cacheprobe- auto-4k"
+    },
+    "cache_mib": {
+      "value": 16416.0,
+      "unit": "MiB",
+      "source": "-cacheprobe- auto-4k"
+    },
+    "expert_blob_mib": {
+      "value": 1.35,
+      "unit": "MiB/专家",
+      "source": "cache_mib ÷ cache_slots_total"
+    },
+    "hit_static": {
+      "value": 0.835,
+      "unit": "占比",
+      "source": "-expertcoverage- 8,106 对"
+    },
+    "hit_session": {
+      "value": 0.96,
+      "unit": "占比",
+      "source": "-cacheprobe- 会话内命中率"
+    },
+    "spec_positions_per_token": {
+      "value": 1.128,
+      "unit": "位置/token",
+      "source": "-specio- 中位"
+    },
+    "table_rt_p50_us": {
+      "value": 1481.0,
+      "unit": "us",
+      "source": "-ioroundtrip- direct-ample"
+    },
+    "table_rt_p99_us": {
+      "value": 1973.0,
+      "unit": "us",
+      "source": "-ioroundtrip- direct-ample"
+    },
+    "kv_resident_cells": {
+      "value": 32768.0,
+      "unit": "cell/层",
+      "source": "-cacheprobe- /metrics"
+    },
+    "max_context": {
+      "value": 262144.0,
+      "unit": "token",
+      "source": "模型"
+    },
+    "n_layers": {
+      "value": 48.0,
+      "unit": "层",
+      "source": "GGUF"
+    },
+    "n_qsa": {
+      "value": 12.0,
+      "unit": "层",
+      "source": "GGUF"
+    },
+    "top_k": {
+      "value": 10.0,
+      "unit": "专家/token/层",
+      "source": "GGUF"
+    },
+    "kv_bytes_per_cell": {
+      "value": 1056.0,
+      "unit": "B/cell",
+      "source": "引擎 --help 的 int8 口径"
+    },
+    "ffn": {
+      "value": 640.0,
+      "unit": "维",
+      "source": "GGUF"
+    },
+    "hidden": {
+      "value": 2560.0,
+      "unit": "维",
+      "source": "GGUF"
+    },
+    "io_share": {
+      "value": 0.5,
+      "unit": "占比",
+      "source": "设计输入"
+    }
+  },
+  "derived": {
+    "pcie_step_budget_mib": 186.8,
+    "demand_experts_static_mib": 106.9,
+    "demand_experts_session_mib": 25.9,
+    "demand_table_mib": 0.00155,
+    "budget_over_demand": 1.75,
+    "budget_over_demand_session": 7.21,
+    "expert_slots_from_cache": 12160.0,
+    "kv_full_mib": 3168.0,
+    "kv_resident_mib": 396.0,
+    "kv_resident_fraction": 0.125,
+    "ceiling_tok_s_iq2": 216.0,
+    "ceiling_tok_s_fp8": 64.8,
+    "vram_vs_nominal": 0.889
+  },
+  "formulas": {
+    "pcie_step_budget_mib": "pcie_h2d_gbps × step_p50_ms/1000 × io_share × 1024（GB→MiB）",
+    "demand_experts_static_mib": "n_layers × top_k × expert_blob_mib × (1 − hit_static)",
+    "demand_experts_session_mib": "n_layers × top_k × expert_blob_mib × (1 − hit_session)",
+    "demand_table_mib": "16 行 × 90 B × spec_positions_per_token ÷ 1 MiB",
+    "expert_slots_from_cache": "cache_mib ÷ expert_blob_mib（对照实测槽位数）",
+    "kv_full_mib": "max_context × kv_bytes_per_cell × n_qsa",
+    "kv_resident_mib": "kv_resident_cells × kv_bytes_per_cell × n_qsa",
+    "ceiling_tok_s_*": "vram_triad_gbps ÷ 每 token 权重字节（§15 的上限）"
+  },
+  "notes": [
+    "预算宽松度 = 带宽允许 ÷ 本步必需需求；小于 1 表示这一步的 PCIe 预算不足以把所有必需搬运做完。",
+    "hit_static 是槽位固定的静态覆盖上界；hit_session 是引擎会话内的实际命中率（含自适应换入与前缀复用）。",
+    "起草长度上限：实测在 T=6 窗口下位置放大 1.05 至 1.25（见 -specio- 记录），故上限取引擎自身的 8，实际由接受率门控（--spec-min-p）。",
+    "并发分池只给出 QSA 侧的每 cell 字节；GDN 侧按并发增长，需要 SSM 几何（未取到）才能算，是画像的已知缺口。"
+  ]
+}
