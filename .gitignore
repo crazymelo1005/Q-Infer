@@ -16,6 +16,7 @@ venv/
 
 # ---- C/C++ / CUDA build ----
 build/
+build-*/
 *.o
 *.so
 *.a

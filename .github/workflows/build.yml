@@ -1,0 +1,18 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 配置
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: 构建
+        run: cmake --build build -j
+      - name: 测试
+        run: ctest --test-dir build --output-on-failure
