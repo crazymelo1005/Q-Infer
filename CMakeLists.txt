@@ -12,6 +12,8 @@ endif()
 add_library(qinfer_storage
   src/storage/page_table.cpp
   src/storage/row_cache.cpp
+  src/storage/cooccurrence.cpp
+  src/storage/expert_cache.cpp
 )
 target_include_directories(qinfer_storage PUBLIC src)
 
@@ -116,6 +118,14 @@ target_link_libraries(test_ngram PRIVATE qinfer_kernels)
 add_executable(test_row_cache tests/test_row_cache.cpp)
 target_link_libraries(test_row_cache PRIVATE qinfer_storage)
 
+add_executable(test_expert_cache tests/test_expert_cache.cpp)
+target_link_libraries(test_expert_cache PRIVATE qinfer_storage)
+
+# 专家缓存的离线重放工具：读参考引擎 --dump-routing 的轨迹，比较三种替换策略的命中率。
+# 需要一个真轨迹文件，故不进 ctest；只保证在 CI 里能编译。
+add_executable(expert_cache_replay measure/expert_cache_replay.cpp)
+target_link_libraries(expert_cache_replay PRIVATE qinfer_storage)
+
 add_executable(test_ple_read_path tests/test_ple_read_path.cpp)
 target_link_libraries(test_ple_read_path PRIVATE qinfer_ple)
 
@@ -153,6 +163,7 @@ add_test(NAME iq4xs COMMAND test_iq4xs)
 add_test(NAME iq3xxs COMMAND test_iq3xxs)
 add_test(NAME ngram COMMAND test_ngram)
 add_test(NAME row_cache COMMAND test_row_cache)
+add_test(NAME expert_cache COMMAND test_expert_cache)
 add_test(NAME ple_read_path COMMAND test_ple_read_path)
 add_test(NAME gguf_table COMMAND test_gguf_table)
 add_test(NAME expert_formats COMMAND test_expert_formats)

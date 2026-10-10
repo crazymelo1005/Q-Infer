@@ -1,0 +1,874 @@
+{
+  "measured_at": "2026-10-10T18:16:04+0800",
+  "measure": "序 4 专家缓存的替换策略与相联度离线重放",
+  "env": "环境1（重放；轨迹来自环境2）",
+  "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略 × 七个（槽位, 相联度）组合；命中率只作观测量",
+  "bounds": [
+    "重放是确定性纯计算，与平台无关；轨迹来自环境2。",
+    "命中率是单条轨迹内部、缓存已热身的自适应口径，与 G-09 的全局静态覆盖不可混用。",
+    "共现表上限 2^18 对、衰减节拍 2^20 次观察。"
+  ],
+  "runs": [
+    {
+      "measured_at": "2026-10-10T18:15:43+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-p0.bin",
+      "records": 28080,
+      "bad_records": 0,
+      "slots": 8106,
+      "ways": 8,
+      "policies": {
+        "fifo": {
+          "hits": 230978,
+          "misses": 49822,
+          "hit_rate": 0.822571,
+          "compulsory": 8085,
+          "replaced": 41737,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 239370,
+          "misses": 41430,
+          "hit_rate": 0.852457,
+          "compulsory": 8085,
+          "replaced": 33345,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 239387,
+          "misses": 41413,
+          "hit_rate": 0.852518,
+          "compulsory": 8085,
+          "replaced": 33328,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 209085,
+        "dropped_pairs": 56890
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:15:43+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-p0.bin",
+      "records": 28080,
+      "bad_records": 0,
+      "slots": 11967,
+      "ways": 8,
+      "policies": {
+        "fifo": {
+          "hits": 249897,
+          "misses": 30903,
+          "hit_rate": 0.889947,
+          "compulsory": 11373,
+          "replaced": 19530,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 255136,
+          "misses": 25664,
+          "hit_rate": 0.908604,
+          "compulsory": 11373,
+          "replaced": 14291,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 255128,
+          "misses": 25672,
+          "hit_rate": 0.908575,
+          "compulsory": 11373,
+          "replaced": 14299,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 209085,
+        "dropped_pairs": 56890
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:15:44+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-p0.bin",
+      "records": 28080,
+      "bad_records": 0,
+      "slots": 2000,
+      "ways": 8,
+      "policies": {
+        "fifo": {
+          "hits": 134168,
+          "misses": 146632,
+          "hit_rate": 0.477806,
+          "compulsory": 2000,
+          "replaced": 144632,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 140947,
+          "misses": 139853,
+          "hit_rate": 0.501948,
+          "compulsory": 2000,
+          "replaced": 137853,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 141011,
+          "misses": 139789,
+          "hit_rate": 0.502176,
+          "compulsory": 2000,
+          "replaced": 137789,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 209085,
+        "dropped_pairs": 56890
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:15:44+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-p0.bin",
+      "records": 28080,
+      "bad_records": 0,
+      "slots": 8106,
+      "ways": 1,
+      "policies": {
+        "fifo": {
+          "hits": 199275,
+          "misses": 81525,
+          "hit_rate": 0.709669,
+          "compulsory": 6855,
+          "replaced": 74670,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 199275,
+          "misses": 81525,
+          "hit_rate": 0.709669,
+          "compulsory": 6855,
+          "replaced": 74670,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 199275,
+          "misses": 81525,
+          "hit_rate": 0.709669,
+          "compulsory": 6855,
+          "replaced": 74670,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 209085,
+        "dropped_pairs": 56890
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:15:49+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-p0.bin",
+      "records": 28080,
+      "bad_records": 0,
+      "slots": 8106,
+      "ways": 64,
+      "policies": {
+        "fifo": {
+          "hits": 234666,
+          "misses": 46134,
+          "hit_rate": 0.835705,
+          "compulsory": 8064,
+          "replaced": 38070,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 244445,
+          "misses": 36355,
+          "hit_rate": 0.870531,
+          "compulsory": 8064,
+          "replaced": 28291,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 244465,
+          "misses": 36335,
+          "hit_rate": 0.870602,
+          "compulsory": 8064,
+          "replaced": 28271,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 209085,
+        "dropped_pairs": 56890
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:15:49+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-p0.bin",
+      "records": 28080,
+      "bad_records": 0,
+      "slots": 11967,
+      "ways": 2,
+      "policies": {
+        "fifo": {
+          "hits": 235054,
+          "misses": 45746,
+          "hit_rate": 0.837087,
+          "compulsory": 9883,
+          "replaced": 35863,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 237786,
+          "misses": 43014,
+          "hit_rate": 0.846816,
+          "compulsory": 9883,
+          "replaced": 33131,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 237730,
+          "misses": 43070,
+          "hit_rate": 0.846617,
+          "compulsory": 9883,
+          "replaced": 33187,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 209085,
+        "dropped_pairs": 56890
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:15:50+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-p0.bin",
+      "records": 28080,
+      "bad_records": 0,
+      "slots": 11967,
+      "ways": 64,
+      "policies": {
+        "fifo": {
+          "hits": 255347,
+          "misses": 25453,
+          "hit_rate": 0.909355,
+          "compulsory": 11904,
+          "replaced": 13549,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 261342,
+          "misses": 19458,
+          "hit_rate": 0.930705,
+          "compulsory": 11904,
+          "replaced": 7554,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 261342,
+          "misses": 19458,
+          "hit_rate": 0.930705,
+          "compulsory": 11904,
+          "replaced": 7554,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 209085,
+        "dropped_pairs": 56890
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:15:50+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-4k-long.bin",
+      "records": 55440,
+      "bad_records": 0,
+      "slots": 8106,
+      "ways": 8,
+      "policies": {
+        "fifo": {
+          "hits": 444430,
+          "misses": 109970,
+          "hit_rate": 0.801641,
+          "compulsory": 8102,
+          "replaced": 101868,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 462806,
+          "misses": 91594,
+          "hit_rate": 0.834787,
+          "compulsory": 8102,
+          "replaced": 83492,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 462842,
+          "misses": 91558,
+          "hit_rate": 0.834852,
+          "compulsory": 8102,
+          "replaced": 83456,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 262144,
+        "dropped_pairs": 219326
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:15:51+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-4k-long.bin",
+      "records": 55440,
+      "bad_records": 0,
+      "slots": 11967,
+      "ways": 8,
+      "policies": {
+        "fifo": {
+          "hits": 491031,
+          "misses": 63369,
+          "hit_rate": 0.885698,
+          "compulsory": 11726,
+          "replaced": 51643,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 504252,
+          "misses": 50148,
+          "hit_rate": 0.909545,
+          "compulsory": 11726,
+          "replaced": 38422,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 504251,
+          "misses": 50149,
+          "hit_rate": 0.909544,
+          "compulsory": 11726,
+          "replaced": 38423,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 262144,
+        "dropped_pairs": 219326
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:15:52+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-4k-long.bin",
+      "records": 55440,
+      "bad_records": 0,
+      "slots": 2000,
+      "ways": 8,
+      "policies": {
+        "fifo": {
+          "hits": 247374,
+          "misses": 307026,
+          "hit_rate": 0.446201,
+          "compulsory": 2000,
+          "replaced": 305026,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 258970,
+          "misses": 295430,
+          "hit_rate": 0.467118,
+          "compulsory": 2000,
+          "replaced": 293430,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 259070,
+          "misses": 295330,
+          "hit_rate": 0.467298,
+          "compulsory": 2000,
+          "replaced": 293330,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 262144,
+        "dropped_pairs": 219326
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:15:53+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-4k-long.bin",
+      "records": 55440,
+      "bad_records": 0,
+      "slots": 8106,
+      "ways": 1,
+      "policies": {
+        "fifo": {
+          "hits": 384407,
+          "misses": 169993,
+          "hit_rate": 0.693375,
+          "compulsory": 7248,
+          "replaced": 162745,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 384407,
+          "misses": 169993,
+          "hit_rate": 0.693375,
+          "compulsory": 7248,
+          "replaced": 162745,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 384407,
+          "misses": 169993,
+          "hit_rate": 0.693375,
+          "compulsory": 7248,
+          "replaced": 162745,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 262144,
+        "dropped_pairs": 219326
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:15:58+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-4k-long.bin",
+      "records": 55440,
+      "bad_records": 0,
+      "slots": 8106,
+      "ways": 64,
+      "policies": {
+        "fifo": {
+          "hits": 450581,
+          "misses": 103819,
+          "hit_rate": 0.812736,
+          "compulsory": 8064,
+          "replaced": 95755,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 472485,
+          "misses": 81915,
+          "hit_rate": 0.852246,
+          "compulsory": 8064,
+          "replaced": 73851,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 472530,
+          "misses": 81870,
+          "hit_rate": 0.852327,
+          "compulsory": 8064,
+          "replaced": 73806,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 262144,
+        "dropped_pairs": 219326
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:15:59+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-4k-long.bin",
+      "records": 55440,
+      "bad_records": 0,
+      "slots": 11967,
+      "ways": 2,
+      "policies": {
+        "fifo": {
+          "hits": 458981,
+          "misses": 95419,
+          "hit_rate": 0.827888,
+          "compulsory": 10523,
+          "replaced": 84896,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 465101,
+          "misses": 89299,
+          "hit_rate": 0.838927,
+          "compulsory": 10523,
+          "replaced": 78776,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 464969,
+          "misses": 89431,
+          "hit_rate": 0.838689,
+          "compulsory": 10523,
+          "replaced": 78908,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 262144,
+        "dropped_pairs": 219326
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:16:01+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-4k-long.bin",
+      "records": 55440,
+      "bad_records": 0,
+      "slots": 11967,
+      "ways": 64,
+      "policies": {
+        "fifo": {
+          "hits": 502842,
+          "misses": 51558,
+          "hit_rate": 0.907002,
+          "compulsory": 11904,
+          "replaced": 39654,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 519493,
+          "misses": 34907,
+          "hit_rate": 0.937036,
+          "compulsory": 11904,
+          "replaced": 23003,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 519502,
+          "misses": 34898,
+          "hit_rate": 0.937053,
+          "compulsory": 11904,
+          "replaced": 22994,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 262144,
+        "dropped_pairs": 219326
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:16:01+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-p196k.bin",
+      "records": 27552,
+      "bad_records": 0,
+      "slots": 8106,
+      "ways": 8,
+      "policies": {
+        "fifo": {
+          "hits": 240566,
+          "misses": 34954,
+          "hit_rate": 0.873134,
+          "compulsory": 8087,
+          "replaced": 26867,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 247185,
+          "misses": 28335,
+          "hit_rate": 0.897158,
+          "compulsory": 8087,
+          "replaced": 20248,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 247206,
+          "misses": 28314,
+          "hit_rate": 0.897234,
+          "compulsory": 8087,
+          "replaced": 20227,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 170647,
+        "dropped_pairs": 5807
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:16:01+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-p196k.bin",
+      "records": 27552,
+      "bad_records": 0,
+      "slots": 11967,
+      "ways": 8,
+      "policies": {
+        "fifo": {
+          "hits": 252769,
+          "misses": 22751,
+          "hit_rate": 0.917425,
+          "compulsory": 11316,
+          "replaced": 11435,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 256219,
+          "misses": 19301,
+          "hit_rate": 0.929947,
+          "compulsory": 11316,
+          "replaced": 7985,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 256221,
+          "misses": 19299,
+          "hit_rate": 0.929954,
+          "compulsory": 11316,
+          "replaced": 7983,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 170647,
+        "dropped_pairs": 5807
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:16:02+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-p196k.bin",
+      "records": 27552,
+      "bad_records": 0,
+      "slots": 2000,
+      "ways": 8,
+      "policies": {
+        "fifo": {
+          "hits": 138948,
+          "misses": 136572,
+          "hit_rate": 0.504312,
+          "compulsory": 2000,
+          "replaced": 134572,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 145134,
+          "misses": 130386,
+          "hit_rate": 0.526764,
+          "compulsory": 2000,
+          "replaced": 128386,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 145227,
+          "misses": 130293,
+          "hit_rate": 0.527101,
+          "compulsory": 2000,
+          "replaced": 128293,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 170647,
+        "dropped_pairs": 5807
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:16:02+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-p196k.bin",
+      "records": 27552,
+      "bad_records": 0,
+      "slots": 8106,
+      "ways": 1,
+      "policies": {
+        "fifo": {
+          "hits": 203244,
+          "misses": 72276,
+          "hit_rate": 0.737674,
+          "compulsory": 6833,
+          "replaced": 65443,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 203244,
+          "misses": 72276,
+          "hit_rate": 0.737674,
+          "compulsory": 6833,
+          "replaced": 65443,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 203244,
+          "misses": 72276,
+          "hit_rate": 0.737674,
+          "compulsory": 6833,
+          "replaced": 65443,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 170647,
+        "dropped_pairs": 5807
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:16:03+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-p196k.bin",
+      "records": 27552,
+      "bad_records": 0,
+      "slots": 8106,
+      "ways": 64,
+      "policies": {
+        "fifo": {
+          "hits": 245687,
+          "misses": 29833,
+          "hit_rate": 0.891721,
+          "compulsory": 8064,
+          "replaced": 21769,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 252928,
+          "misses": 22592,
+          "hit_rate": 0.918002,
+          "compulsory": 8064,
+          "replaced": 14528,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 252931,
+          "misses": 22589,
+          "hit_rate": 0.918013,
+          "compulsory": 8064,
+          "replaced": 14525,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 170647,
+        "dropped_pairs": 5807
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:16:03+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-p196k.bin",
+      "records": 27552,
+      "bad_records": 0,
+      "slots": 11967,
+      "ways": 2,
+      "policies": {
+        "fifo": {
+          "hits": 239357,
+          "misses": 36163,
+          "hit_rate": 0.868746,
+          "compulsory": 9780,
+          "replaced": 26383,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 241466,
+          "misses": 34054,
+          "hit_rate": 0.876401,
+          "compulsory": 9780,
+          "replaced": 24274,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 241412,
+          "misses": 34108,
+          "hit_rate": 0.876205,
+          "compulsory": 9780,
+          "replaced": 24328,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 170647,
+        "dropped_pairs": 5807
+      }
+    },
+    {
+      "measured_at": "2026-10-10T18:16:04+0800",
+      "measure": "序 4 专家缓存的替换策略离线重放",
+      "env": "未标注",
+      "method": "读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, k 权重 f32），逐条喂给三种替换策略；命中率只作观测量",
+      "trace": "/tmp/trace-p196k.bin",
+      "records": 27552,
+      "bad_records": 0,
+      "slots": 11967,
+      "ways": 64,
+      "policies": {
+        "fifo": {
+          "hits": 256818,
+          "misses": 18702,
+          "hit_rate": 0.932121,
+          "compulsory": 11879,
+          "replaced": 6823,
+          "blocked": 0
+        },
+        "lru": {
+          "hits": 259431,
+          "misses": 16089,
+          "hit_rate": 0.941605,
+          "compulsory": 11879,
+          "replaced": 4210,
+          "blocked": 0
+        },
+        "cooccurrence-aware": {
+          "hits": 259431,
+          "misses": 16089,
+          "hit_rate": 0.941605,
+          "compulsory": 11879,
+          "replaced": 4210,
+          "blocked": 0
+        }
+      },
+      "cooccurrence": {
+        "pair_kinds": 170647,
+        "dropped_pairs": 5807
+      }
+    }
+  ]
+}
