@@ -14,6 +14,7 @@
 #include "experts/moe_layer.hpp"
 
 #include "experts/expert_source.hpp"
+#include "experts/step_record.hpp"
 #include "storage/expert_cache.hpp"
 
 #include "check.hpp"
@@ -632,7 +633,7 @@ void test_failures() {
 // ---- 真模型手工入口 ----
 
 int manual_model_entry(const std::string& path, int layer, int k,
-                       std::size_t cache_slots, int tokens) {
+                       std::size_t cache_slots, int tokens, bool verbose) {
     artifact::GgufFile g;
     std::string err;
     if (!g.open(path, err)) {
@@ -692,6 +693,11 @@ int manual_model_entry(const std::string& path, int layer, int k,
         std::vector<float> a(static_cast<std::size_t>(ml.hidden), 0.0f);
         std::vector<float> b(static_cast<std::size_t>(ml.hidden), 0.0f);
         double worst = 0.0;
+        // 重置缓存，让逐 token 的记录从冷启动开始（前面那次单独运行已经用掉了一次 token，
+        // 不重置的话第一条记录会被它吞掉、且 prev 快照会在源还没建时取值）。
+        s.source.reset();
+        s.source_layer = -1;
+        CacheSnapshot prev_snap;  // 冷启动：累计量全 0
         for (int t = 0; t < tokens; ++t) {
             // 每个 token 换一个激活：扰动要够小以保持量级，够大以让路由换出不同的专家。
             std::vector<float> xt = x;
@@ -711,6 +717,13 @@ int manual_model_entry(const std::string& path, int layer, int k,
             for (std::size_t i = 0; i < a.size(); ++i) {
                 worst = std::fmax(worst, std::fabs(static_cast<double>(a[i] - b[i])));
             }
+            // 每步观测（interfaces §7）的缓存侧：这一步的命中/未命中与步末占用。
+            // 预算字段全 0：这条路不做仲裁。
+            const scheduling::StepObservation no_budget{};
+            const CacheSnapshot snap = CacheSnapshot::of(*s.source);
+            const StepRecord rec = make_step_record(t, no_budget, prev_snap, snap);
+            prev_snap = snap;
+            if (verbose) std::printf("  %s\n", format_step_record(rec).c_str());
         }
         const storage::CacheStats& st = s.source->stats();
         const double total = static_cast<double>(st.hits + st.misses);
@@ -1077,14 +1090,19 @@ int main(int argc, char** argv) {
         int layer = 0, k = 10;
         std::size_t cache_slots = 0;
         int tokens = 1;
-        for (int i = 2; i + 1 < argc; ++i) {
-            if (std::string(argv[i]) == "--layer") layer = std::atoi(argv[i + 1]);
-            if (std::string(argv[i]) == "--k") k = std::atoi(argv[i + 1]);
-            if (std::string(argv[i]) == "--tokens") tokens = std::atoi(argv[i + 1]);
-            if (std::string(argv[i]) == "--cache-slots")
-                cache_slots = static_cast<std::size_t>(std::atol(argv[i + 1]));
+        bool verbose = false;
+        // 无值开关（--verbose）可能出现在行尾，故不能要求「后面还有值」才处理。
+        for (int i = 2; i < argc; ++i) {
+            const std::string a = argv[i];
+            const bool has_next = (i + 1) < argc;
+            if (a == "--verbose") verbose = true;
+            else if (a == "--layer" && has_next) layer = std::atoi(argv[++i]);
+            else if (a == "--k" && has_next) k = std::atoi(argv[++i]);
+            else if (a == "--tokens" && has_next) tokens = std::atoi(argv[++i]);
+            else if (a == "--cache-slots" && has_next)
+                cache_slots = static_cast<std::size_t>(std::atol(argv[++i]));
         }
-        return manual_model_entry(argv[2], layer, k, cache_slots, tokens);
+        return manual_model_entry(argv[2], layer, k, cache_slots, tokens, verbose);
     }
     test_identical_experts();
     test_expert_offsets();

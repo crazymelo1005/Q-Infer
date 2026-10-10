@@ -41,9 +41,11 @@ add_library(qinfer_experts
   src/experts/moe_layer.cpp
   src/experts/expert_worker.cpp
   src/experts/expert_source.cpp
+  src/experts/step_record.cpp
 )
 target_include_directories(qinfer_experts PUBLIC src)
-target_link_libraries(qinfer_experts PUBLIC qinfer_artifact qinfer_kernels qinfer_storage)
+target_link_libraries(qinfer_experts PUBLIC qinfer_artifact qinfer_kernels qinfer_storage
+                                           qinfer_scheduling)
 
 add_library(qinfer_kernels
   src/kernels/iq4nl.cpp
@@ -152,6 +154,9 @@ target_link_libraries(test_bus_share PRIVATE qinfer_scheduling)
 add_executable(test_expert_worker tests/test_expert_worker.cpp)
 target_link_libraries(test_expert_worker PRIVATE qinfer_experts)
 
+add_executable(test_step_record tests/test_step_record.cpp)
+target_link_libraries(test_step_record PRIVATE qinfer_experts)
+
 enable_testing()
 add_test(NAME page_table COMMAND test_page_table)
 add_test(NAME budget_arbiter COMMAND test_budget_arbiter)
@@ -180,3 +185,4 @@ add_test(NAME router COMMAND test_router)
 add_test(NAME moe_layer COMMAND test_moe_layer)
 add_test(NAME bus_share COMMAND test_bus_share)
 add_test(NAME expert_worker COMMAND test_expert_worker)
+add_test(NAME step_record COMMAND test_step_record)
