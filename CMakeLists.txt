@@ -37,6 +37,7 @@ target_link_libraries(qinfer_ple PUBLIC qinfer_artifact qinfer_kernels qinfer_st
 add_library(qinfer_dense
   src/dense/gated_residual.cpp
   src/dense/gdn_preprocess.cpp
+  src/dense/gdn_recurrence.cpp
 )
 target_include_directories(qinfer_dense PUBLIC src)
 target_link_libraries(qinfer_dense PUBLIC qinfer_kernels)
@@ -176,6 +177,9 @@ target_link_libraries(test_expert_worker PRIVATE qinfer_experts)
 add_executable(test_layer_dispatch tests/test_layer_dispatch.cpp)
 target_link_libraries(test_layer_dispatch PRIVATE qinfer_experts)
 
+add_executable(test_gdn_recurrence tests/test_gdn_recurrence.cpp)
+target_link_libraries(test_gdn_recurrence PRIVATE qinfer_dense)
+
 add_executable(test_gdn_preprocess tests/test_gdn_preprocess.cpp)
 target_link_libraries(test_gdn_preprocess PRIVATE qinfer_dense)
 
@@ -217,4 +221,5 @@ add_test(NAME expert_worker COMMAND test_expert_worker)
 add_test(NAME layer_dispatch COMMAND test_layer_dispatch)
 add_test(NAME gated_residual COMMAND test_gated_residual)
 add_test(NAME gdn_preprocess COMMAND test_gdn_preprocess)
+add_test(NAME gdn_recurrence COMMAND test_gdn_recurrence)
 add_test(NAME step_record COMMAND test_step_record)
