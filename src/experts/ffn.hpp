@@ -41,6 +41,18 @@ struct FfnScratch {
 
 float silu(float x);
 
+// 按矩阵的档把它那一份激活像量化好（256 值块的档配 Q8_K、32/64 值块的档配 Q8_0，见 [S-42]），
+// 填进 `s.act_k` 或 `s.act_32`。与 `run_gemv` 是一对：先量化、再分派。没有激活搭档的档返回假。
+bool quantize_input(const MatrixSpec& m, const float* x, FfnScratch& s, std::string& err);
+
+// 按一个矩阵的档分派到量化 GEMV：先把激活按该档的搭档量化（256 值块的档配 Q8_K、32/64 值块的档配
+// Q8_0，见 [S-42]），再调对应的逐行 GEMV。内部用的是复用的中间缓冲（`s.act_k` / `s.act_32`）。
+// 公开出来是因为**别处也要按档算一次矩阵乘**——注意力那几个投影（GDN 的 attn_qkv / attn_gate /
+// ssm_out）与专家矩阵是同一件事，没有理由再写第二张「档 → 内核 + 激活搭档」的表（那种重复表差一处
+// 就是静默错值，S-36 那次更正就是这个教训）。不支持的档返回假并写 err。
+bool run_gemv(const MatrixSpec& m, const std::uint8_t* w, FfnScratch& s, float* out,
+              std::string& err);
+
 // 单个专家的一次前馈：结果写入 out（长度 hidden，覆盖写）。
 bool expert_ffn(const LayerSpec& spec, const ExpertWeights& w, const float* x, FfnScratch& scratch,
                 float* out, std::string& err);

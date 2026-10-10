@@ -21,6 +21,8 @@ namespace qinfer::experts {
 namespace {
 
 // 按矩阵的档选激活量化方式并量化 x。返回实际使用的那一组块数（供核验）。
+}  // namespace
+
 bool quantize_input(const MatrixSpec& m, const float* x, FfnScratch& s, std::string& err) {
     const ActFormat act = activation_format(m.format);
     const std::uint64_t blocks = m.row_blocks();
@@ -83,8 +85,6 @@ bool run_gemv(const MatrixSpec& m, const std::uint8_t* w, FfnScratch& s, float* 
             return false;
     }
 }
-
-}  // namespace
 
 float silu(float x) { return x / (1.0f + std::exp(-x)); }
 

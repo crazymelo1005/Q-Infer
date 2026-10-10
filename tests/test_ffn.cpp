@@ -25,6 +25,7 @@
 #include "kernels/iq4xs.hpp"
 #include "kernels/q2_0.hpp"
 #include "kernels/q6k.hpp"
+#include "kernels/q8_0.hpp"
 #include "kernels/q8k.hpp"
 #include <cmath>
 #include <cstdint>
@@ -662,6 +663,97 @@ void test_matches_reference_iq3xxs() {
 
 }  // namespace
 
+// 注意力那几个投影与专家矩阵是同一件事：「按档量化激活 + 按档挑内核」。这里把这一层单独钉一遍，
+// 用的正是注意力三个投影实际会遇到的四个档（S-54：attn_qkv = IQ4_XS 35 层 / IQ3_S 1 层，
+// attn_gate 再加 Q6_K 3 层，ssm_out 与 attn_output = Q8_0）。
+//
+// 两件事分别钉：① 与「直接调那个内核、用它自己量化好的激活像」逐位比——分派若挑错内核或填错激活像，
+// 两边就不同；② 用哪一份激活像按结构钉住（K-quant 的档只该填 act_k、32 值块的档只该填 act_32）——
+// 配错搭档是上游实测过 0.66–1.41% 误差的那种错，而那个量级在别处很容易被当成噪声。
+void test_gemv_dispatch_covers_the_attention_formats() {
+    struct Case {
+        experts::Format f;
+        bool k_quant;
+        const char* name;
+    };
+    const std::vector<Case> cases = {
+        {experts::Format::kIq4Xs, true, "IQ4_XS"},
+        {experts::Format::kIq3S, true, "IQ3_S"},
+        {experts::Format::kQ6K, true, "Q6_K"},
+        {experts::Format::kQ8_0, false, "Q8_0"},
+    };
+    std::vector<float> x(kHidden);
+    std::uint32_t sd = 12345u;
+    for (float& t : x) {
+        sd = sd * 1664525u + 1013904223u;
+        t = static_cast<float>(sd >> 24) / 128.0f - 1.0f;
+    }
+    for (const Case& c : cases) {
+        const std::uint64_t cols = kHidden, rows = kFfn;
+        const Matrix m = c.f == experts::Format::kQ6K ? make_matrix_varied_q6k(rows, cols, 7)
+                                                      : make_matrix_varied(c.f, rows, cols, 7);
+        experts::MatrixSpec spec;
+        spec.format = c.f;
+        spec.cols = cols;
+        spec.rows = rows;
+        spec.experts = 1;
+
+        experts::FfnScratch sc;
+        std::string err;
+        CHECK(experts::quantize_input(spec, x.data(), sc, err));
+        CHECK(err.empty());
+        // ② 只该填对的那一份。
+        CHECK(c.k_quant ? (sc.act_k.size() == cols / 256 && sc.act_32.empty())
+                        : (sc.act_32.size() == cols / 32 && sc.act_k.empty()));
+
+        std::vector<float> got(rows, 0.0f), direct(rows, 0.0f);
+        CHECK(experts::run_gemv(spec, m.bytes.data(), sc, got.data(), err));
+        CHECK(err.empty());
+        const int nb = static_cast<int>(cols / experts::block_elems(c.f));
+        const int ir = static_cast<int>(rows);
+        switch (c.f) {
+            case experts::Format::kIq4Xs:
+                kernels::iq4xs_gemv_q8k(m.bytes.data(), ir, nb, sc.act_k.data(), direct.data());
+                break;
+            case experts::Format::kIq3S:
+                kernels::iq3s_gemv_q8k(m.bytes.data(), ir, nb, sc.act_k.data(), direct.data());
+                break;
+            case experts::Format::kQ6K:
+                kernels::q6k_gemv_q8k(m.bytes.data(), ir, nb, sc.act_k.data(), direct.data());
+                break;
+            case experts::Format::kQ8_0:
+                kernels::q8_0_gemv_q8_0(m.bytes.data(), ir, nb, sc.act_32.data(), direct.data());
+                break;
+            default:
+                CHECK(false);
+        }
+        // ① 逐位相同。
+        for (std::size_t i = 0; i < got.size(); ++i) {
+            if (std::bit_cast<std::uint32_t>(got[i]) != std::bit_cast<std::uint32_t>(direct[i])) {
+                std::printf("FAIL %s 第 %zu 行：得 %.9g 期 %.9g\n", c.name, i,
+                            static_cast<double>(got[i]), static_cast<double>(direct[i]));
+                CHECK(false);
+            }
+        }
+        bool nonzero = false;
+        for (float v : got) {
+            if (v != 0.0f) nonzero = true;
+        }
+        CHECK(nonzero);  // 别让「两边都是 0」这种退化情形混过去
+    }
+    // 没有激活搭档的档要明确失败。
+    experts::MatrixSpec bad;
+    bad.format = experts::Format::kBf16;
+    bad.cols = kHidden;
+    bad.rows = 1;
+    bad.experts = 1;
+    experts::FfnScratch sc2;
+    std::vector<float> out2(1, 0.0f);
+    std::string err2;
+    CHECK(!experts::quantize_input(bad, x.data(), sc2, err2));
+    CHECK(!err2.empty());
+}
+
 int main(int argc, char** argv) {
     if (argc >= 2 && std::string(argv[1]) == "--model") {
         int layer = 0, expert = 0;
@@ -675,6 +767,7 @@ int main(int argc, char** argv) {
     test_matches_reference();
     test_matches_reference_q6k();
     test_matches_reference_iq3s();
+    test_gemv_dispatch_covers_the_attention_formats();
     test_matches_reference_iq4xs();
     test_matches_reference_q80();
     test_matches_reference_iq3xxs();
