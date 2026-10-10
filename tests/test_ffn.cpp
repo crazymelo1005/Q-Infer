@@ -20,6 +20,7 @@
 #include "kernels/fp16.hpp"
 #include "kernels/iq2s.hpp"
 #include "kernels/iq3s.hpp"
+#include "kernels/iq3xxs.hpp"
 #include "kernels/iq4nl.hpp"
 #include "kernels/iq4xs.hpp"
 #include "kernels/q2_0.hpp"
@@ -154,6 +155,9 @@ void dequant_row(experts::Format f, const std::uint8_t* row, std::uint64_t cols,
                 break;
             case experts::Format::kIq3S:
                 dequant_iq3s_block(blk, tmp);
+                break;
+            case experts::Format::kIq3Xxs:
+                dequant_iq3xxs_block(blk, tmp);
                 break;
             case experts::Format::kIq4Xs:
                 dequant_iq4xs_block(blk, tmp);
@@ -351,10 +355,10 @@ void test_unusable_specs_fail() {
     std::vector<float> x(static_cast<std::size_t>(kHidden), 0.1f);
     std::vector<float> out(static_cast<std::size_t>(kHidden), 0.0f);
 
-    // gate 用没有内核的档（IQ3_XXS）：必须在组装前就失败。
+    // gate 用没有内核的档（IQ1_S）：必须在组装前就失败。
     {
         const experts::LayerSpec spec =
-            make_spec(experts::Format::kIq3Xxs, experts::Format::kIq3Xxs, experts::Format::kQ2_0);
+            make_spec(experts::Format::kIq1S, experts::Format::kIq1S, experts::Format::kQ2_0);
         std::vector<std::uint8_t> g(256, 0);
         experts::ExpertWeights w{g.data(), g.data(), g.data()};
         err.clear();
@@ -511,6 +515,22 @@ Matrix make_matrix_varied_iq4xs(std::uint64_t rows, std::uint64_t cols, std::uin
     return m;
 }
 
+// IQ3_XXS 也走 gate/up 的交叉核对。块首 2 字节就是 d，故 make_matrix_varied 的布局可用；但它的幅度
+// 上限 62 比 IQ3_S 的 15 大，配 d=0.5 时 h 会把 down 的 Q8_0 fp16 尺度逼近上限，故把每块的 d 降到 0.25。
+Matrix make_matrix_varied_iq3xxs(std::uint64_t rows, std::uint64_t cols, std::uint32_t salt) {
+    Matrix m = make_matrix_varied(experts::Format::kIq3Xxs, rows, cols, salt);
+    const std::size_t nb = static_cast<std::size_t>(blocks_of(experts::Format::kIq3Xxs, cols));
+    const std::size_t row_bytes = nb * static_cast<std::size_t>(kIq3xxsBlockBytes);
+    for (std::size_t r = 0; r < rows; ++r) {
+        for (std::size_t b = 0; b < nb; ++b) {
+            std::uint8_t* p = m.bytes.data() + r * row_bytes + b * kIq3xxsBlockBytes;
+            p[0] = 0x00;
+            p[1] = 0x34;  // fp16 0.25
+        }
+    }
+    return m;
+}
+
 void test_matches_reference_q6k() {
     const Matrix g = make_matrix_varied_q6k(kFfn, kHidden, 11);
     const Matrix u = make_matrix_varied_q6k(kFfn, kHidden, 12);
@@ -614,6 +634,32 @@ void test_matches_reference_q80() {
     CHECK(compare(got, ref, "Q8_0 ffn vs 参考", 1e-5) == 0);
 }
 
+// IQ3_XXS 参与 gate/up 的交叉核对（3 位档里唯一用「组内 u32 带符号索引 + 末尾 0.25 因子」的那一个）。
+void test_matches_reference_iq3xxs() {
+    const Matrix g = make_matrix_varied_iq3xxs(kFfn, kHidden, 51);
+    const Matrix u = make_matrix_varied_iq3xxs(kFfn, kHidden, 52);
+    const Matrix d = make_matrix_varied(experts::Format::kQ2_0, kHidden, kFfn, 53);
+    const experts::LayerSpec spec =
+        make_spec(experts::Format::kIq3Xxs, experts::Format::kIq3Xxs, experts::Format::kQ2_0);
+    CHECK(spec.usable());
+
+    std::vector<float> x(static_cast<std::size_t>(kHidden));
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        x[i] = static_cast<float>((static_cast<int>(i % 37) - 18) * 0.03125);
+    }
+
+    experts::ExpertWeights w{g.bytes.data(), u.bytes.data(), d.bytes.data()};
+    experts::FfnScratch scratch;
+    std::vector<float> out(static_cast<std::size_t>(kHidden), 0.0f);
+    std::string err;
+    CHECK(experts::expert_ffn(spec, w, x.data(), scratch, out.data(), err));
+
+    std::vector<double> ref;
+    ref_ffn(spec, g, u, d, x.data(), ref);
+    std::vector<double> got(out.begin(), out.end());
+    CHECK(compare(got, ref, "IQ3_XXS ffn vs 参考", 1e-5) == 0);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -631,6 +677,7 @@ int main(int argc, char** argv) {
     test_matches_reference_iq3s();
     test_matches_reference_iq4xs();
     test_matches_reference_q80();
+    test_matches_reference_iq3xxs();
     test_unusable_specs_fail();
     std::puts("ffn: analytic uniform case, double-precision reference and unusable-spec failures hold");
     return 0;

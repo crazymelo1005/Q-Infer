@@ -45,7 +45,7 @@ Geometry geometry(Format f) {
         case Format::kIq2Xxs: return {256, 66, true, ActFormat::kQ8K};
         case Format::kIq2Xs:  return {256, 74, true, ActFormat::kQ8K};
         case Format::kIq2S:   return {256, 82, true, ActFormat::kQ8K};
-        case Format::kIq3Xxs: return {256, 98, false, ActFormat::kQ8K};
+        case Format::kIq3Xxs: return {256, 98, true, ActFormat::kQ8K};
         case Format::kIq3S:   return {256, 110, true, ActFormat::kQ8K};
         case Format::kIq4Xs:  return {256, 136, true, ActFormat::kQ8K};
         case Format::kUnknown: break;

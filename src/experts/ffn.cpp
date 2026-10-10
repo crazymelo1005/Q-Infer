@@ -7,6 +7,7 @@
 #include "kernels/iq2xs_dot.hpp"
 #include "kernels/iq2xxs.hpp"
 #include "kernels/iq3s.hpp"
+#include "kernels/iq3xxs.hpp"
 #include "kernels/iq4nl.hpp"
 #include "kernels/iq4xs.hpp"
 #include "kernels/q2_0.hpp"
@@ -64,6 +65,9 @@ bool run_gemv(const MatrixSpec& m, const std::uint8_t* w, FfnScratch& s, float* 
             return true;
         case Format::kIq4Xs:
             kernels::iq4xs_gemv_q8k(w, rows, blocks, s.act_k.data(), out);
+            return true;
+        case Format::kIq3Xxs:
+            kernels::iq3xxs_gemv_q8k(w, rows, blocks, s.act_k.data(), out);
             return true;
         case Format::kQ2_0:
             kernels::q2_0_gemv_q8_0(w, rows, blocks, s.act_32.data(), out);

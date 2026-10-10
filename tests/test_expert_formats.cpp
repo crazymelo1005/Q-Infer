@@ -140,6 +140,7 @@ void test_geometry_and_kernels() {
         {Format::kIq2Xs, 256, 74, true, ActFormat::kQ8K},
         {Format::kIq2S, 256, 82, true, ActFormat::kQ8K},
         {Format::kIq3S, 256, 110, true, ActFormat::kQ8K},
+        {Format::kIq3Xxs, 256, 98, true, ActFormat::kQ8K},
         {Format::kIq1M, 256, 56, true, ActFormat::kQ8K},
         {Format::kQ6K, 256, 210, true, ActFormat::kQ8K},
         {Format::kIq4Xs, 256, 136, true, ActFormat::kQ8K},
@@ -176,13 +177,13 @@ void test_geometry_and_kernels() {
 }
 
 void test_synthetic_problems() {
-    // 三层：0 层正常；1 层 down 用 IQ2_S（几何不成立）+ gate/up 用 IQ3_XXS（无内核）；2 层缺 down。
+    // 三层：0 层正常；1 层 down 用 IQ2_S（几何不成立）+ gate/up 用 IQ1_S（无内核）；2 层缺 down。
     std::vector<TensorSpec> ts = {
         {"blk.0.ffn_gate_exps.weight", {2560, 640, 512}, 22},
         {"blk.0.ffn_up_exps.weight", {2560, 640, 512}, 22},
         {"blk.0.ffn_down_exps.weight", {640, 2560, 512}, 42},
-        {"blk.1.ffn_gate_exps.weight", {2560, 640, 512}, 18},
-        {"blk.1.ffn_up_exps.weight", {2560, 640, 512}, 18},
+        {"blk.1.ffn_gate_exps.weight", {2560, 640, 512}, 19},
+        {"blk.1.ffn_up_exps.weight", {2560, 640, 512}, 19},
         {"blk.1.ffn_down_exps.weight", {640, 2560, 512}, 22},
         {"blk.2.ffn_gate_exps.weight", {2560, 640, 512}, 99},  // 类型码不认识
         {"blk.2.ffn_up_exps.weight", {2560, 640, 512}, 22},
@@ -264,9 +265,9 @@ void test_real_model_patterns() {
                         map_string(t, false).c_str());
             CHECK(false);
         }
-        // IQ3_S 补上内核后，有内核的 gate 档是 IQ2_XS 10 + IQ2_S 10 + IQ2_XXS 9 + IQ3_S 13 = 42 层。
-        CHECK(t.usable_layers() == 42u);
-        CHECK(t.problems.size() == 2u * 6);  // 只剩 IQ3_XXS 6 层，gate/up 各一个
+        // IQ3_S 与 IQ3_XXS 补上内核后，另一档 48 层的 gate/up 全部有内核。
+        CHECK(t.usable_layers() == 48u);
+        CHECK(t.problems.empty());
     }
 }
 
