@@ -15,10 +15,18 @@
 
 namespace qinfer::dense {
 
-// 索引器的选择参数。块大小是「多少个 cell 打成一个块」，与池化粒度同一件事。
+// 索引器与注意力的几何。真模型（[S-54]）：head_dim 256、24 个 q 头、2 个 kv 头（24 : 2 GQA）；
+// 索引器把 4 个 token 池化成一个 cell，top_k 2048。
 struct QsaShapes {
     std::uint64_t idx_top_k = 0;
     std::uint64_t idx_block = 0;
+    std::uint64_t head_dim = 0;
+    std::uint64_t n_head = 0;
+    std::uint64_t n_head_kv = 0;
+
+    bool attention_sane() const {
+        return head_dim != 0 && n_head != 0 && n_head_kv != 0 && n_head % n_head_kv == 0;
+    }
 };
 
 // 选择宽度：`min(n_kv, idx_top_k + idx_block - 1)`。`idx_block` 为 0 时按 1 处理（免得减出下溢）。
