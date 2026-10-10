@@ -13,12 +13,16 @@
 //   5. 真模型手工入口：对部署那份的可用层跑通，并与测试侧「显式按偏移读三矩阵 + expert_ffn + 加权」核对。
 #include "experts/moe_layer.hpp"
 
+#include "experts/expert_source.hpp"
+#include "storage/expert_cache.hpp"
+
 #include "check.hpp"
 #include "kernels/bf16.hpp"
 #include "kernels/iq2s.hpp"
 #include "kernels/q2_0.hpp"
 #include "kernels/q8k.hpp"
 #include <algorithm>
+#include <cstring>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -746,6 +750,163 @@ int manual_model_entry(const std::string& path, int layer, int k) {
     return ok ? 0 : 1;
 }
 
+// 追加到 tests/test_moe_layer.cpp：专家字节的带缓存读取路径（ExpertSource）。
+void test_expert_source() {
+    const auto ts = layer_tensors("blk.0.", false, 0);
+    const std::filesystem::path p = write_gguf("qinfer_expert_source.gguf", ts);
+    artifact::GgufFile g;
+    std::string err;
+    CHECK(g.open(p.string(), err));
+    const Table table = build_table(g, 0, 0);
+    CHECK(table.layers.size() == 1u);
+    const LayerSpec spec = table.layers[0];
+    CHECK(spec.usable());
+
+    // 一个专家的总字节 = 三矩阵各自 rows × row_bytes。
+    const std::uint64_t expert_bytes = spec.gate.rows * spec.gate.row_bytes() +
+                                       spec.up.rows * spec.up.row_bytes() +
+                                       spec.down.rows * spec.down.row_bytes();
+    const std::uint64_t gate_bytes = spec.gate.rows * spec.gate.row_bytes();
+
+    // (1) 冷启动全未命中，第二遍全命中且指针不变（没有重读）。
+    {
+        storage::LruPolicy lru;
+        ExpertSource src(g, "blk.0.ffn_", spec, lru, /*slots=*/8, /*ways=*/8, /*byte_budget=*/0);
+        ExpertBytes first[4];
+        src.begin_token();
+        for (std::uint64_t e = 0; e < 4; ++e) {
+            CHECK(src.get(e, first[e], err));
+            CHECK(first[e].resident);
+        }
+        CHECK(src.stats().compulsory == 4 && src.stats().hits == 0 && src.stats().misses == 4);
+        CHECK(src.residents() == 4 && src.bytes_resident() == 4 * expert_bytes);
+        CHECK(src.page_entries() == 4);
+
+        src.begin_token();
+        for (std::uint64_t e = 0; e < 4; ++e) {
+            ExpertBytes again;
+            CHECK(src.get(e, again, err));
+            CHECK(again.resident);
+            CHECK(again.gate == first[e].gate && again.down == first[e].down);
+        }
+        CHECK(src.stats().hits == 4);
+        CHECK(src.transient_reads() == 0);
+
+        // 常驻副本与直接从表里读的字节逐位一致——三个矩阵都比，故互换 up/down 之间的偏移也会被杀。
+        const std::uint64_t gb = spec.gate.rows * spec.gate.row_bytes();
+        const std::uint64_t ub = spec.up.rows * spec.up.row_bytes();
+        const std::uint64_t db = spec.down.rows * spec.down.row_bytes();
+        struct Slot {
+            const char* name;
+            std::uint64_t bytes;
+            std::uint64_t at;   // 在常驻副本里的偏移
+        };
+        const Slot slots[3] = {{"blk.0.ffn_gate_exps.weight", gb, 0},
+                               {"blk.0.ffn_up_exps.weight", ub, gb},
+                               {"blk.0.ffn_down_exps.weight", db, gb + ub}};
+        for (const Slot& sl : slots) {
+            const artifact::GgufTensorInfo* t = g.find(sl.name);
+            CHECK(t != nullptr);
+            CHECK(t->dims.size() == 3u);
+            for (std::uint64_t e = 0; e < 4; ++e) {
+                std::vector<std::uint8_t> want(static_cast<std::size_t>(sl.bytes));
+                CHECK(g.read_at(t->offset + e * sl.bytes, want.data(), want.size()));
+                const std::uint8_t* got = first[e].gate + sl.at;
+                for (std::size_t i = 0; i < want.size(); ++i) {
+                    if (want[i] != got[i]) {
+                        std::printf("FAIL %s 专家 %llu 第 %zu 字节：得 %u 期 %u\n", sl.name,
+                                    static_cast<unsigned long long>(e), i, got[i], want[i]);
+                        CHECK(false);
+                    }
+                }
+            }
+        }
+    }
+
+    // (2) 一个槽位：第二个专家把第一个换出，账单跟着走。
+    {
+        storage::FifoPolicy fifo;
+        ExpertSource src(g, "blk.0.ffn_", spec, fifo, /*slots=*/1, /*ways=*/1, /*byte_budget=*/0);
+        ExpertBytes a, b;
+        src.begin_token();
+        CHECK(src.get(1, a, err));
+        CHECK(src.residents() == 1 && src.page_entries() == 1);
+        src.begin_token();
+        CHECK(src.get(2, b, err));
+        CHECK(src.stats().replaced == 1);
+        CHECK(src.residents() == 1 && src.bytes_resident() == expert_bytes);
+        CHECK(src.page_entries() == 1);  // 被换出的那个已从页表摘掉，不是留着占位
+        // 回去读 1：又是未命中（说明真的被换出了）。
+        src.begin_token();
+        ExpertBytes again;
+        CHECK(src.get(1, again, err));
+        CHECK(src.stats().replaced == 2);
+    }
+
+    // (3) 字节预算用尽：不再准入，改走临时缓冲，但字节仍然是对的。
+    {
+        storage::LruPolicy lru;
+        ExpertSource src(g, "blk.0.ffn_", spec, lru, /*slots=*/8, /*ways=*/8,
+                         /*byte_budget=*/expert_bytes);  // 只装得下一个
+        ExpertBytes one, two;
+        src.begin_token();
+        CHECK(src.get(0, one, err));
+        CHECK(one.resident && src.bytes_resident() == expert_bytes);
+        src.begin_token();
+        CHECK(src.get(1, two, err));
+        CHECK(!two.resident);  // 没进缓存
+        CHECK(src.transient_reads() == 1);
+        CHECK(src.residents() == 1 && src.bytes_resident() == expert_bytes);
+        // 临时缓冲里的字节必须与常驻区那条路径给出的一样（正确性不受预算影响）。
+        CHECK(two.gate != nullptr && two.down != nullptr);
+        const artifact::GgufTensorInfo* gt = g.find("blk.0.ffn_gate_exps.weight");
+        const std::uint64_t per_expert_gate = spec.gate.rows * spec.gate.row_bytes();
+        std::vector<std::uint8_t> want(static_cast<std::size_t>(per_expert_gate));
+        CHECK(g.read_at(gt->offset + 1 * per_expert_gate, want.data(), want.size()));
+        for (std::size_t i = 0; i < want.size(); ++i) {
+            if (want[i] != two.gate[i]) {
+                std::printf("FAIL 临时缓冲第 %zu 字节：得 %u 期 %u\n", i, two.gate[i], want[i]);
+                CHECK(false);
+            }
+        }
+    }
+
+    // (4) pin 住的专家不被换出：组内全不可驱逐时这次不准入（改走临时缓冲），而不是硬换。
+    {
+        storage::FifoPolicy fifo;
+        ExpertSource src(g, "blk.0.ffn_", spec, fifo, /*slots=*/1, /*ways=*/1, /*byte_budget=*/0);
+        ExpertBytes a;
+        src.begin_token();
+        CHECK(src.get(0, a, err));
+        CHECK(src.pin(0, err));
+        ExpertBytes b;
+        src.begin_token();
+        CHECK(src.get(1, b, err));  // 装不下也不报错
+        CHECK(!b.resident);
+        CHECK(src.blocked_admissions() == 1);
+        CHECK(src.residents() == 1 && src.page_entries() == 1);  // 0 还在
+        // unpin 之后就能换出它了。
+        CHECK(src.unpin(0, err));
+        src.begin_token();
+        ExpertBytes c;
+        CHECK(src.get(1, c, err));
+        CHECK(c.resident);
+        CHECK(src.stats().replaced == 1);
+        // unpin 一个计数已为 0 的会失败（不允许静默下溢）。
+        CHECK(!src.unpin(0, err));
+    }
+
+    // (5) 张力名对不上时明确失败。
+    {
+        storage::LruPolicy lru;
+        ExpertSource src(g, "blk.9.ffn_", spec, lru, 8, 8, 0);
+        ExpertBytes out;
+        err.clear();
+        CHECK(!src.get(0, out, err));
+        CHECK(!err.empty());
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -763,6 +924,7 @@ int main(int argc, char** argv) {
     test_failures();
     test_shared_expert_plain_add();
     test_shared_scalar_gate_applied_once();
+    test_expert_source();
     std::puts("moe_layer: routing, per-expert offsets, weighted accumulation and the shared expert hold");
     return 0;
 }

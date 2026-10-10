@@ -115,6 +115,35 @@ void test_tier_accounting() {
 
 }  // namespace
 
+void test_remove_guards_the_invariants() {
+    PageTable t;
+    admit_three(t);
+    t.advance_generation();
+
+    // 未登记过的不存在可摘。
+    CHECK(!t.remove(BlockId{99}));
+
+    // 不变量 2：引用计数不为零时不许摘。
+    CHECK(t.acquire(kA, 3, /*must=*/true));
+    CHECK(!t.remove(kA));
+    CHECK(t.size() == 3);                       // 拒绝之后条目还在
+    CHECK(t.release(kA));
+    CHECK(t.remove(kA));                        // 归零之后可以
+    CHECK(t.query(kA) == nullptr && t.size() == 2);
+
+    // 不变量 1：预取在途时不许摘（摘了会让预取的回填写到别人的位置上）。
+    CHECK(t.set_prefetch(kB, PrefetchState::kInflight));
+    CHECK(!t.remove(kB));
+    CHECK(t.query(kB) != nullptr);
+    CHECK(t.set_prefetch(kB, PrefetchState::kIdle));
+    CHECK(t.remove(kB));
+    CHECK(t.size() == 1);
+
+    // 摘掉之后同一个块可以重新登记（缓存换出又换回来是常态）。
+    CHECK(t.admit(kA, BlockClass::kExpert, Tier::kVram, 1'000));
+    CHECK(t.query(kA) != nullptr);
+}
+
 int main() {
     test_admit_and_query();
     test_refcount_and_evictable();
@@ -122,6 +151,7 @@ int main() {
     test_eviction_prefers_cold_and_old();
     test_current_generation_is_protected();
     test_tier_accounting();
+    test_remove_guards_the_invariants();
     std::puts("page_table: all invariants hold");
     return 0;
 }

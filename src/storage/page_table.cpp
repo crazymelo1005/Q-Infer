@@ -119,6 +119,15 @@ std::optional<BlockId> PageTable::evict_one() {
     return victim;
 }
 
+bool PageTable::remove(BlockId id) {
+    auto it = entries_.find(id);
+    if (it == entries_.end()) return false;
+    if (it->second.refcount != 0) return false;                       // 不变量 2
+    if (it->second.prefetch == PrefetchState::kInflight) return false;  // 不变量 1
+    entries_.erase(it);
+    return true;
+}
+
 std::uint64_t PageTable::bytes_in(Tier tier) const {
     std::uint64_t total = 0;
     for (const auto& [id, e] : entries_) {

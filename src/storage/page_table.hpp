@@ -76,6 +76,10 @@ public:
     // 只考虑本世代之前登记、引用计数归零、预取不在途的块；没有候选时返回 nullopt。
     std::optional<BlockId> evict_one();
 
+    // 摘掉某个指定的块（它的字节已经从所在层里退掉了）。引用计数不为零或预取在途时拒绝，
+    // 返回 false——这是不变量 1 与 2 的守卫，不是「尽力而为」。
+    bool remove(BlockId id);
+
     std::size_t size() const { return entries_.size(); }
     std::uint64_t bytes_in(Tier tier) const;
     std::uint64_t generation() const { return generation_; }

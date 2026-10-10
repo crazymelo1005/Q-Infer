@@ -40,9 +40,10 @@ add_library(qinfer_experts
   src/experts/router.cpp
   src/experts/moe_layer.cpp
   src/experts/expert_worker.cpp
+  src/experts/expert_source.cpp
 )
 target_include_directories(qinfer_experts PUBLIC src)
-target_link_libraries(qinfer_experts PUBLIC qinfer_artifact qinfer_kernels)
+target_link_libraries(qinfer_experts PUBLIC qinfer_artifact qinfer_kernels qinfer_storage)
 
 add_library(qinfer_kernels
   src/kernels/iq4nl.cpp
