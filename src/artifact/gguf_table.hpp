@@ -71,10 +71,10 @@ public:
     const std::string& tensor_name() const { return name_; }
 
     // 读一行原始字节到 out（长度须为 row_bytes()）。行号越界或读失败返回 false。
-    bool read_row(std::uint32_t row, std::uint8_t* out);
+    bool read_row(std::uint32_t row, std::uint8_t* out) const;
 
 private:
-    std::ifstream file_;
+    mutable std::ifstream file_;
     std::string path_;
     std::string name_;
     std::uint64_t rows_ = 0;

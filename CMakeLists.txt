@@ -25,6 +25,12 @@ add_library(qinfer_artifact
 )
 target_include_directories(qinfer_artifact PUBLIC src)
 
+add_library(qinfer_ple
+  src/ple/row_path.cpp
+)
+target_include_directories(qinfer_ple PUBLIC src)
+target_link_libraries(qinfer_ple PUBLIC qinfer_artifact qinfer_kernels qinfer_storage qinfer_scheduling)
+
 add_library(qinfer_experts
   src/experts/expert_formats.cpp
   src/experts/ffn.cpp
@@ -84,7 +90,7 @@ add_executable(test_row_cache tests/test_row_cache.cpp)
 target_link_libraries(test_row_cache PRIVATE qinfer_storage)
 
 add_executable(test_ple_read_path tests/test_ple_read_path.cpp)
-target_link_libraries(test_ple_read_path PRIVATE qinfer_storage qinfer_scheduling qinfer_kernels)
+target_link_libraries(test_ple_read_path PRIVATE qinfer_ple)
 
 add_executable(test_gguf_table tests/test_gguf_table.cpp)
 target_link_libraries(test_gguf_table PRIVATE qinfer_artifact qinfer_kernels)

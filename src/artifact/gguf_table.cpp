@@ -237,7 +237,7 @@ bool GgufTable::open(const std::string& path, std::string& err) {
     return true;
 }
 
-bool GgufTable::read_row(std::uint32_t row, std::uint8_t* out) {
+bool GgufTable::read_row(std::uint32_t row, std::uint8_t* out) const {
     if (!file_.is_open() || row_bytes_ == 0 || row >= rows_) return false;
     const std::uint64_t at = data_start_ + tensor_offset_ + static_cast<std::uint64_t>(row) * row_bytes_;
     if (at + row_bytes_ > file_size_) return false;
