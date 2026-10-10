@@ -34,6 +34,12 @@ add_library(qinfer_ple
 target_include_directories(qinfer_ple PUBLIC src)
 target_link_libraries(qinfer_ple PUBLIC qinfer_artifact qinfer_kernels qinfer_storage qinfer_scheduling)
 
+add_library(qinfer_dense
+  src/dense/gated_residual.cpp
+)
+target_include_directories(qinfer_dense PUBLIC src)
+target_link_libraries(qinfer_dense PUBLIC qinfer_kernels)
+
 add_library(qinfer_experts
   src/experts/expert_formats.cpp
   src/experts/ffn.cpp
@@ -166,6 +172,9 @@ target_link_libraries(test_expert_worker PRIVATE qinfer_experts)
 add_executable(test_layer_dispatch tests/test_layer_dispatch.cpp)
 target_link_libraries(test_layer_dispatch PRIVATE qinfer_experts)
 
+add_executable(test_gated_residual tests/test_gated_residual.cpp)
+target_link_libraries(test_gated_residual PRIVATE qinfer_dense)
+
 add_executable(test_step_record tests/test_step_record.cpp)
 target_link_libraries(test_step_record PRIVATE qinfer_experts)
 
@@ -199,4 +208,5 @@ add_test(NAME moe_layer COMMAND test_moe_layer)
 add_test(NAME bus_share COMMAND test_bus_share)
 add_test(NAME expert_worker COMMAND test_expert_worker)
 add_test(NAME layer_dispatch COMMAND test_layer_dispatch)
+add_test(NAME gated_residual COMMAND test_gated_residual)
 add_test(NAME step_record COMMAND test_step_record)

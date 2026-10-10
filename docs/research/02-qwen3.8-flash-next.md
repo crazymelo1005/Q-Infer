@@ -57,6 +57,8 @@
 
 对引擎的含义：GR 权重属于「每 token 必用」，必须常驻显存。
 
+精确口径与几何（2026-10-10，来自 llama.cpp 的 `build_hc_mix` / `build_hc_combine` 与参考引擎的 `gr.hpp` 契约头，两处逐字对过，[S-53]）：`h = rms_norm(R)·w_norm`（逐流一条 RMS、化简在 2560 上），`lo = silu((bf16(h)·w_downᵀ)/hc)`（除 hc 在 silu 里面），`mixed = (1/hc)Σ_c h_c·sigmoid(bf16(lo)·w_up_cᵀ)`（按流平均；被门乘的是未舍入的 h），`inject_c = bf16(h)_c·w_inject_cᵀ`；回写 `R_c += block_out·2·sigmoid(inject_c/hc)`，`2·sigmoid` 把门心定在 1。几何 hc = 4、n_embd = 2560、瓶颈秩 hc_lr = 320（引擎契约头注明「the real model」；未从 GGUF 直读核对）。权重在包里是 bf16、w_norm 已被转换器折叠成 1 + w；逐层张力名是 `blk.<il>.hc_attn_{norm,down,up,inject}` 与 `hc_ffn_*`，最后那个不带回写门的 mixer 是 `output_hc_{norm,down,up}`。这两处「一读就过」的地方（除 hc 在 silu 里、按流平均还是求和）连同激活的 bf16 舍入一起，在实现与测试里各有错读法对照。实现见 `src/dense/gated_residual`。
+
 ### 2.3 N-gram Embedding（51B 外挂表）
 
 - 把当前位置前若干 token 拼成 key → 去大表查向量 → 叠加到表示上。加容量不加计算。
