@@ -19,6 +19,11 @@ using namespace qinfer::kernels;
 
 namespace {
 
+// 由 measure/iq4nl_oracle.py 从真实 GGUF 生成：kIq4nlRealHex / kIq4nlRealFirst16 /
+// kIq4nlRealBlock7_16 / kIq4nlRealSum / kIq4nlRealSumAbs。真实张量是另一档模型里用 IQ4_NL 作
+// 权重的那 18 层 down 之一（blk.0.ffn_down_exps.weight）。
+#include "iq4nl_oracle_data.inc"
+
 std::vector<std::uint8_t> from_hex(const std::string& hex) {
     CHECK(hex.size() % 2 == 0);
     std::vector<std::uint8_t> out;
@@ -105,12 +110,161 @@ void test_fp16_halfway_values() {
     near(f16_bits_to_f32(0x7C00), std::numeric_limits<float>::infinity(), "fp16 inf", 0);
 }
 
+// ---- 通用块路径（IQ4_NL 作权重、Q8_0 作激活） ----
+
+// 一块：d 为给定 fp16，16 个半字节字节全是 qs。
+std::vector<std::uint8_t> flat_iq4nl_block(std::uint16_t d_bits, std::uint8_t qs) {
+    std::vector<std::uint8_t> b(kIq4nlBlockBytes, qs);
+    b[0] = static_cast<std::uint8_t>(d_bits & 0xFF);
+    b[1] = static_cast<std::uint8_t>(d_bits >> 8);
+    return b;
+}
+
+Q80Block flat_q80(std::uint16_t d_bits, std::int8_t qs) {
+    Q80Block y{};
+    y.d_bits = d_bits;
+    for (int j = 0; j < kQ80BlockElems; ++j) y.qs[j] = qs;
+    return y;
+}
+
+void test_block_handmade_and_dot() {
+    // d = 1.0、qs[j] = (j<<4)|j -> 低半字节 j 是元素 j，高半字节 j 是元素 j+16。
+    const auto b = flat_iq4nl_block(0x3C00, 0);
+    float out[kIq4nlValuesPerBlock];
+    for (int j = 0; j < 16; ++j) {
+        std::vector<std::uint8_t> bb = b;
+        bb[2 + j] = static_cast<std::uint8_t>((j << 4) | j);
+        dequant_iq4nl_block(bb.data(), out);
+        CHECK(std::bit_cast<std::uint32_t>(out[j]) ==
+              std::bit_cast<std::uint32_t>(kCodebook[j]));
+        CHECK(std::bit_cast<std::uint32_t>(out[j + 16]) ==
+              std::bit_cast<std::uint32_t>(kCodebook[j]));
+    }
+
+    // 点积：载入的块每半字节都是 0 -> 码本第 0 项 -127，故 32 个权重都是 -127；
+    // 激活 d = 1.0、qs 全 1 -> 每个 1.0。点积 = 32 · (-127) = -4064。
+    const auto w = flat_iq4nl_block(0x3C00, 0x00);
+    const Q80Block y = flat_q80(0x3C00, 1);
+    CHECK(std::bit_cast<std::uint32_t>(iq4nl_dot_q8_0(w.data(), &y, 1)) ==
+          std::bit_cast<std::uint32_t>(-4064.0f));
+
+    // 每半字节都是 8 -> 码本第 8 项 1，故 32 个权重都是 1；点积 = 32。
+    const auto w2 = flat_iq4nl_block(0x3C00, 0x88);
+    CHECK(std::bit_cast<std::uint32_t>(iq4nl_dot_q8_0(w2.data(), &y, 1)) ==
+          std::bit_cast<std::uint32_t>(32.0f));
+}
+
+void test_block_real_bytes() {
+    const std::vector<std::uint8_t> w = from_hex(kIq4nlRealHex);
+    CHECK(w.size() == 16u * static_cast<std::size_t>(kIq4nlBlockBytes));
+
+    float out[kIq4nlValuesPerBlock];
+    double sum = 0.0;
+    double sumabs = 0.0;
+    for (int b = 0; b < 16; ++b) {
+        const std::uint8_t* blk = w.data() + b * kIq4nlBlockBytes;
+        dequant_iq4nl_block(blk, out);
+        const float d = f16_bits_to_f32(static_cast<std::uint16_t>(blk[0] | (blk[1] << 8)));
+        for (int j = 0; j < kIq4nlValuesPerBlock; ++j) {
+            // 结构不变量：幅值必须是 |d| 乘码本 16 项之一。
+            bool ok = false;
+            for (int k = 0; k < 16; ++k) {
+                ok = ok || std::fabs(out[j]) == std::fabs(d * kCodebook[k]);
+            }
+            if (!ok) {
+                std::printf("FAIL invariant block %d elem %d: v=%.9g d=%.9g\n", b, j,
+                            static_cast<double>(out[j]), static_cast<double>(d));
+                CHECK(false);
+            }
+            sum += static_cast<double>(out[j]);
+            sumabs += std::fabs(static_cast<double>(out[j]));
+        }
+        if (b == 0) {
+            for (int j = 0; j < 16; ++j) {
+                const std::uint32_t got = std::bit_cast<std::uint32_t>(out[j]);
+                if (got != kIq4nlRealFirst16[j]) {
+                    std::printf("FAIL first16 j=%d: got 0x%08x want 0x%08x\n", j, got,
+                                kIq4nlRealFirst16[j]);
+                    CHECK(false);
+                }
+            }
+        }
+    }
+    dequant_iq4nl_block(w.data() + 7 * kIq4nlBlockBytes, out);
+    for (int j = 0; j < 16; ++j) {
+        const std::uint32_t got = std::bit_cast<std::uint32_t>(out[16 + j]);
+        if (got != kIq4nlRealBlock7_16[j]) {
+            std::printf("FAIL block7_16 j=%d: got 0x%08x want 0x%08x\n", j, got,
+                        kIq4nlRealBlock7_16[j]);
+            CHECK(false);
+        }
+    }
+    const double tol = 1e-12 * (std::fabs(kIq4nlRealSumAbs) > 0 ? std::fabs(kIq4nlRealSumAbs) : 1.0);
+    if (std::fabs(sum - kIq4nlRealSum) > tol) {
+        std::printf("FAIL sum: got %.17g want %.17g\n", sum, kIq4nlRealSum);
+        CHECK(false);
+    }
+    if (std::fabs(sumabs - kIq4nlRealSumAbs) > tol) {
+        std::printf("FAIL sumabs: got %.17g want %.17g\n", sumabs, kIq4nlRealSumAbs);
+        CHECK(false);
+    }
+}
+
+void test_block_dot_and_row_stride() {
+    const std::vector<std::uint8_t> w = from_hex(kIq4nlRealHex);
+    // 激活必须逐元素变化：若同一块内所有 qs 相同，点积里「元素 j 与 j+16 的配对」就不可辨识，
+    // 把第二半的激活索引写错也测不出来（这正是本用例第一版被变异测试放过的原因）。
+    std::vector<Q80Block> y(16);
+    for (int b = 0; b < 16; ++b) {
+        y[b].d_bits = 0x3C00;
+        for (int j = 0; j < kQ80BlockElems; ++j) {
+            y[b].qs[j] = static_cast<std::int8_t>(((b * 7 + j * 5) % 251) - 125);
+        }
+    }
+
+    const float fused = iq4nl_dot_q8_0(w.data(), y.data(), 16);
+    double acc = 0.0;
+    double mag = 0.0;
+    float wv[kIq4nlValuesPerBlock];
+    float yv[kQ80BlockElems];
+    for (int b = 0; b < 16; ++b) {
+        dequant_iq4nl_block(w.data() + b * kIq4nlBlockBytes, wv);
+        q8_0_dequant_block(y[b], yv);
+        for (int j = 0; j < kIq4nlValuesPerBlock; ++j) {
+            const double term = static_cast<double>(wv[j]) * static_cast<double>(yv[j]);
+            acc += term;
+            mag += std::fabs(term);
+        }
+    }
+    const double rel = std::fabs(static_cast<double>(fused) - acc) / (mag > 0.0 ? mag : 1.0);
+    if (!(rel < 1e-6)) {
+        std::printf("FAIL fused vs float path: fused %.9g float %.9g rel %.3g\n",
+                    static_cast<double>(fused), acc, rel);
+        CHECK(false);
+    }
+
+    // 逐行 GEMV：2 行 × 8 块，所有行共用同一组激活。
+    float gemv[2];
+    iq4nl_gemv_q8_0(w.data(), 2, 8, y.data(), gemv);
+    for (int r = 0; r < 2; ++r) {
+        const float one = iq4nl_dot_q8_0(w.data() + r * 8 * kIq4nlBlockBytes, y.data(), 8);
+        if (std::bit_cast<std::uint32_t>(gemv[r]) != std::bit_cast<std::uint32_t>(one)) {
+            std::printf("FAIL gemv row %d: got 0x%08x want 0x%08x\n", r,
+                        std::bit_cast<std::uint32_t>(gemv[r]), std::bit_cast<std::uint32_t>(one));
+            CHECK(false);
+        }
+    }
+}
+
 }  // namespace
 
 int main() {
     test_handmade_row_pins_codebook_and_nibble_order();
     test_model_row_zero_matches_oracle();
     test_fp16_halfway_values();
-    std::puts("iq4nl: row dequant matches both oracles");
+    test_block_handmade_and_dot();
+    test_block_real_bytes();
+    test_block_dot_and_row_stride();
+    std::puts("iq4nl: row and block dequant plus IQ4_NLxQ8_0 dot pinned by handmade, real bytes and float cross-check");
     return 0;
 }
