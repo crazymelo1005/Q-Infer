@@ -204,6 +204,45 @@ void test_dot_matches_float_path_and_row_stride() {
     }
 }
 
+void test_q8_0_quantizer() {
+    // 手算一块：x = [1.0, -0.5, 0.25, 0...] -> amax = 1.0、d = 1/127、id = 127。
+    // qs[0] = round(127) = 127；qs[1] = round(-63.5) = -64（.5 远离零）；qs[2] = round(31.75) = 32。
+    float x[kQ80BlockElems] = {};
+    x[0] = 1.0f;
+    x[1] = -0.5f;
+    x[2] = 0.25f;
+    Q80Block b;
+    q8_0_quantize_row(x, &b, 1);
+    CHECK(b.qs[0] == 127);
+    CHECK(b.qs[1] == -64);
+    CHECK(b.qs[2] == 32);
+    for (int j = 3; j < kQ80BlockElems; ++j) CHECK(b.qs[j] == 0);
+
+    // 误差界：重建值 d·qs 与原值的差不超过半个量化步长（d 是 fp16 化之后的尺度）。
+    float out[kQ80BlockElems];
+    q8_0_dequant_block(b, out);
+    const float d = f16_bits_to_f32(b.d_bits);
+    const float half_step = std::fabs(d) * 0.5f;
+    for (int j = 0; j < kQ80BlockElems; ++j) {
+        const float err = std::fabs(out[j] - x[j]);
+        if (!(err <= half_step + 1e-6f)) {
+            std::printf("FAIL q8_0 err j=%d: err %.9g half_step %.9g\n", j,
+                        static_cast<double>(err), static_cast<double>(half_step));
+            CHECK(false);
+        }
+    }
+    // 尺度以 fp16 存（ggml 里 d 是 ggml_half），所以重建值带约 2^-11 的相对误差；
+    // 这里只要求它落在 fp16 尺度带来的量级里，不为 1e-6 这种精度背书。
+    CHECK(std::fabs(out[0] - 1.0f) <= 1e-3f);
+
+    // 零块：尺度为 0、量化全 0。
+    float z[kQ80BlockElems] = {};
+    Q80Block zb;
+    q8_0_quantize_row(z, &zb, 1);
+    CHECK(std::bit_cast<std::uint32_t>(f16_bits_to_f32(zb.d_bits)) == 0u);
+    for (int j = 0; j < kQ80BlockElems; ++j) CHECK(zb.qs[j] == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -211,6 +250,7 @@ int main() {
     test_handmade_dot();
     test_real_bytes_invariant_and_regression();
     test_dot_matches_float_path_and_row_stride();
+    test_q8_0_quantizer();
     std::puts("q2_0: block dequant and Q2_0xQ8_0 dot pinned by handmade, real bytes and float cross-check");
     return 0;
 }

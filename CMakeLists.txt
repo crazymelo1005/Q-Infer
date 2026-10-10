@@ -27,6 +27,7 @@ target_include_directories(qinfer_artifact PUBLIC src)
 
 add_library(qinfer_experts
   src/experts/expert_formats.cpp
+  src/experts/ffn.cpp
 )
 target_include_directories(qinfer_experts PUBLIC src)
 target_link_libraries(qinfer_experts PUBLIC qinfer_artifact qinfer_kernels)
@@ -89,6 +90,9 @@ target_link_libraries(test_gguf_table PRIVATE qinfer_artifact qinfer_kernels)
 add_executable(test_expert_formats tests/test_expert_formats.cpp)
 target_link_libraries(test_expert_formats PRIVATE qinfer_experts)
 
+add_executable(test_ffn tests/test_ffn.cpp)
+target_link_libraries(test_ffn PRIVATE qinfer_experts)
+
 enable_testing()
 add_test(NAME page_table COMMAND test_page_table)
 add_test(NAME budget_arbiter COMMAND test_budget_arbiter)
@@ -104,3 +108,4 @@ add_test(NAME row_cache COMMAND test_row_cache)
 add_test(NAME ple_read_path COMMAND test_ple_read_path)
 add_test(NAME gguf_table COMMAND test_gguf_table)
 add_test(NAME expert_formats COMMAND test_expert_formats)
+add_test(NAME ffn COMMAND test_ffn)

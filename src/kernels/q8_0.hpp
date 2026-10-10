@@ -19,6 +19,9 @@ struct Q80Block {
 
 static_assert(sizeof(Q80Block) == kQ80BlockBytes, "Q8_0 block size mismatch");
 
+// 参考激活量化器：尺度是块内绝对值最大者除以 127（fp16 存），量化到最近整数。
+void q8_0_quantize_row(const float* x, Q80Block* out, int n_blocks);
+
 void q8_0_dequant_block(const Q80Block& blk, float* out32);
 
 }  // namespace qinfer::kernels

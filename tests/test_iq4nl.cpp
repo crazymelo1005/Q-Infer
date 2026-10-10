@@ -110,6 +110,31 @@ void test_fp16_halfway_values() {
     near(f16_bits_to_f32(0x7C00), std::numeric_limits<float>::infinity(), "fp16 inf", 0);
 }
 
+void test_f32_to_f16() {
+    // 全部 65536 个 fp16 位型经「f16 -> f32 -> f16」必须回到原值（正规、次正规、零都算）；
+    // 非有限值按 ggml 的约定统一归一成 0x7E00（尾数信息丢失，符号保留）。
+    for (std::uint32_t bits = 0; bits < 0x10000u; ++bits) {
+        const std::uint16_t h = static_cast<std::uint16_t>(bits);
+        const float f = f16_bits_to_f32(h);
+        const std::uint16_t back = f32_to_f16_bits(f);
+        const bool is_nan = ((h >> 10) & 0x1Fu) == 0x1Fu && (h & 0x3FFu) != 0;
+        const std::uint16_t want = is_nan ? static_cast<std::uint16_t>((h & 0x8000u) | 0x7E00u) : h;
+        if (back != want) {
+            std::printf("FAIL roundtrip 0x%04x -> %g -> 0x%04x (want 0x%04x)\n", h,
+                        static_cast<double>(f), back, want);
+            CHECK(false);
+        }
+    }
+    // 已知值：1.0、-2.0、fp16 最大正规数、上溢到 Inf、最小次正规。
+    CHECK(f32_to_f16_bits(1.0f) == 0x3C00);
+    CHECK(f32_to_f16_bits(-2.0f) == 0xC000);
+    CHECK(f32_to_f16_bits(65504.0f) == 0x7BFF);
+    CHECK(f32_to_f16_bits(65520.0f) == 0x7C00);       // 恰好是上溢的中间点，就近舍入到偶数
+    CHECK(f32_to_f16_bits(5.9604645e-8f) == 0x0001);  // 最小次正规
+    CHECK(f32_to_f16_bits(0.0f) == 0x0000);
+    CHECK(f32_to_f16_bits(-0.0f) == 0x8000);
+}
+
 // ---- 通用块路径（IQ4_NL 作权重、Q8_0 作激活） ----
 
 // 一块：d 为给定 fp16，16 个半字节字节全是 qs。
@@ -262,6 +287,7 @@ int main() {
     test_handmade_row_pins_codebook_and_nibble_order();
     test_model_row_zero_matches_oracle();
     test_fp16_halfway_values();
+    test_f32_to_f16();
     test_block_handmade_and_dot();
     test_block_real_bytes();
     test_block_dot_and_row_stride();
