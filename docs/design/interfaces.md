@@ -134,6 +134,8 @@
 - 结果按专家 id 全序并入，与 [ADR-009](adr/ADR-009-correctness-acceptance-criteria.md) 与 engine §16 的归约顺序要求一致。
 - 归约顺序固定之后，同配置下的可复现性按 8.5 的两档口径界定。
 
+已落地的是前两条：`src/experts/layer_dispatch` 把一层的一批未命中专家做完——从 `experts/expert_source` 取齐字节（常驻的按页表引用计数钉住、非常驻的拷进批内缓冲，因为那条共享的临时缓冲下一次读就会被覆写），组成一个 `ExpertJob`，在汇合点 `wait()` 取回，再按专家 id 升序并入 out。归并顺序与逐专家路径同一份排序（engine §16），故两条路径在真权重上逐位一致（部署那份与另一档 IQ3_XXS 档的层 0 / 12 / 47，各 10 个真实专家）。共享专家不走这条批：它在显存侧常驻，由 `experts/moe_layer` 的 `add_shared_expert` 另加，两条路径共用那一处。
+
 ### 8.4 降级与失败
 
 | 情形 | 处理 |
@@ -154,7 +156,7 @@ R-08 记录的同类平台先例伴随 GPU 复位，故失败路径必须是可�
 
 接口、纯 CPU 的 worker、核显占位实现（初始化即报不可用并附探测结论）、总线份额限流器进 `src/experts` 与 `src/scheduling`。核显内核要等 SPIR-V 工具链到位，现状见 engine §13 的实测。接口不绑定图形 API；第一套实现取 Vulkan compute，因为环境2 上它的运行时依赖为零新增。
 
-已落地的是接口这一层：`src/experts/expert_worker`（`ExpertJob`、`ExpertWorker`、`CpuExpertWorker`、核显占位 `IgpuExpertWorker`，以及 8.4 那条重派语义 `run_job_with_fallback`）与 `src/scheduling/bus_share`（份额默认 0 即关闭）。核显内核本身仍待工具链，故占位实现的 `available()` 恒假、失败原因里带上本节引用的探测结论。
+已落地的是接口这一层：`src/experts/expert_worker`（`ExpertJob`、`ExpertWorker`、`CpuExpertWorker`、核显占位 `IgpuExpertWorker`，以及 8.4 那条重派语义 `run_job_with_fallback`）与 `src/scheduling/bus_share`（份额默认 0 即关闭）。作业的组装与归并在 `src/experts/layer_dispatch`：它是一层一批这条缝的生产调用方。核显内核本身仍待工具链，故占位实现的 `available()` 恒假、失败原因里带上本节引用的探测结论；批量路径在首选工人不可用或提交失败时改派 CPU（8.4），测试里有一条钉住「不可用的那个不该被调用」（它的失败计数保持 0）。
 
 ## 9. 尚未定义
 

@@ -64,6 +64,7 @@ struct MoeScratch {
     std::vector<float> expert_out;
     std::vector<int> ids;
     std::vector<float> weights;
+    std::vector<int> order;  // 归并顺序：ids 的按专家 id 升序排列（engine §16）
     // 共享专家：标量门的 bf16 权重、三矩阵的字节区、以及它自己的中间缓冲。
     std::vector<std::uint16_t> s_gate_inp;
     std::vector<std::uint8_t> s_gate, s_up, s_down;
@@ -77,8 +78,18 @@ struct MoeScratch {
 // 跑一层：读路由矩阵 → 路由出 top-k → 逐个读该专家的三矩阵并前馈 → 按权重累加 → 有共享专家则再加。
 // 组合口径是 `y = Σ wᵢ·expertᵢ + shared`：路由侧按权重、共享侧**不加权**直接相加（[S-50]）。
 // out 长 hidden，覆盖写（MoE 输出本身）。若 ids 与 weights 非空则回填路由结果，便于核对。
+//
+// 归并顺序固定为**专家 id 升序**（engine §16）：路由给出的排名序只决定「取哪 k 个、各自权重多少」，
+// 不决定归并顺序。三路计算（显存侧命中专家、CPU 侧未命中、核显分担）都必须按同一顺序并入，否则同
+// 配置下无法逐位复现。`src/experts/layer_dispatch` 的批量路径用的就是同一顺序。
 bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const float* x, float* out,
                    MoeScratch& scratch, std::string& err, int* ids_out = nullptr,
                    float* weights_out = nullptr);
+
+// 加上这一层的共享专家（`y += shared`）。该层没有共享专家时什么也不做、返回真。
+// 单独抽出来是因为共享专家不属于「未命中专家」那一批：批量分担走 `layer_dispatch`，共享专家在
+// 显存侧算（engine §6），两条路径各自把结果加进同一个 out。
+bool add_shared_expert(const artifact::GgufFile& gguf, const MoeLayer& layer, const float* x,
+                       float* out, MoeScratch& scratch, std::string& err);
 
 }  // namespace qinfer::experts

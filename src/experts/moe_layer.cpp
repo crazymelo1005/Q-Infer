@@ -1,5 +1,7 @@
 #include "experts/moe_layer.hpp"
 
+#include <algorithm>
+
 namespace qinfer::experts {
 
 namespace {
@@ -146,8 +148,16 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
         s.source->observe_token(reinterpret_cast<const std::uint32_t*>(s.ids.data()), k);
     }
 
-    for (int i = 0; i < k; ++i) {
-        const std::uint64_t e = static_cast<std::uint64_t>(s.ids[static_cast<std::size_t>(i)]);
+    // 归并顺序固定为专家 id 升序（engine §16）。排名序只用来取前 k 与定权重，不用来定归并顺序。
+    s.order.resize(static_cast<std::size_t>(k));
+    for (int i = 0; i < k; ++i) s.order[static_cast<std::size_t>(i)] = i;
+    std::sort(s.order.begin(), s.order.end(),
+              [&s](int a, int b) { return s.ids[static_cast<std::size_t>(a)] <
+                                           s.ids[static_cast<std::size_t>(b)]; });
+
+    for (int t = 0; t < k; ++t) {
+        const std::size_t i = static_cast<std::size_t>(s.order[static_cast<std::size_t>(t)]);
+        const std::uint64_t e = static_cast<std::uint64_t>(s.ids[i]);
         ExpertWeights w;
         if (s.source != nullptr) {
             ExpertBytes eb;
@@ -167,39 +177,44 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
             w = ExpertWeights{s.gate.data(), s.up.data(), s.down.data()};
         }
         if (!expert_ffn(layer.spec, w, x, s.ffn, s.expert_out.data(), err)) return false;
-        const float wt = s.weights[static_cast<std::size_t>(i)];
+        const float wt = s.weights[i];
         for (std::size_t j = 0; j < hidden; ++j) out[j] += wt * s.expert_out[j];
     }
 
+    return add_shared_expert(gguf, layer, x, out, s, err);
+}
+
+bool add_shared_expert(const artifact::GgufFile& gguf, const MoeLayer& layer, const float* x,
+                       float* out, MoeScratch& s, std::string& err) {
     // 共享专家：路由侧按权重、共享侧不加权，直接加（`y = Σ wᵢ·expertᵢ + shared`，[S-50]）。
-    if (layer.shared.present) {
-        s.s_gate_inp.resize(hidden);
-        if (!gguf.read_at(layer.s_gate_inp->offset,
-                          reinterpret_cast<std::uint8_t*>(s.s_gate_inp.data()), hidden * 2)) {
-            err = "读共享专家的标量门失败";
-            return false;
-        }
-        const std::uint64_t s_gate_bytes = layer.shared.gate.rows * layer.shared.gate.row_bytes();
-        const std::uint64_t s_up_bytes = layer.shared.up.rows * layer.shared.up.row_bytes();
-        const std::uint64_t s_down_bytes = layer.shared.down.rows * layer.shared.down.row_bytes();
-        s.s_gate.resize(s_gate_bytes);
-        s.s_up.resize(s_up_bytes);
-        s.s_down.resize(s_down_bytes);
-        // 共享专家没有专家维，故起点就是张力起点，不加逐专家偏移。
-        if (!gguf.read_at(layer.s_gate->offset, s.s_gate.data(), s.s_gate.size()) ||
-            !gguf.read_at(layer.s_up->offset, s.s_up.data(), s.s_up.size()) ||
-            !gguf.read_at(layer.s_down->offset, s.s_down.data(), s.s_down.size())) {
-            err = "读共享专家的矩阵失败";
-            return false;
-        }
-        ExpertWeights sw{s.s_gate.data(), s.s_up.data(), s.s_down.data()};
-        s.shared_out.assign(hidden, 0.0f);
-        if (!shared_expert_ffn(layer.shared, sw, s.s_gate_inp.data(), x, s.shared_out.data(),
-                               s.s_ffn, err)) {
-            return false;
-        }
-        for (std::size_t j = 0; j < hidden; ++j) out[j] += s.shared_out[j];
+    if (!layer.shared.present) return true;
+    const std::size_t hidden = static_cast<std::size_t>(layer.hidden);
+    s.s_gate_inp.resize(hidden);
+    if (!gguf.read_at(layer.s_gate_inp->offset, reinterpret_cast<std::uint8_t*>(s.s_gate_inp.data()),
+                      hidden * 2)) {
+        err = "读共享专家的标量门失败";
+        return false;
     }
+    const std::uint64_t s_gate_bytes = layer.shared.gate.rows * layer.shared.gate.row_bytes();
+    const std::uint64_t s_up_bytes = layer.shared.up.rows * layer.shared.up.row_bytes();
+    const std::uint64_t s_down_bytes = layer.shared.down.rows * layer.shared.down.row_bytes();
+    s.s_gate.resize(static_cast<std::size_t>(s_gate_bytes));
+    s.s_up.resize(static_cast<std::size_t>(s_up_bytes));
+    s.s_down.resize(static_cast<std::size_t>(s_down_bytes));
+    // 共享专家没有专家维，故起点就是张力起点，不加逐专家偏移。
+    if (!gguf.read_at(layer.s_gate->offset, s.s_gate.data(), s.s_gate.size()) ||
+        !gguf.read_at(layer.s_up->offset, s.s_up.data(), s.s_up.size()) ||
+        !gguf.read_at(layer.s_down->offset, s.s_down.data(), s.s_down.size())) {
+        err = "读共享专家的矩阵失败";
+        return false;
+    }
+    ExpertWeights sw{s.s_gate.data(), s.s_up.data(), s.s_down.data()};
+    s.shared_out.assign(hidden, 0.0f);
+    if (!shared_expert_ffn(layer.shared, sw, s.s_gate_inp.data(), x, s.shared_out.data(), s.s_ffn,
+                           err)) {
+        return false;
+    }
+    for (std::size_t j = 0; j < hidden; ++j) out[j] += s.shared_out[j];
     return true;
 }
 
