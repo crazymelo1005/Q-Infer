@@ -56,8 +56,14 @@
 
 ## 接口与边界
 
-- 接口：ONE API / SYCL 或 Level Zero；内核走 DP4a（若可用则 XMX）。
+- 接口：见 [interfaces.md](../interfaces.md) 第 8 节。该节只覆盖「专家分担」这一条缝；本节第一部分的三处无条件用途是各自独立的管线，不经过它。接口本身不绑定图形 API。
 - 边界：核显与 CPU 总吞吐共同受 ≈70GB/s 约束。
+
+接口与运行时的实测现状（2026-10-10，工具 `measure/igpu_probe.c`，记录 `measure/results/20261010T195533-igpuprobe-环境2.json`）：
+
+- 环境2 上核显没有任何计算运行时：无 Level Zero（无 loader、无头文件），OpenCL 只注册了 `nvidia.icd`。Vulkan 加载器与 Mesa 的 ANV 驱动在，故 Vulkan 路线的运行时依赖为零新增，Level Zero 路线则要加装 `intel-level-zero-gpu` 与 `level-zero-devel`。上游那套 Arc 端口是 SYCL，同样依赖 Intel 计算运行时。
+- 该设备在 192 项扩展里没有 `VK_KHR_shader_integer_dot_product`，即 Vulkan 路线上取不到 DP4a 等效指令，码本矩阵乘只能手写整数乘加。这与本 ADR 上文「内核走 DP4a（若可用则 XMX）」之间存在口径差：待决项是「改走 Vulkan 并手写整数乘加」还是「加装 Level Zero 以取 DP4a」，两者都要等一个真跑在核显上的码本内核才能比较（工具链前提见上一条）。
+- 带宽型争用实测：核显拷贝最好 26.9 GB/s（对总线约 53.7 GB/s）；与 8 线程 CPU 流式读同跑时 CPU 保留 41% 至 46%，两侧合计只有 CPU 单独的 0.98 至 1.10 倍。即带宽型工作下核显是争用者而非增量来源，与本 ADR「把它当第二个工人而不是独立的带宽来源」一致；算力型场景仍待测。
 
 ## 门禁（Gate）
 
