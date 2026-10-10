@@ -1,5 +1,6 @@
 #include "experts/ffn.hpp"
 
+#include "kernels/iq1m.hpp"
 #include "kernels/iq2s.hpp"
 #include "kernels/iq2xs.hpp"
 #include "kernels/iq2xs_dot.hpp"
@@ -46,6 +47,9 @@ bool run_gemv(const MatrixSpec& m, const std::uint8_t* w, FfnScratch& s, float* 
             return true;
         case Format::kIq2Xxs:
             kernels::iq2xxs_gemv_q8k(w, rows, blocks, s.act_k.data(), out);
+            return true;
+        case Format::kIq1M:
+            kernels::iq1m_gemv_q8k(w, rows, blocks, s.act_k.data(), out);
             return true;
         case Format::kQ2_0:
             kernels::q2_0_gemv_q8_0(w, rows, blocks, s.act_32.data(), out);

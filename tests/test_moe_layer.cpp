@@ -395,18 +395,18 @@ void test_failures() {
         CHECK(!build_moe_layer(g, 0, kTopK, layer, err));
         CHECK(!err.empty());
     }
-    // 不可用的档（IQ1_M）：把 gate/up 的类型码改成 29。
+    // 不可用的档（Q6_K）：把 gate/up 的类型码改成 14。
     {
         auto ts = layer_tensors("blk.0.", false, 0);
-        ts[0].type = 29;
-        ts[1].type = 29;
-        const std::filesystem::path p = write_gguf("qinfer_moe_iq1m.gguf", ts);
+        ts[0].type = 14;
+        ts[1].type = 14;
+        const std::filesystem::path p = write_gguf("qinfer_moe_nokernel.gguf", ts);
         artifact::GgufFile g;
         CHECK(g.open(p.string(), err));
         MoeLayer layer;
         err.clear();
         CHECK(!build_moe_layer(g, 0, kTopK, layer, err));
-        CHECK(err.find("IQ1_M") != std::string::npos);
+        CHECK(err.find("Q6_K") != std::string::npos);
     }
 }
 

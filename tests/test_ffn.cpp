@@ -309,10 +309,10 @@ void test_unusable_specs_fail() {
     std::vector<float> x(static_cast<std::size_t>(kHidden), 0.1f);
     std::vector<float> out(static_cast<std::size_t>(kHidden), 0.0f);
 
-    // gate 用没有内核的档（IQ1_M）：必须在组装前就失败。
+    // gate 用没有内核的档（Q6_K）：必须在组装前就失败。
     {
         const experts::LayerSpec spec =
-            make_spec(experts::Format::kIq1M, experts::Format::kIq1M, experts::Format::kQ2_0);
+            make_spec(experts::Format::kQ6K, experts::Format::kQ6K, experts::Format::kQ2_0);
         std::vector<std::uint8_t> g(256, 0);
         experts::ExpertWeights w{g.data(), g.data(), g.data()};
         err.clear();
