@@ -21,6 +21,7 @@
 #include "kernels/iq2s.hpp"
 #include "kernels/iq4nl.hpp"
 #include "kernels/q2_0.hpp"
+#include "kernels/q6k.hpp"
 #include "kernels/q8k.hpp"
 #include <cmath>
 #include <cstdint>
@@ -88,6 +89,33 @@ Matrix make_matrix_varied(experts::Format f, std::uint64_t rows, std::uint64_t c
     return m;
 }
 
+// Q6_K 的块布局与其他档不同：fp16 尺度在块末尾（偏移 208），scales 是块内 192..207 的 int8。
+// 故不能复用 make_matrix_varied——它把尺度写在块首。这里把尺度固定在 1..7 的正 int8、d 取 0.25，
+// 其余字节按 LCG 变化。量级必须压住：down 是 Q2_0，它的激活搭档 Q8_0 把块尺度存成 fp16，
+// 而 h = silu(gate)·up 随权重幅度平方增长，一旦某块 amax/127 超过 65504 就会变成 inf。
+Matrix make_matrix_varied_q6k(std::uint64_t rows, std::uint64_t cols, std::uint32_t salt) {
+    const std::uint64_t nb = blocks_of(experts::Format::kQ6K, cols);
+    Matrix m;
+    m.bytes.resize(static_cast<std::size_t>(rows * nb * static_cast<std::uint64_t>(kQ6kBlockBytes)));
+    std::size_t at = 0;
+    for (std::uint64_t r = 0; r < rows; ++r) {
+        for (std::uint64_t b = 0; b < nb; ++b) {
+            std::uint32_t s = salt * 1000003u + static_cast<std::uint32_t>(r * 131 + b * 17 + 7);
+            for (int k = 0; k < 192; ++k) {
+                s = s * 1664525u + 1013904223u;
+                m.bytes[at++] = static_cast<std::uint8_t>(s >> 24);
+            }
+            for (int k = 0; k < 16; ++k) {
+                s = s * 1664525u + 1013904223u;
+                m.bytes[at++] = static_cast<std::uint8_t>(1 + ((s >> 24) % 7));
+            }
+            m.bytes[at++] = 0x00;  // fp16 0.25
+            m.bytes[at++] = 0x34;
+        }
+    }
+    return m;
+}
+
 experts::LayerSpec make_spec(experts::Format gate, experts::Format up, experts::Format down) {
     experts::LayerSpec s;
     s.layer = 0;
@@ -115,6 +143,9 @@ void dequant_row(experts::Format f, const std::uint8_t* row, std::uint64_t cols,
         switch (f) {
             case experts::Format::kIq2S:
                 dequant_iq2s_block(blk, tmp);
+                break;
+            case experts::Format::kQ6K:
+                dequant_q6k_block(blk, tmp);
                 break;
             case experts::Format::kQ2_0:
                 dequant_q2_0_block(blk, tmp);
@@ -309,10 +340,10 @@ void test_unusable_specs_fail() {
     std::vector<float> x(static_cast<std::size_t>(kHidden), 0.1f);
     std::vector<float> out(static_cast<std::size_t>(kHidden), 0.0f);
 
-    // gate 用没有内核的档（Q6_K）：必须在组装前就失败。
+    // gate 用没有内核的档（IQ3_S）：必须在组装前就失败。
     {
         const experts::LayerSpec spec =
-            make_spec(experts::Format::kQ6K, experts::Format::kQ6K, experts::Format::kQ2_0);
+            make_spec(experts::Format::kIq3S, experts::Format::kIq3S, experts::Format::kQ2_0);
         std::vector<std::uint8_t> g(256, 0);
         experts::ExpertWeights w{g.data(), g.data(), g.data()};
         err.clear();
@@ -421,6 +452,33 @@ int manual_model_entry(const std::string& path, int layer, int expert) {
     return bad;
 }
 
+// Q6_K 参与 gate/up 的交叉核对：它是本仓库唯一的 K-quant，块布局与 IQ 家族不同（尺度在块末）。
+// 这里把 gate 与 up 都用 Q6_K、down 仍用 Q2_0，走同一条参考比对。
+void test_matches_reference_q6k() {
+    const Matrix g = make_matrix_varied_q6k(kFfn, kHidden, 11);
+    const Matrix u = make_matrix_varied_q6k(kFfn, kHidden, 12);
+    const Matrix d = make_matrix_varied(experts::Format::kQ2_0, kHidden, kFfn, 13);
+    const experts::LayerSpec spec =
+        make_spec(experts::Format::kQ6K, experts::Format::kQ6K, experts::Format::kQ2_0);
+    CHECK(spec.usable());
+
+    std::vector<float> x(static_cast<std::size_t>(kHidden));
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        x[i] = static_cast<float>((static_cast<int>(i % 43) - 21) * 0.03125);
+    }
+
+    experts::ExpertWeights w{g.bytes.data(), u.bytes.data(), d.bytes.data()};
+    experts::FfnScratch scratch;
+    std::vector<float> out(static_cast<std::size_t>(kHidden), 0.0f);
+    std::string err;
+    CHECK(experts::expert_ffn(spec, w, x.data(), scratch, out.data(), err));
+
+    std::vector<double> ref;
+    ref_ffn(spec, g, u, d, x.data(), ref);
+    std::vector<double> got(out.begin(), out.end());
+    CHECK(compare(got, ref, "Q6_K ffn vs 参考", 1e-5) == 0);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -434,6 +492,7 @@ int main(int argc, char** argv) {
     }
     test_analytic_uniform();
     test_matches_reference();
+    test_matches_reference_q6k();
     test_unusable_specs_fail();
     std::puts("ffn: analytic uniform case, double-precision reference and unusable-spec failures hold");
     return 0;

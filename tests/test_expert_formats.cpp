@@ -140,7 +140,7 @@ void test_geometry_and_kernels() {
         {Format::kIq2S, 256, 82, true, ActFormat::kQ8K},
         {Format::kIq3S, 256, 110, false, ActFormat::kQ8K},
         {Format::kIq1M, 256, 56, true, ActFormat::kQ8K},
-        {Format::kQ6K, 256, 210, false, ActFormat::kQ8K},
+        {Format::kQ6K, 256, 210, true, ActFormat::kQ8K},
         {Format::kBf16, 1, 2, false, ActFormat::kNone},
     };
     for (const Row& r : rows) {
@@ -174,13 +174,13 @@ void test_geometry_and_kernels() {
 }
 
 void test_synthetic_problems() {
-    // 三层：0 层正常；1 层 down 用 IQ2_S（几何不成立）+ gate 用 Q6_K（无内核）；2 层缺 down。
+    // 三层：0 层正常；1 层 down 用 IQ2_S（几何不成立）+ gate/up 用 IQ3_S（无内核）；2 层缺 down。
     std::vector<TensorSpec> ts = {
         {"blk.0.ffn_gate_exps.weight", {2560, 640, 512}, 22},
         {"blk.0.ffn_up_exps.weight", {2560, 640, 512}, 22},
         {"blk.0.ffn_down_exps.weight", {640, 2560, 512}, 42},
-        {"blk.1.ffn_gate_exps.weight", {2560, 640, 512}, 14},
-        {"blk.1.ffn_up_exps.weight", {2560, 640, 512}, 14},
+        {"blk.1.ffn_gate_exps.weight", {2560, 640, 512}, 21},
+        {"blk.1.ffn_up_exps.weight", {2560, 640, 512}, 21},
         {"blk.1.ffn_down_exps.weight", {640, 2560, 512}, 22},
         {"blk.2.ffn_gate_exps.weight", {2560, 640, 512}, 99},  // 类型码不认识
         {"blk.2.ffn_up_exps.weight", {2560, 640, 512}, 22},
