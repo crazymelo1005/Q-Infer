@@ -245,6 +245,19 @@ void test_observe_step_feeds_the_policy() {
     CHECK(c.cooccurrence().score(K(0, 1), K(0, 2)) == 1);
 }
 
+void test_cooccurrence_aging_halves_counts() {
+    // 衰减是「减半」而不是别的：计数 4 的那一对在衰减后必须是 2（不是 1，也不是 0）。
+    Cooccurrence cooc(8, /*aging_interval=*/4);
+    const ExpertKey a[2] = {K(0, 1), K(0, 2)};
+    cooc.observe(a, 2);  // 1
+    cooc.observe(a, 2);  // 2
+    cooc.observe(a, 2);  // 3
+    CHECK(cooc.score(K(0, 1), K(0, 2)) == 3);
+    cooc.observe(a, 2);  // 4 -> 触发衰减：4 >> 1 = 2
+    CHECK(cooc.agings() == 1);
+    CHECK(cooc.score(K(0, 1), K(0, 2)) == 2);
+}
+
 }  // namespace
 
 int main() {
@@ -255,6 +268,7 @@ int main() {
     test_evictable_callback_and_blocked();
     test_cooccurrence_bounds();
     test_cooccurrence_aging_frees_room();
+    test_cooccurrence_aging_halves_counts();
     test_observe_step_feeds_the_policy();
     std::puts("expert_cache: geometry, policies, page-table invariants and bounded cooccurrence hold");
     return 0;
