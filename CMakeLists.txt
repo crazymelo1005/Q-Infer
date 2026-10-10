@@ -116,6 +116,14 @@ target_link_libraries(test_iq4xs PRIVATE qinfer_kernels)
 add_executable(test_iq3xxs tests/test_iq3xxs.cpp)
 target_link_libraries(test_iq3xxs PRIVATE qinfer_kernels)
 
+add_library(qinfer_kv
+  src/kv/kv_pool.cpp
+)
+target_include_directories(qinfer_kv PUBLIC src)
+
+add_executable(test_kv_pool tests/test_kv_pool.cpp)
+target_link_libraries(test_kv_pool PRIVATE qinfer_kv)
+
 add_executable(test_ngram tests/test_ngram.cpp)
 target_link_libraries(test_ngram PRIVATE qinfer_kernels)
 
@@ -175,6 +183,7 @@ add_test(NAME iq3s COMMAND test_iq3s)
 add_test(NAME iq4xs COMMAND test_iq4xs)
 add_test(NAME iq3xxs COMMAND test_iq3xxs)
 add_test(NAME ngram COMMAND test_ngram)
+add_test(NAME kv_pool COMMAND test_kv_pool)
 add_test(NAME row_cache COMMAND test_row_cache)
 add_test(NAME expert_cache COMMAND test_expert_cache)
 add_test(NAME ple_read_path COMMAND test_ple_read_path)
