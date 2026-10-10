@@ -9,11 +9,13 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "artifact/gguf_table.hpp"
 #include "experts/expert_formats.hpp"
+#include "experts/expert_source.hpp"
 #include "experts/ffn.hpp"
 #include "experts/router.hpp"
 
@@ -40,6 +42,13 @@ struct MoeLayer {
     std::uint64_t down_expert_bytes = 0;
     std::uint64_t hidden = 0;
     std::uint64_t n_expert = 0;
+
+    // 专家缓存（engine §5）。cache_slots = 0 表示不走缓存：按需直接读表，与最早的实现一致。
+    // 开了之后读取路径走 storage/expert_cache 的策略决策与 storage/page_table 的不变量。
+    std::size_t cache_slots = 0;
+    int cache_ways = 8;
+    std::uint64_t cache_byte_budget = 0;  // 0 表示不限
+    storage::PolicyKind cache_policy = storage::PolicyKind::kLru;
 };
 
 // 校验一层的三个专家矩阵与路由器：几何成立、有内核、路由是 BF16、维度自洽（gate.cols == hidden == down.rows、
@@ -60,6 +69,9 @@ struct MoeScratch {
     std::vector<std::uint8_t> s_gate, s_up, s_down;
     FfnScratch s_ffn;
     std::vector<float> shared_out;
+    // 走缓存时的字节来源（按层懒建；见 MoeLayer 的 cache_slots）。
+    std::unique_ptr<ExpertSource> source;
+    int source_layer = -1;
 };
 
 // 跑一层：读路由矩阵 → 路由出 top-k → 逐个读该专家的三矩阵并前馈 → 按权重累加 → 有共享专家则再加。

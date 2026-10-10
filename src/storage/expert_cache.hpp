@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "storage/cooccurrence.hpp"
@@ -69,6 +70,12 @@ public:
     const char* name() const override { return "cooccurrence-aware"; }
 };
 
+// 内置策略的选择。给「想让缓存自己持有策略」的调用方用：自定义策略仍走引用版构造，由调用方保证
+// 生命周期，这里不接管。
+enum class PolicyKind : std::uint8_t { kFifo = 0, kLru, kCooccurrence };
+
+const char* to_string(PolicyKind k);
+
 struct CacheStats {
     std::uint64_t hits = 0;
     std::uint64_t misses = 0;
@@ -83,6 +90,10 @@ public:
     // 容量按 ways 向下取整到整数个组。策略按引用保存，调用方保证它在缓存存活期内有效。
     // max_cooc_pairs = 共现图的种类上限（engine §3.4 要求显式给出这个密度上限）。
     ExpertCache(std::size_t capacity_slots, int ways, const EvictionPolicy& policy,
+                std::size_t max_cooc_pairs = 1u << 18);
+
+    // 同上，但策略由缓存自己持有——调用方只需给一个内置种类，不必操心生命周期。
+    ExpertCache(std::size_t capacity_slots, int ways, PolicyKind kind,
                 std::size_t max_cooc_pairs = 1u << 18);
 
     // 调用方提供的「当前可驱逐」判定（页表那两条不变量）；nullptr 表示全都可驱逐。
@@ -122,6 +133,7 @@ private:
     std::size_t used_ = 0;
     CacheStats stats_;
     const EvictionPolicy* policy_ = nullptr;
+    std::unique_ptr<EvictionPolicy> owned_policy_;  // 走 PolicyKind 构造时才有值
     Cooccurrence cooc_;
     std::vector<ExpertKey> step_keys_;
 };

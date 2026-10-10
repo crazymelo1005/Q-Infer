@@ -78,6 +78,30 @@ ExpertCache::ExpertCache(std::size_t capacity_slots, int ways, const EvictionPol
     slots_.assign(sets_ * static_cast<std::size_t>(ways_), SlotState{});
 }
 
+const char* to_string(PolicyKind k) {
+    switch (k) {
+        case PolicyKind::kFifo: return "fifo";
+        case PolicyKind::kLru: return "lru";
+        case PolicyKind::kCooccurrence: return "cooccurrence-aware";
+    }
+    return "?";
+}
+
+ExpertCache::ExpertCache(std::size_t capacity_slots, int ways, PolicyKind kind,
+                         std::size_t max_cooc_pairs)
+    : ways_(ways < 1 ? 1 : ways), cooc_(max_cooc_pairs) {
+    switch (kind) {
+        case PolicyKind::kFifo: owned_policy_ = std::make_unique<FifoPolicy>(); break;
+        case PolicyKind::kLru: owned_policy_ = std::make_unique<LruPolicy>(); break;
+        case PolicyKind::kCooccurrence:
+            owned_policy_ = std::make_unique<CooccurrenceAwarePolicy>();
+            break;
+    }
+    policy_ = owned_policy_.get();
+    sets_ = capacity_slots / static_cast<std::size_t>(ways_);  // 不足一组的尾巴丢掉
+    slots_.assign(sets_ * static_cast<std::size_t>(ways_), SlotState{});
+}
+
 int ExpertCache::probe(const SlotState* set, const ExpertKey& k) const {
     for (int w = 0; w < ways_; ++w) {
         if (set[w].occupied && set[w].key == k) return w;

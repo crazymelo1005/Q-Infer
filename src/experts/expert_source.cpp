@@ -19,15 +19,10 @@ bool evictable_fn(const storage::ExpertKey& key, void* ctx) {
 
 }  // namespace
 
-ExpertSource::ExpertSource(const artifact::GgufFile& gguf, const std::string& tensor_prefix,
-                           const LayerSpec& spec, const storage::EvictionPolicy& policy,
-                           std::size_t slots, int ways, std::uint64_t byte_budget)
-    : gguf_(gguf),
-      cache_(slots, ways, policy),
-      budget_(byte_budget) {
-    gate_ = gguf.find(tensor_prefix + "gate_exps.weight");
-    up_ = gguf.find(tensor_prefix + "up_exps.weight");
-    down_ = gguf.find(tensor_prefix + "down_exps.weight");
+void ExpertSource::init_common(const std::string& tensor_prefix, const LayerSpec& spec) {
+    gate_ = gguf_.find(tensor_prefix + "gate_exps.weight");
+    up_ = gguf_.find(tensor_prefix + "up_exps.weight");
+    down_ = gguf_.find(tensor_prefix + "down_exps.weight");
     layer_ = static_cast<std::uint32_t>(spec.layer < 0 ? 0 : spec.layer);
     gate_bytes_ = spec.gate.rows * spec.gate.row_bytes();
     up_bytes_ = spec.up.rows * spec.up.row_bytes();
@@ -35,9 +30,24 @@ ExpertSource::ExpertSource(const artifact::GgufFile& gguf, const std::string& te
     expert_bytes_ = gate_bytes_ + up_bytes_ + down_bytes_;
 }
 
+ExpertSource::ExpertSource(const artifact::GgufFile& gguf, const std::string& tensor_prefix,
+                           const LayerSpec& spec, const storage::EvictionPolicy& policy,
+                           std::size_t slots, int ways, std::uint64_t byte_budget)
+    : gguf_(gguf), cache_(slots, ways, policy), budget_(byte_budget) {
+    init_common(tensor_prefix, spec);
+}
+
+ExpertSource::ExpertSource(const artifact::GgufFile& gguf, const std::string& tensor_prefix,
+                           const LayerSpec& spec, storage::PolicyKind kind, std::size_t slots,
+                           int ways, std::uint64_t byte_budget)
+    : gguf_(gguf), cache_(slots, ways, kind), budget_(byte_budget) {
+    init_common(tensor_prefix, spec);
+}
+
 storage::BlockId ExpertSource::id_of(std::uint64_t expert) const {
     return storage::BlockId{pack_key(layer_, expert)};
 }
+
 
 bool ExpertSource::read_into(std::uint64_t expert, std::vector<std::uint8_t>& dst,
                              std::string& err) const {

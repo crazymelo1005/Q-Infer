@@ -41,6 +41,11 @@ public:
                  const LayerSpec& spec, const storage::EvictionPolicy& policy,
                  std::size_t slots, int ways, std::uint64_t byte_budget);
 
+    // 同上，但策略由缓存自己持有（只给内置种类）——给不想管策略生命周期的调用方用。
+    ExpertSource(const artifact::GgufFile& gguf, const std::string& tensor_prefix,
+                 const LayerSpec& spec, storage::PolicyKind kind, std::size_t slots, int ways,
+                 std::uint64_t byte_budget);
+
     // 这一步要读的专家（同一 token 内一起激活，喂给共现图）。步号每调用一次 +1，供 LRU 用。
     void begin_token();
     void observe_token(const std::uint32_t* experts, int n);
@@ -53,6 +58,7 @@ public:
     bool unpin(std::uint64_t expert, std::string& err);
 
     const storage::CacheStats& stats() const { return cache_.stats(); }
+    const storage::Cooccurrence& cooccurrence() const { return cache_.cooccurrence(); }
     std::uint64_t residents() const { return static_cast<std::uint64_t>(bytes_.size()); }
     std::uint64_t bytes_resident() const { return bytes_resident_; }
     std::uint64_t transient_reads() const { return transient_reads_; }
@@ -61,6 +67,7 @@ public:
     std::int64_t step() const { return step_; }
 
 private:
+    void init_common(const std::string& tensor_prefix, const LayerSpec& spec);
     storage::BlockId id_of(std::uint64_t expert) const;
     bool read_into(std::uint64_t expert, std::vector<std::uint8_t>& dst, std::string& err) const;
 

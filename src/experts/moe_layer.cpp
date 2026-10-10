@@ -133,18 +133,39 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
     s.expert_out.assign(hidden, 0.0f);
     for (std::size_t i = 0; i < hidden; ++i) out[i] = 0.0f;
 
+    // 走缓存时按层懒建一次字节来源；这一步也算作一个「token」，供 LRU 与共现图用。
+    if (layer.cache_slots > 0) {
+        if (s.source == nullptr || s.source_layer != layer.layer) {
+            const std::string prefix = "blk." + std::to_string(layer.layer) + ".ffn_";
+            s.source = std::make_unique<ExpertSource>(gguf, prefix, layer.spec, layer.cache_policy,
+                                                      layer.cache_slots, layer.cache_ways,
+                                                      layer.cache_byte_budget);
+            s.source_layer = layer.layer;
+        }
+        s.source->begin_token();
+        s.source->observe_token(reinterpret_cast<const std::uint32_t*>(s.ids.data()), k);
+    }
+
     for (int i = 0; i < k; ++i) {
         const std::uint64_t e = static_cast<std::uint64_t>(s.ids[static_cast<std::size_t>(i)]);
-        // 逐专家偏移：专家 e 的矩阵起点 = 张力起点 + e × (rows × row_bytes)。
-        if (!gguf.read_at(layer.gate->offset + e * layer.gate_expert_bytes, s.gate.data(),
-                          s.gate.size()) ||
-            !gguf.read_at(layer.up->offset + e * layer.up_expert_bytes, s.up.data(), s.up.size()) ||
-            !gguf.read_at(layer.down->offset + e * layer.down_expert_bytes, s.down.data(),
-                          s.down.size())) {
-            err = "读专家 " + std::to_string(e) + " 的矩阵失败";
-            return false;
+        ExpertWeights w;
+        if (s.source != nullptr) {
+            ExpertBytes eb;
+            if (!s.source->get(e, eb, err)) return false;
+            w = ExpertWeights{eb.gate, eb.up, eb.down};
+        } else {
+            // 逐专家偏移：专家 e 的矩阵起点 = 张力起点 + e × (rows × row_bytes)。
+            if (!gguf.read_at(layer.gate->offset + e * layer.gate_expert_bytes, s.gate.data(),
+                              s.gate.size()) ||
+                !gguf.read_at(layer.up->offset + e * layer.up_expert_bytes, s.up.data(),
+                              s.up.size()) ||
+                !gguf.read_at(layer.down->offset + e * layer.down_expert_bytes, s.down.data(),
+                              s.down.size())) {
+                err = "读专家 " + std::to_string(e) + " 的矩阵失败";
+                return false;
+            }
+            w = ExpertWeights{s.gate.data(), s.up.data(), s.down.data()};
         }
-        ExpertWeights w{s.gate.data(), s.up.data(), s.down.data()};
         if (!expert_ffn(layer.spec, w, x, s.ffn, s.expert_out.data(), err)) return false;
         const float wt = s.weights[static_cast<std::size_t>(i)];
         for (std::size_t j = 0; j < hidden; ++j) out[j] += wt * s.expert_out[j];

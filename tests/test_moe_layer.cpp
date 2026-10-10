@@ -631,7 +631,8 @@ void test_failures() {
 
 // ---- 真模型手工入口 ----
 
-int manual_model_entry(const std::string& path, int layer, int k) {
+int manual_model_entry(const std::string& path, int layer, int k,
+                       std::size_t cache_slots, int tokens) {
     artifact::GgufFile g;
     std::string err;
     if (!g.open(path, err)) {
@@ -643,6 +644,7 @@ int manual_model_entry(const std::string& path, int layer, int k) {
         std::printf("层 %d 建不起来：%s\n", layer, err.c_str());
         return 1;
     }
+    ml.cache_slots = cache_slots;
     std::vector<float> x(static_cast<std::size_t>(ml.hidden));
     for (std::size_t i = 0; i < x.size(); ++i) {
         x[i] = static_cast<float>((static_cast<int>(i % 23) - 11)) * 0.03125f;
@@ -680,6 +682,50 @@ int manual_model_entry(const std::string& path, int layer, int k) {
                     format_name(ml.shared.down.format), static_cast<double>(g));
     } else {
         std::printf("  这一层没有共享专家\n");
+    }
+
+    // 开了缓存时：与直读路径逐 token 比对（真权重上的接线核对），并打印缓存统计。
+    if (cache_slots > 0 && tokens > 0) {
+        MoeLayer plain = ml;
+        plain.cache_slots = 0;
+        MoeScratch sp;
+        std::vector<float> a(static_cast<std::size_t>(ml.hidden), 0.0f);
+        std::vector<float> b(static_cast<std::size_t>(ml.hidden), 0.0f);
+        double worst = 0.0;
+        for (int t = 0; t < tokens; ++t) {
+            // 每个 token 换一个激活：扰动要够小以保持量级，够大以让路由换出不同的专家。
+            std::vector<float> xt = x;
+            for (std::size_t i = 0; i < xt.size(); ++i) {
+                xt[i] = static_cast<float>(
+                    static_cast<double>(x[i]) * (1.0 + 0.05 * ((t % 7) - 3)) +
+                    0.002 * static_cast<double>((t * 31 + static_cast<int>(i)) % 11 - 5));
+            }
+            if (!run_moe_layer(g, plain, xt.data(), a.data(), sp, err)) {
+                std::printf("直读路径失败：%s\n", err.c_str());
+                return 1;
+            }
+            if (!run_moe_layer(g, ml, xt.data(), b.data(), s, err)) {
+                std::printf("缓存路径失败：%s\n", err.c_str());
+                return 1;
+            }
+            for (std::size_t i = 0; i < a.size(); ++i) {
+                worst = std::fmax(worst, std::fabs(static_cast<double>(a[i] - b[i])));
+            }
+        }
+        const storage::CacheStats& st = s.source->stats();
+        const double total = static_cast<double>(st.hits + st.misses);
+        std::printf("  缓存接线：%d 个 token，缓存路径与直读路径的最大逐元素差 %.3g（%s）\n", tokens,
+                    worst, worst == 0.0 ? "逐位一致" : "不一致");
+        std::printf("  缓存统计：命中 %llu / 未命中 %llu（命中率 %.4f）冷启动 %llu 换出 %llu 被拒 %llu "
+                    "临时读 %llu；常驻 %llu 个 / %.3f MiB，页表条目 %zu\n",
+                    (unsigned long long) st.hits, (unsigned long long) st.misses,
+                    total > 0 ? static_cast<double>(st.hits) / total : 0.0,
+                    (unsigned long long) st.compulsory, (unsigned long long) st.replaced,
+                    (unsigned long long) s.source->blocked_admissions(),
+                    (unsigned long long) s.source->transient_reads(),
+                    (unsigned long long) s.source->residents(),
+                    static_cast<double>(s.source->bytes_resident()) / 1048576.0,
+                    s.source->page_entries());
     }
 
     // 独立参考：测试侧按「张力起点 + e × rows × row_bytes」自己读三矩阵，再走 expert_ffn 与加权。
@@ -907,16 +953,138 @@ void test_expert_source() {
     }
 }
 
+void test_cached_layer_matches_direct() {
+    const auto ts = layer_tensors("blk.0.", false, 0);
+    const std::filesystem::path p = write_gguf("qinfer_moe_cached.gguf", ts);
+    artifact::GgufFile g;
+    std::string err;
+    CHECK(g.open(p.string(), err));
+    const std::vector<float> x = make_x();
+
+    // 不开缓存：按需直读（最早的实现）。
+    MoeLayer plain;
+    CHECK(build_moe_layer(g, 0, kTopK, plain, err));
+    CHECK(plain.cache_slots == 0);
+    MoeScratch s1;
+    std::vector<float> out_plain(kHidden, 0.0f);
+    CHECK(run_moe_layer(g, plain, x.data(), out_plain.data(), s1, err));
+
+    // 开缓存：第一遍全冷启动，结果与直读逐位一致。
+    MoeLayer cached = plain;
+    cached.cache_slots = 8;
+    cached.cache_ways = 8;
+    MoeScratch s2;
+    std::vector<float> out_cached(kHidden, 0.0f);
+    CHECK(run_moe_layer(g, cached, x.data(), out_cached.data(), s2, err));
+    for (std::size_t i = 0; i < out_plain.size(); ++i) {
+        CHECK(out_cached[i] == out_plain[i]);
+    }
+    CHECK(s2.source != nullptr);
+    CHECK(s2.source->stats().compulsory == 2 && s2.source->stats().hits == 0);
+    CHECK(s2.source->residents() == 2);
+
+    // 第二遍：同一批专家全命中，结果仍与直读一致。
+    std::vector<float> out_again(kHidden, 0.0f);
+    CHECK(run_moe_layer(g, cached, x.data(), out_again.data(), s2, err));
+    for (std::size_t i = 0; i < out_plain.size(); ++i) CHECK(out_again[i] == out_plain[i]);
+    CHECK(s2.source->stats().hits == 2);
+    CHECK(s2.source->transient_reads() == 0 && s2.source->blocked_admissions() == 0);
+
+    // 只给一个槽位：同一个 token 内的第二个专家换不掉第一个——页表保护本世代刚搬进来的（设计如此），
+    // 所以这一遍是「被拒 + 走临时缓冲」，结果仍不变。
+    MoeLayer tiny = plain;
+    tiny.cache_slots = 1;
+    tiny.cache_ways = 1;
+    MoeScratch s3;
+    std::vector<float> out_tiny(kHidden, 0.0f);
+    CHECK(run_moe_layer(g, tiny, x.data(), out_tiny.data(), s3, err));
+    for (std::size_t i = 0; i < out_plain.size(); ++i) CHECK(out_tiny[i] == out_plain[i]);
+    CHECK(s3.source->blocked_admissions() >= 1);
+    CHECK(s3.source->stats().replaced == 0);
+    // 下一个 token：上一个 token 搬进来的就出了本世代，这时才换得掉。
+    std::vector<float> out_tiny2(kHidden, 0.0f);
+    CHECK(run_moe_layer(g, tiny, x.data(), out_tiny2.data(), s3, err));
+    for (std::size_t i = 0; i < out_plain.size(); ++i) CHECK(out_tiny2[i] == out_plain[i]);
+    CHECK(s3.source->stats().replaced >= 1);
+
+    // 共现图也接上了：走共现策略时，本步的专家应当被喂进共现图。
+    MoeLayer cooc = plain;
+    cooc.cache_slots = 8;
+    cooc.cache_policy = storage::PolicyKind::kCooccurrence;
+    MoeScratch s5;
+    std::vector<float> out_cooc(kHidden, 0.0f);
+    CHECK(run_moe_layer(g, cooc, x.data(), out_cooc.data(), s5, err));
+    for (std::size_t i = 0; i < out_plain.size(); ++i) CHECK(out_cooc[i] == out_plain[i]);
+    CHECK(s5.source != nullptr);
+    CHECK(s5.source->cooccurrence().pairs() > 0);  // 同一 token 的 2 个专家构成 1 对
+
+    // 字节预算小到装不下一个专家：改走临时缓冲，结果仍不变。
+    MoeLayer budgeted = plain;
+    budgeted.cache_slots = 8;
+    budgeted.cache_byte_budget = 1;
+    MoeScratch s4;
+    std::vector<float> out_b(kHidden, 0.0f);
+    CHECK(run_moe_layer(g, budgeted, x.data(), out_b.data(), s4, err));
+    for (std::size_t i = 0; i < out_plain.size(); ++i) CHECK(out_b[i] == out_plain[i]);
+    CHECK(s4.source->transient_reads() == 2 && s4.source->residents() == 0);
+}
+
+void test_cached_source_is_rebuilt_per_layer() {
+    // 同一个 scratch 连跑两层：字节来源必须按层重建，否则会拿上一层的张力去读这一层的专家
+    // （偏移还不越界，静默读到错权重）。两层用不同的权重生成参数，故结果必须不同。
+    std::vector<TensorSpec> ts = layer_tensors("blk.0.", false, 0);
+    for (auto& t : layer_tensors("blk.1.", /*vary_gate=*/true, 0)) ts.push_back(std::move(t));
+    const std::filesystem::path p = write_gguf("qinfer_moe_two_layers.gguf", ts);
+    artifact::GgufFile g;
+    std::string err;
+    CHECK(g.open(p.string(), err));
+
+    MoeLayer l0, l1;
+    CHECK(build_moe_layer(g, 0, kTopK, l0, err));
+    CHECK(build_moe_layer(g, 1, kTopK, l1, err));
+    l0.cache_slots = 8;
+    l1.cache_slots = 8;
+    const std::vector<float> x = make_x();
+
+    MoeScratch shared;
+    std::vector<float> out0(kHidden, 0.0f), out1(kHidden, 0.0f);
+    CHECK(run_moe_layer(g, l0, x.data(), out0.data(), shared, err));
+    CHECK(shared.source_layer == 0);
+    CHECK(run_moe_layer(g, l1, x.data(), out1.data(), shared, err));
+    CHECK(shared.source_layer == 1);  // 换了层就重建
+
+    // 与「各层各自一个干净 scratch」的结果逐位一致。
+    MoeScratch fresh0, fresh1;
+    std::vector<float> ref0(kHidden, 0.0f), ref1(kHidden, 0.0f);
+    CHECK(run_moe_layer(g, l0, x.data(), ref0.data(), fresh0, err));
+    CHECK(run_moe_layer(g, l1, x.data(), ref1.data(), fresh1, err));
+    for (std::size_t i = 0; i < kHidden; ++i) {
+        CHECK(out0[i] == ref0[i]);
+        CHECK(out1[i] == ref1[i]);
+    }
+    // 两层的结果确实不同（否则上面那条「重建」的断言就白测了）。
+    bool differs = false;
+    for (std::size_t i = 0; i < kHidden; ++i) {
+        if (out0[i] != out1[i]) differs = true;
+    }
+    CHECK(differs);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     if (argc >= 2 && std::string(argv[1]) == "--model") {
         int layer = 0, k = 10;
+        std::size_t cache_slots = 0;
+        int tokens = 1;
         for (int i = 2; i + 1 < argc; ++i) {
             if (std::string(argv[i]) == "--layer") layer = std::atoi(argv[i + 1]);
             if (std::string(argv[i]) == "--k") k = std::atoi(argv[i + 1]);
+            if (std::string(argv[i]) == "--tokens") tokens = std::atoi(argv[i + 1]);
+            if (std::string(argv[i]) == "--cache-slots")
+                cache_slots = static_cast<std::size_t>(std::atol(argv[i + 1]));
         }
-        return manual_model_entry(argv[2], layer, k);
+        return manual_model_entry(argv[2], layer, k, cache_slots, tokens);
     }
     test_identical_experts();
     test_expert_offsets();
@@ -925,6 +1093,8 @@ int main(int argc, char** argv) {
     test_shared_expert_plain_add();
     test_shared_scalar_gate_applied_once();
     test_expert_source();
+    test_cached_layer_matches_direct();
+    test_cached_source_is_rebuilt_per_layer();
     std::puts("moe_layer: routing, per-expert offsets, weighted accumulation and the shared expert hold");
     return 0;
 }
