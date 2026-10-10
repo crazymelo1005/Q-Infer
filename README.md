@@ -2,7 +2,7 @@
 
 在消费级 GPU 上运行超大稀疏 MoE 模型的推理引擎设计与研究。目标形态是 16 GB 显存的单卡或双卡消费级平台，主案例为 Qwen3.8-Flash-Next（125B 主参数 + 51B 外挂 n-gram 表 + 4B MTP，原生 262K 上下文）。
 
-仓库当前处于设计阶段，只产出文档，不产出可运行的引擎。
+仓库处于设计与实现并行阶段：`docs/` 是设计与事实台账，`src/` 是引擎实现。主机侧骨架已落地并在 CI 里构建与测试；GPU 侧与单请求端到端闭环尚未开始。
 
 命名：Q-Infer。「Q」兼指 Qwen（主案例）与 Quantized（量化）；「擎」取「擎起」——用 16 GB 擎起 125B。
 
@@ -47,9 +47,13 @@ API / 调度层        OpenAI 兼容接口 · 批调度 · 前缀缓存 · 指�
 
 ## 当前状态
 
-已完成：问题界定、竞品核查、架构设计、九条架构决策记录、门禁实测（13 条已测、G-11 得部分、G-14 部分未判定）、实施顺序序 0 的目标基线（单卡 decode 稳态 64.44、双卡 85.96 至 89.33 tok/s，见 [requirements §3](docs/requirements.md)）与序 1 的自动标定（机器画像，见 [research/01](docs/research/01-strata-engine.md) §10.2）；序 2 的主机侧已成形：GGUF 表行读取、三层存储与页表、有界行缓存、PCIe 字节预算仲裁、表行索引哈希与反量化，以及把它们接成一条路径的回归（`src/`，CI 里构建并跑 7 套测试；真实模型上已与 Python oracle 对照通过）。其中 G-04 不通过：记忆表行在去重后无顺序性、亦无近邻复用，故表行预取子系统已砍，退守按需读加有界行缓存（[ADR-007](docs/design/adr/ADR-007-ngram-table-on-demand-read.md)）。G-07 判定未命中专家路径为算力瓶颈，核显分担的前提满足。
+已完成：问题界定、竞品核查、架构设计、九条架构决策记录、门禁实测（13 条已测、G-11 得部分、G-14 部分未判定）、实施顺序序 0 的目标基线（单卡 decode 稳态 64.44、双卡 85.96 至 89.33 tok/s，见 [requirements §3](docs/requirements.md)）与序 1 的自动标定（机器画像，见 [research/01](docs/research/01-strata-engine.md) §10.2）。
 
-下一步：在环境2 上建立基线实测（全部倍数指标的分母）→ 完成门禁测量 → 跑通最小垂直切片。
+序 2 的主机侧骨架已成形，CI 里构建并跑 17 套测试：三层存储与页表、有界行缓存、PCIe 字节预算仲裁；表行一侧的索引哈希、IQ4_NL 反量化与整条读取路径（`ple/row_path`）；专家一侧的格式分派表、三矩阵前馈（IQ2_XS / IQ2_S / IQ2_XXS / Q2_0 / IQ4_NL 五档内核）、路由门控与一层 MoE 串联（`experts/`）。两条路径都已在真模型（环境2 上的两档分片）上跑通并对照过独立实现：表行 16 个头的 L1 与 Python oracle 全等、专家前馈与双精度参考一致、路由的专家 id 与引擎自身的主机参考全等。
+
+其中 G-04 不通过：记忆表行在去重后无顺序性、亦无近邻复用，故表行预取子系统已砍，退守按需读加有界行缓存（[ADR-007](docs/design/adr/ADR-007-ngram-table-on-demand-read.md)）。G-07 判定未命中专家路径为算力瓶颈，核显分担的前提满足。
+
+下一步：序 2 的验收标准是「单请求正确跑通」，还差稠密部分、KV 与注意力、顶层步循环；GPU 侧自序 3 起。此外还有未实现的专家档（部署那份的 IQ1_M 3 层、另一档的 IQ3_S / IQ3_XXS 等）、共享专家与专家缓存。门禁方面 G-14 仍未判定。代码版本标签 `v<主>.<次>.<修订>` 按 [CONTRIBUTING §6.2](CONTRIBUTING.md) 的约定留到「单请求跑通」之后，故尚无代码版本标签，也没有 Release（现有 15 个标签都是设计里程碑与实测快照）。
 
 门禁指必须先测量的假设，测量不通过即砍掉对应子系统并记录负结果，不得保留。清单与测量方法见 [design/gates.md](docs/design/gates.md)。
 
@@ -143,9 +147,9 @@ https://github.com/crazymelo1005/Q-Infer
 
 ## English summary
 
-Q-Infer is a design-stage project: research and architecture for running very large sparse-MoE models on consumer GPUs with 16 GB of VRAM (single or dual card). The primary case study is Qwen3.8-Flash-Next — 125B main parameters plus a 51B external n-gram table and a 4B MTP head, with a native 262K context.
+Q-Infer is a project in the design-and-implementation phase: research and architecture for running very large sparse-MoE models on consumer GPUs with 16 GB of VRAM (single or dual card). The primary case study is Qwen3.8-Flash-Next — 125B main parameters plus a 51B external n-gram table and a 4B MTP head, with a native 262K context.
 
-The premise is that the weights never fit in VRAM, so the engine is built around tiered offload of expert weights, an explicitly prefetched n-gram table, and long-context KV management. It targets single-machine, low-concurrency use (2–8 concurrent requests), not server-grade throughput, and not multi-node deployment.
+The premise is that the weights never fit in VRAM, so the engine is built around tiered offload of expert weights, an external n-gram table read on demand behind a bounded row cache, and long-context KV management. It targets single-machine, low-concurrency use (2–8 concurrent requests), not server-grade throughput, and not multi-node deployment.
 
 - Requirements and acceptance criteria: [requirements.md](docs/requirements.md)
 - Architecture overview: [overview.md](docs/overview.md)
@@ -154,6 +158,6 @@ The premise is that the weights never fit in VRAM, so the engine is built around
 - Decision records: [`docs/design/adr/`](docs/design/adr/)
 - Research ledger and references: [`docs/research/`](docs/research/)
 
-This repository currently contains documentation only. There is no implementation yet.
+The host-side engine skeleton is implemented under `src/` and is built and tested in CI (17 ctest suites), including a quantized-kernel set, the expert path (format dispatch, gated FFN, router, one MoE layer) and the n-gram table-row path; both have been run against the real model shards and cross-checked against independent implementations. The GPU side and a single-request end-to-end loop are not yet in place, so there is no code-version tag or Release yet.
 
 License: Apache-2.0 — see [LICENSE](LICENSE).
