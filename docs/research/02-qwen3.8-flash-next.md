@@ -20,6 +20,7 @@
 | MoE | 每层 512 专家（GGUF 元数据 `expert_count`）→ × 48 层 = 24,576；每 token top-10，`expert_feed_forward_length` 640 | [环境2实测] |
 | 架构标识 | `qwen4exp`（GGUF `general.architecture`，与上游 llama.cpp 的 `qwen4exp` 分支同名） | [环境2实测] |
 | 实际部署的实例 | 社区量化 `GSQ-RCO-abliterated` 的「IQ2_XS」档（不是官方检查点）：主权重分片 37 GiB + 表分片 26.8 GiB（4-bit）+ 视觉 mmproj 866 MiB。文件名与 `general.file_type=20` 只表示总量级——分张量看没有 IQ2_XS，路由专家逐层换档（gate/up 为 IQ2_S 34 层 / IQ2_XXS 11 层 / IQ1_M 3 层，down 48 层全为 Q2_0），见 [S-36] | [环境2实测] |
+| 另一档（可选） | 同款模型的 `IQ3_XXS` 档（环境2 上另存一份）：逐层格式与部署那份不同——gate/up 为 IQ3_S 13 层 / IQ2_XS 10 层 / IQ2_S 10 层 / IQ2_XXS 9 层 / IQ3_XXS 6 层，down 为 Q2_0 30 层 / IQ4_NL 18 层；专家字节 39.97 GiB、等效 2.842 bpw。表分片与部署那份字节数完全相同（共用的 n-gram 表），故表行路径不受档位选择影响。见 [S-38] | [环境2实测] |
 | 上下文 | 原生 262,144，YaRN 可扩至 1,000,000 | [已确认] |
 | 模态 | 文本 / 图像 / 视频（带 vision encoder） | [官方] |
 | 协议 | qwen-community-1.0（非 Apache） | [官方] |
@@ -170,10 +171,10 @@ G-12 已实测（环境2，2026-10-09）：**参考引擎并不做索引器的�
 | FP8 | 1.0 | 约 27GB | Flash-Next FP8 检查点 172.78 GiB |
 | NVFP4 | ≈0.55 | 约 14.9GB | Blackwell 原生 |
 | GGUF 混合低比特 | ≈0.315（全档）、≈0.294（仅专家） | — | 环境2 实际使用档：逐层混 IQ2_S / IQ2_XXS / IQ1_M / Q2_0，等效约 2.35 bpw，见 [S-36] |
-| GGUF IQ3_XXS | ≈0.35 | — | 社区常用档（文件 71GB） |
+| GGUF IQ3_XXS 档 | 0.3553（实测） | — | 同款模型的另一档：专家字节 39.97 GiB、等效 2.842 bpw，见 [S-38] |
 | 三值 ternary | ≈0.198 | 约 5.4GB | 需专用/LUT 核，非 Blackwell 原生路径 |
 
-> 徽章：Byte/参数与「27B 级别参考体积」列为 [推算]；第一行「GGUF 混合低比特」为 [环境2实测]（分量表与专家字节合计见 [S-36]）；备注中的官方数字（含视觉 55.6GB、FP8 检查点 172.78 GiB）为 [官方]；`IQ3_XXS` 文件 71GB 为 [他卡实测] 社区。
+> 徽章：Byte/参数与「27B 级别参考体积」列为 [推算]；「GGUF 混合低比特」与「GGUF IQ3_XXS 档」两行为 [环境2实测]（分量表见 [S-36] 与 [S-38]）；备注中的官方数字（含视觉 55.6GB、FP8 检查点 172.78 GiB）为 [官方]。
 
 权重轴与 KV 轴正交：选权重档不决定 KV 档。Key 离群值按通道、Value 离群值按token，粒度必须不同；量化必须把反量化融进注意力核，否则省下的带宽又读回来。
 
@@ -279,5 +280,6 @@ vLLM recipe 要点（[已确认]）：
 | S-33 | §1、§3.1 | 模型 GGUF 元数据（几何、专家数、表形状） |
 | S-34 | §3.2 | 参考引擎的 n-gram 哈希与 PLE 行读取实现（`src/kernels/ngram.cpp`、`src/kernels/ple_oracle_vectors.inc`） |
 | S-36 | §1、§2 | 实际部署模型的逐张量量化档分布（路由专家逐层换档；全表无 IQ2_XS） |
+| S-38 | §1、§2 | 同款模型另一档（IQ3_XXS）的逐张量量化档分布与专家字节合计 |
 
 等级、复核状态与 URL 见 [references.md](references.md)。
