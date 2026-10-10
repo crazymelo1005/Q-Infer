@@ -29,6 +29,7 @@ add_library(qinfer_experts
   src/experts/expert_formats.cpp
   src/experts/ffn.cpp
   src/experts/router.cpp
+  src/experts/moe_layer.cpp
 )
 target_include_directories(qinfer_experts PUBLIC src)
 target_link_libraries(qinfer_experts PUBLIC qinfer_artifact qinfer_kernels)
@@ -97,6 +98,9 @@ target_link_libraries(test_ffn PRIVATE qinfer_experts)
 add_executable(test_router tests/test_router.cpp)
 target_link_libraries(test_router PRIVATE qinfer_experts)
 
+add_executable(test_moe_layer tests/test_moe_layer.cpp)
+target_link_libraries(test_moe_layer PRIVATE qinfer_experts)
+
 enable_testing()
 add_test(NAME page_table COMMAND test_page_table)
 add_test(NAME budget_arbiter COMMAND test_budget_arbiter)
@@ -114,3 +118,4 @@ add_test(NAME gguf_table COMMAND test_gguf_table)
 add_test(NAME expert_formats COMMAND test_expert_formats)
 add_test(NAME ffn COMMAND test_ffn)
 add_test(NAME router COMMAND test_router)
+add_test(NAME moe_layer COMMAND test_moe_layer)

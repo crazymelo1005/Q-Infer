@@ -164,7 +164,7 @@ bool GgufFile::open(const std::string& path, std::string& err) {
     return true;
 }
 
-bool GgufFile::read_at(std::uint64_t offset_in_data, std::uint8_t* out, std::size_t n) {
+bool GgufFile::read_at(std::uint64_t offset_in_data, std::uint8_t* out, std::size_t n) const {
     if (!file_.is_open() || n == 0) return false;
     if (offset_in_data > file_size_) return false;
     const std::uint64_t at = data_start_ + offset_in_data;

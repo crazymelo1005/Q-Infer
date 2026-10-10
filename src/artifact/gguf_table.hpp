@@ -45,10 +45,11 @@ public:
     std::uint64_t file_size() const { return file_size_; }
 
     // 从数据区内的偏移处读 n 字节。越界或读失败返回 false。
-    bool read_at(std::uint64_t offset_in_data, std::uint8_t* out, std::size_t n);
+    // const：读操作不改对象的逻辑状态（只移动流位置，故流本身声明为 mutable）。
+    bool read_at(std::uint64_t offset_in_data, std::uint8_t* out, std::size_t n) const;
 
 private:
-    std::ifstream file_;
+    mutable std::ifstream file_;
     std::vector<GgufTensorInfo> tensors_;
     std::uint64_t data_start_ = 0;
     std::uint64_t file_size_ = 0;
