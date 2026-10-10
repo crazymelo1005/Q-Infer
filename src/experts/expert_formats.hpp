@@ -80,6 +80,20 @@ struct LayerSpec {
     bool usable() const { return gate.usable() && up.usable() && down.usable(); }
 };
 
+// 共享专家的一层。三个矩阵与路由专家同形（2 维、无专家维），但另有一个 1 维的 bf16 标量门
+// `ffn_gate_inp_shexp.weight`（逐 token 出一个标量，不是逐维）。语义与来源见 [S-50]：
+//   h = silu(x·gateᵀ) · (x·upᵀ)；h = h·downᵀ；g = sigmoid(Σ bf16(x)·bf16(w))；out = h · g。
+// 「一层有没有共享专家」是逐层的数据（引擎侧的 shared 允许为空），故 present 由张力是否存在决定，
+// 生成表时不以「缺张力」记问题。
+struct SharedSpec {
+    bool present = false;
+    MatrixSpec gate;
+    MatrixSpec up;
+    MatrixSpec down;
+    bool gate_inp = false;  // ffn_gate_inp_shexp.weight 存在、1 维、维度 = hidden、且是 bf16
+    bool usable() const { return present && gate.usable() && up.usable() && down.usable() && gate_inp; }
+};
+
 // 分派过程中发现的问题。不可用就记下来，不静默跳过。
 struct Problem {
     int layer = -1;
@@ -89,6 +103,7 @@ struct Problem {
 
 struct Table {
     std::vector<LayerSpec> layers;
+    std::vector<SharedSpec> shared;  // 与 layers 一一对应
     std::vector<Problem> problems;
     std::uint64_t usable_layers() const;
 };
@@ -100,5 +115,10 @@ int layer_count(const artifact::GgufFile& gguf);
 Table build_table(const artifact::GgufFile& gguf);
 // 只处理 [first, last] 这段层（含两端），便于用合成夹具做小范围测试。
 Table build_table(const artifact::GgufFile& gguf, int first, int last);
+
+// 从张力表里取出某一层的共享专家描述（四个张力名都以 ffn_ 开头、以 _shexp.weight 收尾）。
+// 三个矩阵张力一个都不在时返回 present=false；在则逐个校验，问题照旧进 problems 由调用方带上。
+SharedSpec read_shared_spec(const artifact::GgufFile& gguf, int layer,
+                            std::vector<Problem>& problems);
 
 }  // namespace qinfer::experts

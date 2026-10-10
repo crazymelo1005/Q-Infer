@@ -1,5 +1,6 @@
 #include "experts/ffn.hpp"
 
+#include "kernels/bf16.hpp"
 #include "kernels/iq1m.hpp"
 #include "kernels/iq2s.hpp"
 #include "kernels/iq2xs.hpp"
@@ -116,6 +117,44 @@ bool expert_ffn(const LayerSpec& spec, const ExpertWeights& w, const float* x, F
 
     if (!quantize_input(spec.down, scratch.h.data(), scratch, err)) return false;
     if (!run_gemv(spec.down, w.down, scratch, out, err)) return false;
+    return true;
+}
+
+float shared_scalar_gate(const std::uint16_t* w_bf16, const float* x, std::uint64_t n) {
+    float acc = 0.0f;
+    for (std::uint64_t j = 0; j < n; ++j) {
+        acc += kernels::bf16_bits_to_f32(w_bf16[j]) *
+               kernels::bf16_bits_to_f32(kernels::f32_to_bf16_bits(x[j]));
+    }
+    return 1.0f / (1.0f + std::exp(-acc));
+}
+
+bool shared_expert_ffn(const SharedSpec& spec, const ExpertWeights& w,
+                       const std::uint16_t* gate_inp_bf16, const float* x, float* out,
+                       FfnScratch& scratch, std::string& err) {
+    if (!spec.present) {
+        err = "这一层没有共享专家";
+        return false;
+    }
+    if (!spec.gate_inp || gate_inp_bf16 == nullptr) {
+        err = "共享专家的标量门缺失或不是 1 维 bf16";
+        return false;
+    }
+    // 三矩阵复用 expert_ffn：它已经按 gate/up 的档各自量化激活、在 gate 上做 SwiGLU、并把中间量
+    // 按 down 的档量化。这里只把共享专家的三段拼成一个 LayerSpec 视图。
+    LayerSpec view;
+    view.layer = -1;
+    view.gate = spec.gate;
+    view.up = spec.up;
+    view.down = spec.down;
+    if (!view.usable()) {
+        err = "共享专家的三矩阵有档不可用（几何不成立或没有内核）";
+        return false;
+    }
+    if (!expert_ffn(view, w, x, scratch, out, err)) return false;
+    const float g = shared_scalar_gate(gate_inp_bf16, x, spec.gate.cols);
+    const std::size_t hidden = static_cast<std::size_t>(spec.down.rows);
+    for (std::size_t i = 0; i < hidden; ++i) out[i] *= g;
     return true;
 }
 

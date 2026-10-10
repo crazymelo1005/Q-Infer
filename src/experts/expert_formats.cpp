@@ -93,6 +93,56 @@ MatrixSpec make_spec(const artifact::GgufTensorInfo& t, std::string& why) {
 
 }  // namespace
 
+// 共享专家的四个张力名。三个矩阵是 2 维（无专家维），标量门是 1 维 bf16。
+SharedSpec read_shared_spec(const artifact::GgufFile& gguf, int layer,
+                            std::vector<Problem>& problems) {
+    SharedSpec s;
+    const std::string base = "blk." + std::to_string(layer) + ".ffn_";
+    const artifact::GgufTensorInfo* g = gguf.find(base + "gate_shexp.weight");
+    const artifact::GgufTensorInfo* u = gguf.find(base + "up_shexp.weight");
+    const artifact::GgufTensorInfo* d = gguf.find(base + "down_shexp.weight");
+    if (g == nullptr && u == nullptr && d == nullptr) return s;  // 这一层没有共享专家
+    s.present = true;
+
+    struct Slot {
+        const char* suffix;
+        const artifact::GgufTensorInfo* t;
+        MatrixSpec* out;
+    };
+    const Slot slots[3] = {
+        {"gate_shexp.weight", g, &s.gate},
+        {"up_shexp.weight", u, &s.up},
+        {"down_shexp.weight", d, &s.down},
+    };
+    for (const Slot& sl : slots) {
+        const std::string name = base + sl.suffix;
+        if (sl.t == nullptr) {
+            problems.push_back({layer, name, "张力不存在（该层有共享专家）"});
+            continue;
+        }
+        std::string why;
+        *sl.out = make_spec(*sl.t, why);
+        if (!why.empty()) problems.push_back({layer, name, why});
+    }
+
+    const std::string ginp = base + "gate_inp_shexp.weight";
+    const artifact::GgufTensorInfo* t = gguf.find(ginp);
+    if (t == nullptr) {
+        problems.push_back({layer, ginp, "张力不存在（该层有共享专家）"});
+    } else if (t->dims.size() != 1 || format_from_type_code(t->type) != Format::kBf16) {
+        problems.push_back({layer, ginp, "标量门不是 1 维 bf16（维度数 " +
+                                             std::to_string(t->dims.size()) + "，类型码 " +
+                                             std::to_string(t->type) + "）"});
+    } else if (s.gate.cols != 0 && t->dims[0] != s.gate.cols) {
+        problems.push_back({layer, ginp, "标量门长度 " + std::to_string(t->dims[0]) +
+                                             " 与 gate 的输入维 " + std::to_string(s.gate.cols) +
+                                             " 不一致"});
+    } else {
+        s.gate_inp = true;
+    }
+    return s;
+}
+
 Format format_from_type_code(std::uint32_t code) {
     switch (code) {
         case 0: return Format::kF32;
@@ -214,6 +264,7 @@ Table build_table(const artifact::GgufFile& gguf, int first, int last) {
             if (!why.empty()) table.problems.push_back({l, name, why});
         }
         table.layers.push_back(spec);
+        table.shared.push_back(read_shared_spec(gguf, l, table.problems));
     }
     return table;
 }

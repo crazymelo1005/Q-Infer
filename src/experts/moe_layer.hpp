@@ -25,11 +25,16 @@ struct MoeLayer {
     int layer = -1;
     int top_k = 0;
     LayerSpec spec;
+    SharedSpec shared;   // 这一层的共享专家；present=false 表示没有
     RouterSpec router_spec;
     const artifact::GgufTensorInfo* gate = nullptr;
     const artifact::GgufTensorInfo* up = nullptr;
     const artifact::GgufTensorInfo* down = nullptr;
     const artifact::GgufTensorInfo* router = nullptr;
+    const artifact::GgufTensorInfo* s_gate = nullptr;
+    const artifact::GgufTensorInfo* s_up = nullptr;
+    const artifact::GgufTensorInfo* s_down = nullptr;
+    const artifact::GgufTensorInfo* s_gate_inp = nullptr;  // 1 维 bf16 标量门，长度 hidden
     std::uint64_t gate_expert_bytes = 0;
     std::uint64_t up_expert_bytes = 0;
     std::uint64_t down_expert_bytes = 0;
@@ -50,9 +55,15 @@ struct MoeScratch {
     std::vector<float> expert_out;
     std::vector<int> ids;
     std::vector<float> weights;
+    // 共享专家：标量门的 bf16 权重、三矩阵的字节区、以及它自己的中间缓冲。
+    std::vector<std::uint16_t> s_gate_inp;
+    std::vector<std::uint8_t> s_gate, s_up, s_down;
+    FfnScratch s_ffn;
+    std::vector<float> shared_out;
 };
 
-// 跑一层：读路由矩阵 → 路由出 top-k → 逐个读该专家的三矩阵并前馈 → 按权重累加。
+// 跑一层：读路由矩阵 → 路由出 top-k → 逐个读该专家的三矩阵并前馈 → 按权重累加 → 有共享专家则再加。
+// 组合口径是 `y = Σ wᵢ·expertᵢ + shared`：路由侧按权重、共享侧**不加权**直接相加（[S-50]）。
 // out 长 hidden，覆盖写（MoE 输出本身）。若 ids 与 weights 非空则回填路由结果，便于核对。
 bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const float* x, float* out,
                    MoeScratch& scratch, std::string& err, int* ids_out = nullptr,

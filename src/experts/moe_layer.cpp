@@ -71,6 +71,34 @@ bool build_moe_layer(const artifact::GgufFile& gguf, int layer, int top_k, MoeLa
     out.gate_expert_bytes = out.spec.gate.rows * out.spec.gate.row_bytes();
     out.up_expert_bytes = out.spec.up.rows * out.spec.up.row_bytes();
     out.down_expert_bytes = out.spec.down.rows * out.spec.down.row_bytes();
+
+    // 共享专家是可选的一层：缺它不算错（引擎侧 shared 允许为空），但一旦有一层就要四个都齐、且几何自洽。
+    out.shared = table.shared.empty() ? SharedSpec{} : table.shared[0];
+    if (out.shared.present) {
+        if (!out.shared.usable()) {
+            err = "层 " + std::to_string(layer) + " 的共享专家不可用：";
+            for (const auto& p : table.problems) err += p.tensor + "（" + p.reason + "） ";
+            return false;
+        }
+        out.s_gate = need(gguf, base + "gate_shexp.weight", err);
+        out.s_up = need(gguf, base + "up_shexp.weight", err);
+        out.s_down = need(gguf, base + "down_shexp.weight", err);
+        out.s_gate_inp = need(gguf, base + "gate_inp_shexp.weight", err);
+        if (out.s_gate == nullptr || out.s_up == nullptr || out.s_down == nullptr ||
+            out.s_gate_inp == nullptr) {
+            return false;
+        }
+        // 共享专家的 ffn 宽必须与路由专家一致（该模型的共享专家宽 = 640，与路由专家同）。
+        if (out.shared.gate.cols != out.hidden || out.shared.down.rows != out.hidden ||
+            out.shared.gate.rows != out.spec.gate.rows ||
+            out.shared.down.cols != out.spec.down.cols) {
+            err = "共享专家的几何与路由专家不一致：shared gate " +
+                  std::to_string(out.shared.gate.cols) + "×" + std::to_string(out.shared.gate.rows) +
+                  " 与路由 " + std::to_string(out.spec.gate.cols) + "×" +
+                  std::to_string(out.spec.gate.rows);
+            return false;
+        }
+    }
     return true;
 }
 
@@ -120,6 +148,36 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
         if (!expert_ffn(layer.spec, w, x, s.ffn, s.expert_out.data(), err)) return false;
         const float wt = s.weights[static_cast<std::size_t>(i)];
         for (std::size_t j = 0; j < hidden; ++j) out[j] += wt * s.expert_out[j];
+    }
+
+    // 共享专家：路由侧按权重、共享侧不加权，直接加（`y = Σ wᵢ·expertᵢ + shared`，[S-50]）。
+    if (layer.shared.present) {
+        s.s_gate_inp.resize(hidden);
+        if (!gguf.read_at(layer.s_gate_inp->offset,
+                          reinterpret_cast<std::uint8_t*>(s.s_gate_inp.data()), hidden * 2)) {
+            err = "读共享专家的标量门失败";
+            return false;
+        }
+        const std::uint64_t s_gate_bytes = layer.shared.gate.rows * layer.shared.gate.row_bytes();
+        const std::uint64_t s_up_bytes = layer.shared.up.rows * layer.shared.up.row_bytes();
+        const std::uint64_t s_down_bytes = layer.shared.down.rows * layer.shared.down.row_bytes();
+        s.s_gate.resize(s_gate_bytes);
+        s.s_up.resize(s_up_bytes);
+        s.s_down.resize(s_down_bytes);
+        // 共享专家没有专家维，故起点就是张力起点，不加逐专家偏移。
+        if (!gguf.read_at(layer.s_gate->offset, s.s_gate.data(), s.s_gate.size()) ||
+            !gguf.read_at(layer.s_up->offset, s.s_up.data(), s.s_up.size()) ||
+            !gguf.read_at(layer.s_down->offset, s.s_down.data(), s.s_down.size())) {
+            err = "读共享专家的矩阵失败";
+            return false;
+        }
+        ExpertWeights sw{s.s_gate.data(), s.s_up.data(), s.s_down.data()};
+        s.shared_out.assign(hidden, 0.0f);
+        if (!shared_expert_ffn(layer.shared, sw, s.s_gate_inp.data(), x, s.shared_out.data(),
+                               s.s_ffn, err)) {
+            return false;
+        }
+        for (std::size_t j = 0; j < hidden; ++j) out[j] += s.shared_out[j];
     }
     return true;
 }

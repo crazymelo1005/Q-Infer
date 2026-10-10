@@ -173,6 +173,44 @@ std::vector<TensorSpec> layer_tensors(const std::string& prefix, bool vary_gate,
     return ts;
 }
 
+// ---- 共享专家 ----
+//
+// 四个张力：三个 2 维矩阵（无专家维）+ 一个 1 维 bf16 标量门。构造规则沿用上面的块生成器：
+// IQ2_S 的子尺度 n 给 0 时每元素 1.0、给 1 时 3.0（db = d(0.5+n)/4，格点 0 的幅度 8）；
+// Q2_0 的码 0xAA 每元素 1.0。
+
+std::vector<std::uint8_t> bf16_vector(std::uint64_t n, float v) {
+    const std::uint16_t bits = f32_to_bf16_bits(v);
+    std::vector<std::uint8_t> data(static_cast<std::size_t>(n * 2));
+    for (std::uint64_t i = 0; i < n; ++i) {
+        data[static_cast<std::size_t>(2 * i)] = static_cast<std::uint8_t>(bits & 0xFF);
+        data[static_cast<std::size_t>(2 * i + 1)] = static_cast<std::uint8_t>(bits >> 8);
+    }
+    return data;
+}
+
+// gate 的子尺度取 gate_n（0 -> 每元素 1.0，1 -> 3.0），up 固定取 up_n。两者不同才能让
+// 「silu 加在 gate 还是加在 up」这条读法差异可观测。
+std::vector<TensorSpec> shexp_tensors(const std::string& prefix, std::uint8_t gate_n,
+                                      std::uint8_t up_n, float ginp) {
+    std::vector<TensorSpec> ts;
+    ts.push_back({prefix + "ffn_gate_shexp.weight", {kHidden, kFfn}, 22,
+                  iq2s_tensor(kHidden, kFfn, 1, gate_n, true)});
+    ts.push_back({prefix + "ffn_up_shexp.weight", {kHidden, kFfn}, 22,
+                  iq2s_tensor(kHidden, kFfn, 1, up_n, true)});
+    ts.push_back({prefix + "ffn_down_shexp.weight", {kFfn, kHidden}, 42,
+                  q20_tensor(kFfn, kHidden, 1)});
+    ts.push_back({prefix + "ffn_gate_inp_shexp.weight", {kHidden}, 30,
+                  bf16_vector(kHidden, ginp)});
+    return ts;
+}
+
+std::vector<TensorSpec> with_shared(std::vector<TensorSpec> base, const std::string& prefix,
+                                    std::uint8_t gate_n, std::uint8_t up_n, float ginp) {
+    for (auto& t : shexp_tensors(prefix, gate_n, up_n, ginp)) base.push_back(std::move(t));
+    return base;
+}
+
 // ---- 参考侧：直接按构造规则算单个专家的前馈（不走偏移算术） ----
 
 float dq_iq2s(const std::vector<std::uint8_t>& t, std::size_t row, std::size_t col) {
@@ -245,6 +283,183 @@ std::vector<float> make_x() {
         x[i] = static_cast<float>((static_cast<int>(i % 29) - 14)) * 0.03125f;
     }
     return x;
+}
+
+// 共享专家的双精度参考，**不含门**（门由调用方按 ref_gate_scalar 乘，这样才能分别核对门与主体）。
+// silu_on_up 打开时故意算错的那一版（引擎侧 parity 测试同样用意）。
+std::vector<double> ref_shared(const std::vector<std::uint8_t>& g, const std::vector<std::uint8_t>& u,
+                              const std::vector<std::uint8_t>& d, const float* x, bool silu_on_up) {
+    Q8kBlock xb{};
+    q8k_quantize_row(x, &xb, 1);
+    float xq[256];
+    q8k_dequant_block(xb, xq);
+    std::vector<double> gate(kFfn, 0.0), up(kFfn, 0.0);
+    for (std::size_t r = 0; r < kFfn; ++r) {
+        for (std::size_t j = 0; j < kHidden; ++j) {
+            gate[r] += static_cast<double>(dq_iq2s(g, r, j)) * static_cast<double>(xq[j]);
+            up[r] += static_cast<double>(dq_iq2s(u, r, j)) * static_cast<double>(xq[j]);
+        }
+    }
+    float h[kFfn];
+    for (std::size_t r = 0; r < kFfn; ++r) {
+        const double gv = silu_on_up ? up[r] : gate[r];
+        const double other = silu_on_up ? gate[r] : up[r];
+        h[r] = static_cast<float>((gv / (1.0 + std::exp(-gv))) * other);
+    }
+    Q80Block hb[2];
+    q8_0_quantize_row(h, hb, 2);
+    float hq[kFfn];
+    for (int b = 0; b < 2; ++b) q8_0_dequant_block(hb[b], hq + b * kQ80BlockElems);
+
+    std::vector<double> out(kHidden, 0.0);
+    for (std::size_t i = 0; i < kHidden; ++i) {
+        for (std::size_t j = 0; j < kFfn; ++j) {
+            out[i] += static_cast<double>(dq_q20(d, i, j)) * static_cast<double>(hq[j]);
+        }
+    }
+    return out;
+}
+
+void scale_vec(std::vector<double>& a, double k) {
+    for (double& v : a) v *= k;
+}
+
+// 共享专家那两条测试专用的输入：在 make_x 上叠一个 bf16 表示不了的小量，这样「标量门要把激活
+// 也舍入到 bf16」这件事才可观测（make_x 的值恰好在 bf16 里精确，舍不舍入一样，会漏掉那条守卫）。
+std::vector<float> make_x_shared() {
+    std::vector<float> x = make_x();
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        x[i] += static_cast<float>(static_cast<int>(i % 7) - 3) * 1e-4f;
+    }
+    return x;
+}
+
+void add_vec(std::vector<double>& a, const std::vector<double>& b) {
+    for (std::size_t i = 0; i < a.size(); ++i) a[i] += b[i];
+}
+
+// 标量门本身的双精度参考：dot = Σ bf16(x)·bf16(w)，再 sigmoid。scale 用来核对门恰好作用一次。
+double ref_gate_scalar(const std::vector<std::uint8_t>& ginp, const float* x, double scale) {
+    double dot = 0.0;
+    for (std::size_t j = 0; j < kHidden; ++j) {
+        const std::uint16_t wb = static_cast<std::uint16_t>(
+            ginp[2 * j] | (static_cast<std::uint16_t>(ginp[2 * j + 1]) << 8));
+        dot += static_cast<double>(bf16_bits_to_f32(wb)) *
+               static_cast<double>(bf16_bits_to_f32(f32_to_bf16_bits(x[j])));
+    }
+    return 1.0 / (1.0 + std::exp(-dot * scale));
+}
+
+void test_shared_expert_plain_add() {
+    // 共享专家的整体口径：路由侧按权重、共享侧不加权直接相加（y = Σ wᵢ·expertᵢ + shared）。
+    const auto ts = with_shared(layer_tensors("blk.0.", false, 0), "blk.0.", 0, 1, 1.0f);
+    const std::filesystem::path p = write_gguf("qinfer_moe_shexp.gguf", ts);
+    artifact::GgufFile g;
+    std::string err;
+    CHECK(g.open(p.string(), err));
+    MoeLayer layer;
+    CHECK(build_moe_layer(g, 0, kTopK, layer, err));
+    CHECK(layer.shared.present && layer.shared.usable());
+    CHECK(layer.shared.gate.format == Format::kIq2S);
+    CHECK(layer.shared.down.format == Format::kQ2_0);
+
+    const std::vector<float> x = make_x_shared();
+    MoeScratch s;
+    std::vector<float> out(kHidden, 0.0f);
+    int ids[kTopK];
+    float weights[kTopK];
+    CHECK(run_moe_layer(g, layer, x.data(), out.data(), s, err, ids, weights));
+
+    // 参考 = 单个路由专家的前馈（两个专家同值、权重各 0.5）+ 共享专家主体 × 标量门（共享侧不加权）。
+    std::vector<double> ref = ref_expert_ffn(ts[0].data, ts[1].data, ts[2].data, x.data());
+    const std::size_t base = 4;  // 共享专家的四个张力在末尾
+    std::vector<double> shared_base =
+        ref_shared(ts[base].data, ts[base + 1].data, ts[base + 2].data, x.data(), false);
+    const double gate = ref_gate_scalar(ts[base + 3].data, x.data(), 1.0);
+    scale_vec(shared_base, gate);
+    add_vec(ref, shared_base);
+    CHECK(near_vec(out, ref, "shared plain add") == 0);
+
+    // 陷阱可观测：把 silu 加在 up 上的那一版必须与正确版 materially 不同，否则这条测试看不出读法差异。
+    // 只在共享专家主体上比（路由项与这条读法无关，混进来会把差距稀释掉）。
+    const std::vector<double> shared_wrong =
+        ref_shared(ts[base].data, ts[base + 1].data, ts[base + 2].data, x.data(), true);
+    const std::vector<double> shared_right =
+        ref_shared(ts[base].data, ts[base + 1].data, ts[base + 2].data, x.data(), false);
+    double diff = 0.0, mag = 0.0;
+    for (std::size_t i = 0; i < shared_right.size(); ++i) {
+        diff += std::fabs(shared_right[i] - shared_wrong[i]);
+        mag += std::fabs(shared_right[i]);
+    }
+    CHECK(mag > 0.0);
+    if (!(diff / mag > 0.5)) {
+        std::printf("FAIL silu-on-gate vs silu-on-up 不可观测（相差 %.2f%%）\n", diff / mag * 100.0);
+        CHECK(false);
+    }
+
+    // 门是「每 token 一个标量」：out - 路由部分 与 共享专家的门前值 必须逐维成同一比例，且该比例
+    // 等于独立算出的 sigmoid(dot)。
+    std::vector<double> routed = ref_expert_ffn(ts[0].data, ts[1].data, ts[2].data, x.data());
+    double ratio = 0.0;
+    for (std::size_t i = 0; i < ref.size(); ++i) {
+        CHECK(shared_right[i] != 0.0);
+        const double r = (ref[i] - routed[i]) / shared_right[i];
+        if (i == 0) {
+            ratio = r;
+        } else if (!(std::fabs(r - ratio) < 1e-9)) {
+            std::printf("FAIL 标量门不是均匀比例：第 %zu 维 %.12g 对首维 %.12g\n", i, r, ratio);
+            CHECK(false);
+        }
+    }
+    if (!(std::fabs(ratio - gate) < 1e-6)) {
+        std::printf("FAIL 门的比例：实得 %.9g 期 %.9g\n", ratio, gate);
+        CHECK(false);
+    }
+}
+
+void test_shared_scalar_gate_applied_once() {
+    // 把标量门的权重整体翻倍（构造时给 2× 的值），门应从 sigmoid(d) 变成 sigmoid(2d)。
+    // 若实现把门乘了两次、或乘在权重上、或没乘，这条会露出来。
+    const std::vector<float> x = make_x_shared();
+    auto build_and_ratio = [&](float ginp) {
+        const auto ts = with_shared(layer_tensors("blk.0.", false, 0), "blk.0.", 0, 1, ginp);
+        const std::filesystem::path p = write_gguf("qinfer_moe_shexp_g.gguf", ts);
+        artifact::GgufFile g;
+        std::string err;
+        CHECK(g.open(p.string(), err));
+        MoeLayer layer;
+        CHECK(build_moe_layer(g, 0, kTopK, layer, err));
+        MoeScratch s;
+        std::vector<float> out(kHidden, 0.0f);
+        CHECK(run_moe_layer(g, layer, x.data(), out.data(), s, err));
+        std::vector<double> routed = ref_expert_ffn(ts[0].data, ts[1].data, ts[2].data, x.data());
+        const std::size_t base = 4;
+        const std::vector<double> body =
+            ref_shared(ts[base].data, ts[base + 1].data, ts[base + 2].data, x.data(), false);
+        double ratio = 0.0;
+        for (std::size_t i = 0; i < routed.size(); ++i) {
+            if (body[i] == 0.0) continue;
+            ratio = (static_cast<double>(out[i]) - routed[i]) / body[i];
+            break;
+        }
+        return ratio;
+    };
+    const double r1 = build_and_ratio(1.0f);
+    const double r2 = build_and_ratio(2.0f);
+    // 期望值由数据算出：门权翻倍等于 dot 翻倍。
+    const auto ts = with_shared(layer_tensors("blk.0.", false, 0), "blk.0.", 0, 1, 1.0f);
+    const std::size_t base = 4;
+    const double s1 = ref_gate_scalar(ts[base + 3].data, x.data(), 1.0);
+    const double s2 = ref_gate_scalar(ts[base + 3].data, x.data(), 2.0);
+    if (!(std::fabs(r1 - s1) < 1e-6 && std::fabs(r2 - s2) < 1e-6)) {
+        std::printf("FAIL 标量门：r1=%.9g（期 %.9g） r2=%.9g（期 %.9g）\n", r1, s1, r2, s2);
+        CHECK(false);
+    }
+    // 门权翻倍必然把门推离 0.5（无论 dot 的正负），这条与上面的数值核对互补。
+    if (!(std::fabs(s2 - 0.5) > std::fabs(s1 - 0.5) && s1 != s2)) {
+        std::printf("FAIL 门的方向不对：%.6f 对 %.6f\n", s1, s2);
+        CHECK(false);
+    }
 }
 
 void test_identical_experts() {
@@ -449,6 +664,20 @@ int manual_model_entry(const std::string& path, int layer, int k) {
     for (std::size_t i = 0; i < out.size(); ++i) osum += out[i];
     std::printf("\n  out 前 3 值 %.6g %.6g %.6g；sum %.6g\n", out[0], out[1], out[2], osum);
 
+    // 共享专家：这一层的四个张力是否齐、三矩阵的档、以及标量门的值（逐 token 一个标量）。
+    if (ml.shared.present) {
+        if (!ml.shared.usable()) {
+            std::printf("  共享专家存在但不可用\n");
+            return 1;
+        }
+        const float g = shared_scalar_gate(s.s_gate_inp.data(), x.data(), ml.hidden);
+        std::printf("  共享专家：gate %s / up %s / down %s；标量门 %.6f\n",
+                    format_name(ml.shared.gate.format), format_name(ml.shared.up.format),
+                    format_name(ml.shared.down.format), static_cast<double>(g));
+    } else {
+        std::printf("  这一层没有共享专家\n");
+    }
+
     // 独立参考：测试侧按「张力起点 + e × rows × row_bytes」自己读三矩阵，再走 expert_ffn 与加权。
     std::vector<std::uint8_t> bg(static_cast<std::size_t>(ml.gate_expert_bytes));
     std::vector<std::uint8_t> bu(static_cast<std::size_t>(ml.up_expert_bytes));
@@ -472,6 +701,39 @@ int manual_model_entry(const std::string& path, int layer, int k) {
         for (std::size_t j = 0; j < ref.size(); ++j) {
             ref[j] += w[static_cast<std::size_t>(i)] * one[j];
         }
+    }
+    // 共享专家按同一套口径独立拼一遍：直接从张力起点读三段（无专家维），复用 expert_ffn 的三矩阵
+    // 组装与 shared_scalar_gate 的标量门——即不走 run_moe_layer 里那段接线，也不走
+    // shared_expert_ffn 那个组合，用来抓「接线/组合」层面的错。
+    if (ml.shared.present) {
+        std::vector<std::uint8_t> sg(static_cast<std::size_t>(
+            ml.shared.gate.rows * ml.shared.gate.row_bytes()));
+        std::vector<std::uint8_t> su(
+            static_cast<std::size_t>(ml.shared.up.rows * ml.shared.up.row_bytes()));
+        std::vector<std::uint8_t> sd(
+            static_cast<std::size_t>(ml.shared.down.rows * ml.shared.down.row_bytes()));
+        std::vector<std::uint16_t> gi(static_cast<std::size_t>(ml.hidden));
+        if (!g.read_at(ml.s_gate->offset, sg.data(), sg.size()) ||
+            !g.read_at(ml.s_up->offset, su.data(), su.size()) ||
+            !g.read_at(ml.s_down->offset, sd.data(), sd.size()) ||
+            !g.read_at(ml.s_gate_inp->offset, reinterpret_cast<std::uint8_t*>(gi.data()),
+                       gi.size() * 2)) {
+            std::printf("参考侧读共享专家失败\n");
+            return 1;
+        }
+        LayerSpec sview;
+        sview.gate = ml.shared.gate;
+        sview.up = ml.shared.up;
+        sview.down = ml.shared.down;
+        ExpertWeights sw{sg.data(), su.data(), sd.data()};
+        FfnScratch sfs;
+        std::vector<float> sone(static_cast<std::size_t>(ml.hidden), 0.0f);
+        if (!expert_ffn(sview, sw, x.data(), sfs, sone.data(), err)) {
+            std::printf("参考侧共享专家前馈失败：%s\n", err.c_str());
+            return 1;
+        }
+        const float sgate = shared_scalar_gate(gi.data(), x.data(), ml.hidden);
+        for (std::size_t j = 0; j < ref.size(); ++j) ref[j] += sone[j] * sgate;
     }
     double diff = 0.0, mag = 0.0;
     for (std::size_t j = 0; j < ref.size(); ++j) {
@@ -499,6 +761,8 @@ int main(int argc, char** argv) {
     test_expert_offsets();
     test_nonuniform_router_weights();
     test_failures();
-    std::puts("moe_layer: routing, per-expert offsets and weighted accumulation hold");
+    test_shared_expert_plain_add();
+    test_shared_scalar_gate_applied_once();
+    std::puts("moe_layer: routing, per-expert offsets, weighted accumulation and the shared expert hold");
     return 0;
 }

@@ -49,4 +49,15 @@ bool expert_ffn(const LayerSpec& spec, const ExpertWeights& w, const float* x, F
 bool moe_ffn(const LayerSpec& spec, const ExpertWeights* ws, const float* route_weight, int n,
              const float* x, float* out, FfnScratch& scratch, std::string& err);
 
+// 共享专家的标量门：g = sigmoid(Σ bf16(x)·bf16(w))。两个操作数都按 bf16 舍入——标量门的权重是 bf16，
+// ggml 会把激活也转到权重的 vec_dot_type；只要一边不舍入就会在门上留下固定偏移（[S-50] 的 parity
+// 测试就是这么分开钉的）。累加在 f32，与路由投影 `router_logits` 同口径。
+float shared_scalar_gate(const std::uint16_t* w_bf16, const float* x, std::uint64_t n);
+
+// 共享专家的一次前馈：三矩阵走 expert_ffn（SwiGLU 在 gate 上），再整体乘标量门 g。
+// out 为 hidden 长、覆盖写。三矩阵的档必须可用、且标量门必须是 1 维 bf16，否则返回 false。
+bool shared_expert_ffn(const SharedSpec& spec, const ExpertWeights& w,
+                       const std::uint16_t* gate_inp_bf16, const float* x, float* out,
+                       FfnScratch& scratch, std::string& err);
+
 }  // namespace qinfer::experts
