@@ -8,6 +8,7 @@
 #define CHECK(cond)                                                                  \
     do {                                                                             \
         if (!(cond)) {                                                               \
+            std::fflush(stdout);                                                     \
             std::fprintf(stderr, "CHECK 失败: %s  (%s:%d)\n", #cond, __FILE__, __LINE__); \
             std::abort();                                                            \
         }                                                                            \
