@@ -235,6 +235,14 @@ G-07 已实测为**算力瓶颈**（环境2）：纯流式读 8 线程即饱和�
 
 边界：核显与 CPU 总吞吐共同受总线带宽约束，只在算力瓶颈场景启用并限制其占比，把它当作第二个工人而不是独立的带宽来源。NPU 擅长整数卷积，不适合低成本码本矩阵乘，不参与专家计算。
 
+核显现状与总线争用已实测（工具 `measure/igpu_probe.c`，记录 `measure/results/20261010T195533-igpuprobe-环境2.json`；零新增依赖，只用发行版自带的 Mesa Vulkan / ANV）：
+
+1. 设备可见：Intel Arrow Lake-S Graphics（vendor 0x8086、device 0x7d67、集成型），绑在 i915，渲染节点 `/dev/dri/renderD130` 对当前用户可开（有显式 ACL）。
+2. 运行时现状：核显没有任何计算运行时——无 Level Zero（无 loader、无头文件），OpenCL 只注册了 `nvidia.icd`（核显不在其中）。Vulkan 加载器与 ANV 驱动（Mesa 26.0.8）在。故两条路线的依赖代价不同：Vulkan 路线运行时零新增，只需编译期的 `libvulkan-dev` 与一个 SPIR-V 编译器（或按 [ADR-008](adr/ADR-008-implementation-stack-and-kernel-reuse.md) 的惯例把预编译 SPIR-V 连同生成来源入库）；Level Zero 路线需要在环境2 加装 `intel-level-zero-gpu` 与 `level-zero-devel`。上游那套 Arc 端口是 SYCL，同样依赖 Intel 计算运行时，故「复用上游内核」并不因此更省依赖。
+3. 该设备在 192 项扩展里没有 `VK_KHR_shader_integer_dot_product`，故 Vulkan 路线上 DP4a 等效指令不可用，码本矩阵乘只能手写整数乘加——这与 ADR-005「内核走 DP4a（若可用则 XMX）」之间有一处待决的口径差。
+4. 总线争用（带宽型对带宽型）：核显 `vkCmdCopyBuffer` 搬 256 MiB 最好 26.9 GB/s（对总线约 53.7 GB/s，拷贝按读一遍写一遍计）；与 8 线程 CPU 流式读同跑时 CPU 从 56 至 61 GB/s 掉到约 25 GB/s（保留 41% 至 46%），两侧合计 59 至 62 GB/s，只有 CPU 单独的 0.98 至 1.10 倍。即带宽型工作下核显是争用者、不是增量来源。
+5. 口径边界（要紧）：上面两条只回答带宽型工作。未命中专家路径是算力型（G-07：4 位码本臂在 16 线程只用 20.6 GB/s 总线），故「算力型工作能否叠加」还没有答案，它需要一个真正跑在核显上的计算内核——而那需要上一条的 SPIR-V 工具链。CPU 臂与 `measure/cpu_expert_bench.c` 同形（按线程切互不重叠区段、屏障齐发、固定遍数），本机上 8 线程得 56 至 61 GB/s，与 G-07 的 58.5 同量级，可作为方法互校。
+
 共享内存总线上同类方案的公开实测为负收益（−19%），这一风险不因 G-07 的结论消失；G-07 只回答「值不值得试」（算力瓶颈成立），占比如何限制仍须实测，见 R-08。
 
 ## 14. 单卡与双卡

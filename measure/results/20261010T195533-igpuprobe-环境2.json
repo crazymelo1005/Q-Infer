@@ -1,0 +1,10 @@
+{
+  "measured_at": "2026-10-10T19:55:33+0800",
+  "measure": "核显带宽与「与 CPU 共总线时的争用」探针（Vulkan 传输路径）",
+  "env": "环境2",
+  "method": "dlopen libvulkan.so.1（Mesa ANV，发行版自带，零新增依赖）；核显侧 vkCmdCopyBuffer 在同一块 DDR 上搬运；CPU 侧与 measure/cpu_expert_bench.c 同形（按线程切互不重叠区段、屏障齐发、固定遍数）；一次拷贝对总线按 2× 搬运字节计",
+  "devices": [{"name": "Intel(R) Graphics (ARL)", "vendor_id": 32902, "device_id": 32103, "type": 1}, {"name": "NVIDIA GeForce RTX 5060 Ti", "vendor_id": 4318, "device_id": 11524, "type": 2}, {"name": "NVIDIA GeForce RTX 5060 Ti", "vendor_id": 4318, "device_id": 11524, "type": 2}, {"name": "llvmpipe (LLVM 21.1.8, 256 bits)", "vendor_id": 65541, "device_id": 0, "type": 4}],
+  "igpu_extensions": {"shader_integer_dot_product": 0, "shader_float16_int8": 0, "count": 192},
+  "igpu_copy": {"buffer_mib": 256, "rounds": 5, "moved_gb_s_best": 26.865, "moved_gb_s_avg": 24.424, "moved_gb_s_worst": 16.005, "bus_gb_s_best_est": 53.730},
+  "contention": {"cpu_threads": 8, "cpu_buffer_mib": 512, "cpu_passes": 5, "window_s": 0.105, "cpu_gb_s_alone": 56.09, "cpu_gb_s_with_igpu": 25.66, "cpu_retained_fraction": 0.4574, "igpu_contended_moved_gb_s": 17.96, "igpu_contended_bus_gb_s_est": 35.92, "bus_total_gb_s_est": 61.58, "bus_total_over_cpu_alone": 1.0979}
+}
