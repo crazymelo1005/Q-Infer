@@ -141,6 +141,7 @@ void test_geometry_and_kernels() {
         {Format::kIq3S, 256, 110, true, ActFormat::kQ8K},
         {Format::kIq1M, 256, 56, true, ActFormat::kQ8K},
         {Format::kQ6K, 256, 210, true, ActFormat::kQ8K},
+        {Format::kIq4Xs, 256, 136, true, ActFormat::kQ8K},
         {Format::kBf16, 1, 2, false, ActFormat::kNone},
     };
     for (const Row& r : rows) {

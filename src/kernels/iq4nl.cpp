@@ -8,13 +8,14 @@
 // 两处口径一致。
 #include "kernels/iq4nl.hpp"
 
+#include "kernels/iq4nl_tables.hpp"
+
 namespace qinfer::kernels {
 
 namespace {
 
-// kvalues_iq4nl：IQ4_NL 的 16 个格点，无 -8 偏移。
-constexpr std::int8_t kCodebook[16] = {-127, -104, -83, -65, -49, -35, -22, -10,
-                                       1, 13, 25, 38, 53, 69, 89, 113};
+// kvalues_iq4nl 在 iq4nl_tables.hpp（IQ4_XS 共用同一张表）。
+constexpr const std::int8_t* kCodebook = detail::kIq4nlCode;
 
 std::uint16_t read_u16(const std::uint8_t* p) {
     return static_cast<std::uint16_t>(p[0] | (p[1] << 8));

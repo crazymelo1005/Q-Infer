@@ -21,6 +21,7 @@
 #include "kernels/iq2s.hpp"
 #include "kernels/iq3s.hpp"
 #include "kernels/iq4nl.hpp"
+#include "kernels/iq4xs.hpp"
 #include "kernels/q2_0.hpp"
 #include "kernels/q6k.hpp"
 #include "kernels/q8k.hpp"
@@ -150,6 +151,9 @@ void dequant_row(experts::Format f, const std::uint8_t* row, std::uint64_t cols,
                 break;
             case experts::Format::kIq3S:
                 dequant_iq3s_block(blk, tmp);
+                break;
+            case experts::Format::kIq4Xs:
+                dequant_iq4xs_block(blk, tmp);
                 break;
             case experts::Format::kQ2_0:
                 dequant_q2_0_block(blk, tmp);
@@ -479,6 +483,31 @@ Matrix make_matrix_varied_iq3s(std::uint64_t rows, std::uint64_t cols, std::uint
     return m;
 }
 
+// IQ4_XS 也走 gate/up 的交叉核对。它的 6 位尺度带 -32 偏移，LCG 出来的随机尺度会把 dl 拉到
+// ±16 再乘码本的 ±127，h 立刻把 down 的 Q8_0 fp16 尺度推成 inf。故把每块改成：d = 0.25、
+// scales_h 恒为 2（每个 32 值组的高 2 位）、scales_l 的半字节取 1..3 -> (ls-32) ∈ {1,2,3}。
+Matrix make_matrix_varied_iq4xs(std::uint64_t rows, std::uint64_t cols, std::uint32_t salt) {
+    Matrix m = make_matrix_varied(experts::Format::kIq4Xs, rows, cols, salt);
+    const std::size_t nb = static_cast<std::size_t>(blocks_of(experts::Format::kIq4Xs, cols));
+    const std::size_t row_bytes = nb * static_cast<std::size_t>(kIq4xsBlockBytes);
+    for (std::size_t r = 0; r < rows; ++r) {
+        for (std::size_t b = 0; b < nb; ++b) {
+            std::uint8_t* p = m.bytes.data() + r * row_bytes + b * kIq4xsBlockBytes;
+            p[0] = 0x00;
+            p[1] = 0x34;  // fp16 0.25
+            p[2] = 0xAA;  // scales_h：每个 2 位字段 = 2
+            p[3] = 0xAA;
+            const std::uint32_t s = static_cast<std::uint32_t>(r * 5 + b * 11 + salt);
+            for (int k = 0; k < 4; ++k) {
+                const std::uint8_t lo = static_cast<std::uint8_t>(1 + ((s + k) % 3));
+                const std::uint8_t hi = static_cast<std::uint8_t>(1 + ((s + k + 2) % 3));
+                p[4 + k] = static_cast<std::uint8_t>(lo | (hi << 4));
+            }
+        }
+    }
+    return m;
+}
+
 void test_matches_reference_q6k() {
     const Matrix g = make_matrix_varied_q6k(kFfn, kHidden, 11);
     const Matrix u = make_matrix_varied_q6k(kFfn, kHidden, 12);
@@ -530,6 +559,32 @@ void test_matches_reference_iq3s() {
     CHECK(compare(got, ref, "IQ3_S ffn vs 参考", 1e-5) == 0);
 }
 
+// IQ4_XS 参与 gate/up 的交叉核对（6 位尺度带 -32 偏移，与 IQ4_NL 的单 fp16 尺度不同）。
+void test_matches_reference_iq4xs() {
+    const Matrix g = make_matrix_varied_iq4xs(kFfn, kHidden, 31);
+    const Matrix u = make_matrix_varied_iq4xs(kFfn, kHidden, 32);
+    const Matrix d = make_matrix_varied(experts::Format::kQ2_0, kHidden, kFfn, 33);
+    const experts::LayerSpec spec =
+        make_spec(experts::Format::kIq4Xs, experts::Format::kIq4Xs, experts::Format::kQ2_0);
+    CHECK(spec.usable());
+
+    std::vector<float> x(static_cast<std::size_t>(kHidden));
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        x[i] = static_cast<float>((static_cast<int>(i % 39) - 19) * 0.03125);
+    }
+
+    experts::ExpertWeights w{g.bytes.data(), u.bytes.data(), d.bytes.data()};
+    experts::FfnScratch scratch;
+    std::vector<float> out(static_cast<std::size_t>(kHidden), 0.0f);
+    std::string err;
+    CHECK(experts::expert_ffn(spec, w, x.data(), scratch, out.data(), err));
+
+    std::vector<double> ref;
+    ref_ffn(spec, g, u, d, x.data(), ref);
+    std::vector<double> got(out.begin(), out.end());
+    CHECK(compare(got, ref, "IQ4_XS ffn vs 参考", 1e-5) == 0);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -545,6 +600,7 @@ int main(int argc, char** argv) {
     test_matches_reference();
     test_matches_reference_q6k();
     test_matches_reference_iq3s();
+    test_matches_reference_iq4xs();
     test_unusable_specs_fail();
     std::puts("ffn: analytic uniform case, double-precision reference and unusable-spec failures hold");
     return 0;

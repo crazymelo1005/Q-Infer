@@ -47,6 +47,7 @@ add_library(qinfer_kernels
   src/kernels/iq2s.cpp
   src/kernels/iq2xxs.cpp
   src/kernels/iq3s.cpp
+  src/kernels/iq4xs.cpp
   src/kernels/iq1m.cpp
   src/kernels/q2_0.cpp
   src/kernels/q6k.cpp
@@ -95,6 +96,9 @@ target_link_libraries(test_iq1m PRIVATE qinfer_kernels)
 add_executable(test_iq3s tests/test_iq3s.cpp)
 target_link_libraries(test_iq3s PRIVATE qinfer_kernels)
 
+add_executable(test_iq4xs tests/test_iq4xs.cpp)
+target_link_libraries(test_iq4xs PRIVATE qinfer_kernels)
+
 add_executable(test_ngram tests/test_ngram.cpp)
 target_link_libraries(test_ngram PRIVATE qinfer_kernels)
 
@@ -132,6 +136,7 @@ add_test(NAME iq2s COMMAND test_iq2s)
 add_test(NAME iq2xxs COMMAND test_iq2xxs)
 add_test(NAME iq1m COMMAND test_iq1m)
 add_test(NAME iq3s COMMAND test_iq3s)
+add_test(NAME iq4xs COMMAND test_iq4xs)
 add_test(NAME ngram COMMAND test_ngram)
 add_test(NAME row_cache COMMAND test_row_cache)
 add_test(NAME ple_read_path COMMAND test_ple_read_path)
