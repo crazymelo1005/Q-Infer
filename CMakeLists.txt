@@ -173,7 +173,7 @@ add_executable(test_layer_dispatch tests/test_layer_dispatch.cpp)
 target_link_libraries(test_layer_dispatch PRIVATE qinfer_experts)
 
 add_executable(test_gated_residual tests/test_gated_residual.cpp)
-target_link_libraries(test_gated_residual PRIVATE qinfer_dense)
+target_link_libraries(test_gated_residual PRIVATE qinfer_dense qinfer_artifact)
 
 add_executable(test_step_record tests/test_step_record.cpp)
 target_link_libraries(test_step_record PRIVATE qinfer_experts)

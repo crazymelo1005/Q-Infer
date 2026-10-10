@@ -39,12 +39,27 @@ struct GrShapes {
     bool sane() const { return n_embd != 0 && hc != 0 && hc_lr != 0; }
 };
 
-// 一次 gr_read 的四组权重（bf16 位型）。w_inject 为 null 表示这是最后那个 mixer：它没有回写门。
+// 权重在文件里的存储精度。**逐张力读它自己声明的类型**，不能写死：这份 GGUF 里三个投影是 BF16、
+// 而 `hc_*_norm.weight` 是 F32（实测码 0/30/30/30），且它的取值带 bf16 装不下的低位（40960 个里
+// 有 7520 个转 bf16 会丢位），故截断到 bf16 是真误差而不是无损提升。上游那句「这些张力都是 BF16」
+// 说的是引擎自带的原生 pack，不是这份 GGUF。
+enum class GrPrecision : std::uint8_t { kBf16, kF32 };
+
+// 一组权重：bf16 时 data 指向 uint16 位型数组，F32 时指向 float 数组。data 为 null 表示没有这一组
+// （只有 w_inject 允许为空，那是最后那个 mixer）。
+struct GrTensor {
+    const void* data = nullptr;
+    GrPrecision precision = GrPrecision::kBf16;
+    bool present() const { return data != nullptr; }
+};
+
+// 一次 gr_read 的四组权重，按清单原样存、不做置换：w_down 行主序 (hc_lr, hc·n_embd)、
+// w_up 行主序 (hc·n_embd, hc_lr)、w_inject 行主序 (hc, hc·n_embd)。
 struct GrWeights {
-    const std::uint16_t* w_norm = nullptr;    // hc·n_embd
-    const std::uint16_t* w_down = nullptr;    // hc_lr × hc·n_embd
-    const std::uint16_t* w_up = nullptr;      // hc·n_embd × hc_lr
-    const std::uint16_t* w_inject = nullptr;  // hc × hc·n_embd，可为 null
+    GrTensor w_norm;    // hc·n_embd
+    GrTensor w_down;    // hc_lr × hc·n_embd
+    GrTensor w_up;      // hc·n_embd × hc_lr
+    GrTensor w_inject;  // hc × hc·n_embd，可为空
 };
 
 // 复用的中间缓冲，避免每次调用分配。
@@ -59,7 +74,7 @@ struct GrScratch {
 float rms_scale(const float* row, std::uint64_t n, float eps);
 
 // R 是 (hc, n_embd)，n_embd 最快（第 c 条流从 c·n_embd 开始）。mixed 与 inject 由调用方给缓冲
-// （mixed 长 n_embd、inject 长 hc）。w_inject 为 null 时 inject 原样不动。
+// （mixed 长 n_embd、inject 长 hc）。w_inject 缺席时 inject 原样不动。
 bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, float* mixed,
              float* inject, GrScratch& scratch, std::string& err);
 

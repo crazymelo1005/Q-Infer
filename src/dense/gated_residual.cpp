@@ -8,9 +8,12 @@ namespace qinfer::dense {
 
 namespace {
 
-// bf16 权重取出成 f32：左移 16 位即成位型，无舍入（权重在包里就是 bf16，不是 f32 的近似）。
-inline float w_at(const std::uint16_t* w, std::uint64_t i) {
-    return kernels::bf16_bits_to_f32(w[i]);
+// 权重取出成 f32：bf16 是左移 16 位即得位型、无舍入；F32 直接取。逐张力按它自己声明的精度。
+inline float w_at(const GrTensor& t, std::uint64_t i) {
+    if (t.precision == GrPrecision::kF32) {
+        return static_cast<const float*>(t.data)[i];
+    }
+    return kernels::bf16_bits_to_f32(static_cast<const std::uint16_t*>(t.data)[i]);
 }
 
 // 激活侧的 bf16 舍入，口径与参考实现同（就近舍入到偶数，见 S-44 的 f32_to_bf16_bits）。
@@ -19,6 +22,16 @@ inline float round_act(float v) {
 }
 
 inline float sigmoidf(float v) { return 1.0f / (1.0f + std::exp(-v)); }
+
+// 某一行（或某一个的投影组）的视图：基址按行推进，精度跟着走。
+inline GrTensor row_view(const GrTensor& t, std::uint64_t row, std::uint64_t row_len) {
+    GrTensor r = t;
+    const std::uint64_t off = row * row_len;
+    r.data = t.precision == GrPrecision::kF32
+                 ? static_cast<const void*>(static_cast<const float*>(t.data) + off)
+                 : static_cast<const void*>(static_cast<const std::uint16_t*>(t.data) + off);
+    return r;
+}
 
 // silu(v) = v · sigmoid(v)。
 inline float siluf(float v) { return v * sigmoidf(v); }
@@ -42,7 +55,7 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
         err = "超连接的几何不成立（n_embd / hc / hc_lr 有零）";
         return false;
     }
-    if (w.w_norm == nullptr || w.w_down == nullptr || w.w_up == nullptr) {
+    if (!w.w_norm.present() || !w.w_down.present() || !w.w_up.present()) {
         err = "gr_read 缺权重（w_norm / w_down / w_up 之一为空）";
         return false;
     }
@@ -73,7 +86,7 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
     // lo = silu((bf16(xn) · w_downᵀ) / hc)：除 hc 在 silu 里面。
     scratch.lo.assign(static_cast<std::size_t>(lr), 0.0f);
     for (std::uint64_t k = 0; k < lr; ++k) {
-        const std::uint16_t* wrow = w.w_down + k * hc_dim;
+        const GrTensor wrow = row_view(w.w_down, k, hc_dim);
         double acc = 0.0;
         for (std::uint64_t i = 0; i < hc_dim; ++i) {
             acc += static_cast<double>(scratch.act[static_cast<std::size_t>(i)]) *
@@ -93,7 +106,7 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
         float m = 0.0f;
         for (std::uint64_t c = 0; c < hc; ++c) {
             const std::uint64_t i = c * n + d;
-            const std::uint16_t* wrow = w.w_up + i * lr;
+            const GrTensor wrow = row_view(w.w_up, i, lr);
             double acc = 0.0;
             for (std::uint64_t k = 0; k < lr; ++k) {
                 acc += static_cast<double>(scratch.lq[static_cast<std::size_t>(k)]) *
@@ -105,10 +118,10 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
         mixed[d] = m / static_cast<float>(hc);
     }
 
-    // inject[c] = bf16(xn)[c] · w_inject[c]ᵀ。w_inject 为 null 时（最后那个 mixer）原样不动。
-    if (w.w_inject != nullptr) {
+    // inject[c] = bf16(xn)[c] · w_inject[c]ᵀ。w_inject 缺席时（最后那个 mixer）原样不动。
+    if (w.w_inject.present()) {
         for (std::uint64_t c = 0; c < hc; ++c) {
-            const std::uint16_t* wrow = w.w_inject + c * hc_dim;
+            const GrTensor wrow = row_view(w.w_inject, c, hc_dim);
             double acc = 0.0;
             for (std::uint64_t i = 0; i < hc_dim; ++i) {
                 acc += static_cast<double>(scratch.act[static_cast<std::size_t>(i)]) *
