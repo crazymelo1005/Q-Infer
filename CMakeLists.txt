@@ -145,6 +145,9 @@ target_link_libraries(test_expert_cache PRIVATE qinfer_storage)
 add_executable(expert_cache_replay measure/expert_cache_replay.cpp)
 target_link_libraries(expert_cache_replay PRIVATE qinfer_storage)
 
+add_executable(gguf_tensors measure/gguf_tensors.cpp)
+target_link_libraries(gguf_tensors PRIVATE qinfer_artifact)
+
 add_executable(test_ple_read_path tests/test_ple_read_path.cpp)
 target_link_libraries(test_ple_read_path PRIVATE qinfer_ple)
 
