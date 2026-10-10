@@ -135,4 +135,18 @@ void ExpertCache::observe_step(const ExpertKey* keys, int n) {
     cooc_.observe(keys, n);
 }
 
+bool ExpertCache::preload(const ExpertKey& k) {
+    if (sets_ == 0) return false;
+    SlotState* set = &slots_[static_cast<std::size_t>(mix(k) % sets_) * static_cast<std::size_t>(ways_)];
+    if (probe(set, k) >= 0) return true;  // 已在槽里
+    for (int w = 0; w < ways_; ++w) {
+        if (!set[w].occupied) {
+            set[w] = SlotState{k, 0, 0, true};
+            ++used_;
+            return true;
+        }
+    }
+    return false;  // 组满：预载不驱逐
+}
+
 }  // namespace qinfer::storage

@@ -11,12 +11,15 @@
 // 用法：expert_cache_replay --trace <trace.bin> [--slots N] [--ways W] [--json]
 #include "storage/expert_cache.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 using namespace qinfer::storage;
@@ -90,6 +93,81 @@ struct RunResult {
     std::uint64_t dropped_pairs = 0;
 };
 
+// 留出法：前 split_frac 的轨迹只用来统计（不评），其余用来评。用来回答 engine §5 那个杠杆问题——
+// 「把哪些对放进槽位」：预载排序用全量频次好，还是用共现中心度好。
+struct PreloadArm {
+    std::string name;
+    std::uint64_t preloaded = 0;
+    std::uint64_t hits = 0;
+    std::uint64_t misses = 0;
+};
+
+// 从轨迹的一段里统计「键被访问的频次」。
+std::vector<std::pair<std::uint64_t, std::uint32_t>> frequency_ranking(const std::vector<Record>& trace,
+                                                                     std::size_t begin,
+                                                                     std::size_t end) {
+    std::unordered_map<std::uint32_t, std::uint64_t> freq;
+    for (std::size_t i = begin; i < end; ++i) {
+        for (std::uint32_t e : trace[i].experts) ++freq[key_code(ExpertKey{trace[i].layer, e})];
+    }
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> ranked;
+    ranked.reserve(freq.size());
+    for (const auto& kv : freq) ranked.emplace_back(kv.second, kv.first);
+    std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
+        return a.first != b.first ? a.first > b.first : a.second < b.second;
+    });
+    return ranked;
+}
+
+// 从轨迹的一段里统计共现，并按中心度给出排序。
+std::vector<std::pair<std::uint64_t, std::uint32_t>> centrality_ranking(const std::vector<Record>& trace,
+                                                                      std::size_t begin,
+                                                                      std::size_t end) {
+    Cooccurrence cooc(1u << 20, /*aging_interval=*/0);
+    std::vector<ExpertKey> keys;
+    for (std::size_t i = begin; i < end; ++i) {
+        keys.clear();
+        for (std::uint32_t e : trace[i].experts) keys.push_back(ExpertKey{trace[i].layer, e});
+        cooc.observe(keys.data(), static_cast<int>(keys.size()));
+    }
+    std::vector<ExpertKey> top;
+    cooc.centrality_ranking(top, 1u << 20);
+    std::vector<std::pair<std::uint64_t, std::uint32_t>> ranked;
+    ranked.reserve(top.size());
+    // centrality_ranking 已按中心度降序；这里只需要顺序，故用递减的伪计数保住名次。
+    std::uint64_t rank = top.size();
+    for (const ExpertKey& k : top) ranked.emplace_back(rank--, key_code(k));
+    return ranked;
+}
+
+// 用给定的排序预载，然后在 [eval_begin, end) 上评。预载在评之前做，不计命中。
+PreloadArm run_preload_arm(const char* name, const std::vector<Record>& trace, std::size_t eval_begin,
+                           std::size_t eval_end, std::size_t slots, int ways,
+                           const std::vector<std::pair<std::uint64_t, std::uint32_t>>& ranking) {
+    LruPolicy lru;
+    ExpertCache cache(slots, ways, lru);
+    PreloadArm arm;
+    arm.name = name;
+    for (const auto& p : ranking) {
+        if (arm.preloaded >= slots) break;
+        const std::uint32_t code = p.second;
+        if (cache.preload(ExpertKey{code >> 16, code & 0xFFFFu})) ++arm.preloaded;
+    }
+    std::vector<ExpertKey> keys;
+    for (std::size_t i = eval_begin; i < eval_end; ++i) {
+        keys.clear();
+        for (std::uint32_t e : trace[i].experts) keys.push_back(ExpertKey{trace[i].layer, e});
+        cache.observe_step(keys.data(), static_cast<int>(keys.size()));
+        for (const ExpertKey& k : keys) {
+            ExpertKey victim;
+            cache.access(k, static_cast<std::int64_t>(i), nullptr, nullptr, &victim);
+        }
+    }
+    arm.hits = cache.stats().hits;
+    arm.misses = cache.stats().misses;
+    return arm;
+}
+
 RunResult run(const std::vector<Record>& trace, std::size_t slots, int ways,
               const EvictionPolicy& policy) {
     ExpertCache cache(slots, ways, policy);
@@ -128,12 +206,14 @@ int main(int argc, char** argv) {
     std::string env = "未标注";
     std::size_t slots = 8106;  // 默认取 G-09 定的部署槽位口径
     int ways = 8;
+    double split = 0.0;  // > 0 时做留出法预载实验：前 split 比例只统计，其余评
     bool json = false;
     for (int i = 1; i + 1 < argc; ++i) {
         if (std::strcmp(argv[i], "--trace") == 0) trace_path = argv[i + 1];
         else if (std::strcmp(argv[i], "--slots") == 0) slots = static_cast<std::size_t>(std::atol(argv[i + 1]));
         else if (std::strcmp(argv[i], "--ways") == 0) ways = std::atoi(argv[i + 1]);
         else if (std::strcmp(argv[i], "--env") == 0) env = argv[i + 1];
+        else if (std::strcmp(argv[i], "--split") == 0) split = std::atof(argv[i + 1]);
     }
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--json") == 0) json = true;
@@ -160,10 +240,11 @@ int main(int argc, char** argv) {
         const std::time_t now = std::time(nullptr);
         std::strftime(stamp, sizeof stamp, "%Y-%m-%dT%H:%M:%S%z", std::localtime(&now));
         std::printf("  \"measured_at\": \"%s\",\n", stamp);
-        std::printf("  \"measure\": \"序 4 专家缓存的替换策略离线重放\",\n");
+        std::printf("  \"measure\": \"序 4 专家缓存的替换策略、相联度与预载排序离线重放\",\n");
         std::printf("  \"env\": \"%s\",\n", env.c_str());
         std::printf("  \"method\": \"读参考引擎 --dump-routing 的轨迹（layer i32, k i32, k 专家 i32, "
-                    "k 权重 f32），逐条喂给三种替换策略；命中率只作观测量\",\n");
+                    "k 权重 f32），逐条喂给三种替换策略；--split>0 时前一段只统计、其余评预载排序。"
+                    "命中率只作观测量\",\n");
         std::printf("  \"trace\": \"%s\",\n", trace_path.c_str());
         std::printf("  \"records\": %llu,\n", static_cast<unsigned long long>(trace.size()));
         std::printf("  \"bad_records\": %llu,\n", static_cast<unsigned long long>(bad));
@@ -183,9 +264,41 @@ int main(int argc, char** argv) {
                         i == 2 ? "" : ",");
         }
         std::printf("  },\n");
-        std::printf("  \"cooccurrence\": {\"pair_kinds\": %llu, \"dropped_pairs\": %llu}\n",
+        std::printf("  \"cooccurrence\": {\"pair_kinds\": %llu, \"dropped_pairs\": %llu},\n",
                     static_cast<unsigned long long>(r_cooc.pair_kinds),
                     static_cast<unsigned long long>(r_cooc.dropped_pairs));
+        if (split > 0.0) {
+            const std::size_t eval_begin = static_cast<std::size_t>(static_cast<double>(trace.size()) * split);
+            const std::vector<std::pair<std::uint64_t, std::uint32_t>> freq =
+                frequency_ranking(trace, 0, eval_begin);
+            const std::vector<std::pair<std::uint64_t, std::uint32_t>> cent =
+                centrality_ranking(trace, 0, eval_begin);
+            const std::vector<std::pair<std::uint64_t, std::uint32_t>> none;
+            const PreloadArm arms[3] = {
+                run_preload_arm("cold", trace, eval_begin, trace.size(), slots, ways, none),
+                run_preload_arm("preload-frequency", trace, eval_begin, trace.size(), slots, ways, freq),
+                run_preload_arm("preload-centrality", trace, eval_begin, trace.size(), slots, ways, cent),
+            };
+            std::printf("  \"split\": %.4f,\n", split);
+            std::printf("  \"evaluated_records\": %llu,\n",
+                        static_cast<unsigned long long>(trace.size() - eval_begin));
+            std::printf("  \"preload_experiment\": [\n");
+            for (int i = 0; i < 3; ++i) {
+                const std::uint64_t total = arms[i].hits + arms[i].misses;
+                std::printf("    {\"arm\": \"%s\", \"preloaded\": %llu, \"hits\": %llu, "
+                            "\"misses\": %llu, \"hit_rate\": %.6f}%s\n",
+                            arms[i].name.c_str(),
+                            static_cast<unsigned long long>(arms[i].preloaded),
+                            static_cast<unsigned long long>(arms[i].hits),
+                            static_cast<unsigned long long>(arms[i].misses),
+                            total == 0 ? 0.0
+                                       : static_cast<double>(arms[i].hits) / static_cast<double>(total),
+                            i == 2 ? "" : ",");
+            }
+            std::printf("  ]\n");
+        } else {
+            std::printf("  \"split\": 0\n");
+        }
         std::printf("}\n");
     } else {
         std::printf("轨迹 %s：%llu 条记录（坏 %llu）槽位 %llu 相联度 %d\n", trace_path.c_str(),

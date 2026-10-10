@@ -101,6 +101,10 @@ public:
     // 把本步正在读的键记进共现图（engine §5 第 1 条）；也用于策略的查询集。
     void observe_step(const ExpertKey* keys, int n);
 
+    // 预载一个键（engine §5 第 2 条：会话开始按簇预载，而不是等它被读到）。只占空槽，槽满返回 false——
+    // 预载不驱逐，因为驱逐的判据是策略与页表不变量，预载阶段这两者都还没建立。不计入命中/未命中。
+    bool preload(const ExpertKey& k);
+
     std::size_t capacity() const { return slots_.size(); }
     std::size_t sets() const { return sets_; }
     int ways() const { return ways_; }

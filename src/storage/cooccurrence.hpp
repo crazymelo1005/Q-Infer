@@ -49,6 +49,16 @@ public:
     // k 与一组键的共现计数之和，策略用它排序。
     std::uint64_t score_with(ExpertKey k, const ExpertKey* query, int n) const;
 
+    // 按「中心度」排名：中心度 = 该键与所有伙伴的共现计数之和。用于预载排序——engine §5 第 2 条
+    // （会话开始时预载专家簇，而不是用全局热榜）需要一个「按共现挑一批键」的入口。O(表大小) 一次。
+    // 输出最多 n 个键，按中心度降序；并列取键更小的（确定性）。
+    void centrality_ranking(std::vector<ExpertKey>& out, std::size_t n) const;
+
+    // 单个键的中心度 = 与所有伙伴的共现计数之和。O(表大小)，只给需要核对这个量的调用方用。
+    // 一条要紧的性质：路由是固定 top-k 时，一次激活恰好带来 (k−1) 个伙伴对，故
+    // 中心度 == (k−1) × 该键的激活频次——中心度不含超出边缘频次的信息，用它排序与用频次排序同序。
+    std::uint64_t degree_weight(ExpertKey k) const;
+
     std::size_t pairs() const { return counts_.size(); }
     std::uint64_t dropped_pairs() const { return dropped_; }  // 因满而被拒收的新对数
     std::uint64_t agings() const { return agings_; }

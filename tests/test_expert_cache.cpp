@@ -258,6 +258,53 @@ void test_cooccurrence_aging_halves_counts() {
     CHECK(cooc.score(K(0, 1), K(0, 2)) == 2);
 }
 
+void test_centrality_carries_no_information_beyond_frequency() {
+    // 固定 top-k 的路由下，一次激活恰好带来 (k−1) 个伙伴对，故「中心度 == (k−1) × 激活频次」——
+    // 中心度不含超出边缘频次的信息，用它排序与用频次排序同序。这是本轮实测「共现图作预载/替换输入
+    // 无收益」的结构性原因，用不变量钉住，免得日后有人凭直觉再试一遍。
+    constexpr int k = 3;
+    // 一批 k=3 的 token，成员不同但规模固定。
+    const std::vector<std::vector<std::uint32_t>> tokens = {
+        {1, 2, 3}, {1, 2, 3}, {2, 3, 4}, {1, 4, 5}, {1, 2, 5},
+        {3, 4, 5}, {1, 3, 5}, {2, 4, 5}, {1, 2, 4}, {1, 2, 3},
+    };
+    Cooccurrence cooc(1u << 12, /*aging_interval=*/0);
+    std::vector<ExpertKey> keys;
+    std::vector<std::uint64_t> freq(8, 0);
+    for (const auto& tk : tokens) {
+        keys.clear();
+        for (std::uint32_t e : tk) {
+            keys.push_back(K(0, e));
+            ++freq[e];
+        }
+        cooc.observe(keys.data(), static_cast<int>(keys.size()));
+    }
+    for (std::uint32_t e = 1; e <= 5; ++e) {
+        const std::uint64_t want = static_cast<std::uint64_t>(k - 1) * freq[e];
+        const std::uint64_t got = cooc.degree_weight(K(0, e));
+        if (got != want) {
+            std::printf("FAIL 中心度 e=%u：得 %llu，应 (k−1)×频次 = %llu\n", e,
+                        static_cast<unsigned long long>(got),
+                        static_cast<unsigned long long>(want));
+            CHECK(false);
+        }
+    }
+    // 没有出现过的键中心度为 0。
+    CHECK(cooc.degree_weight(K(0, 7)) == 0);
+
+    // 排序同序：频次降序与中心度降序给出同一批键（并列都取小键号）。
+    std::vector<ExpertKey> top;
+    cooc.centrality_ranking(top, 5);
+    std::vector<std::uint32_t> got;
+    for (const ExpertKey& kk : top) got.push_back(kk.expert);
+    // 频次：1 与 2 各 7，3 是 6，4 与 5 各 5 -> 中心度同序，并列取小键号。
+    CHECK(freq[1] == 7 && freq[2] == 7 && freq[3] == 6 && freq[4] == 5 && freq[5] == 5);
+    CHECK(got.size() == 5u);
+    for (std::size_t i = 0; i < got.size(); ++i) {
+        CHECK(got[i] == static_cast<std::uint32_t>(i + 1));
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -270,6 +317,7 @@ int main() {
     test_cooccurrence_aging_frees_room();
     test_cooccurrence_aging_halves_counts();
     test_observe_step_feeds_the_policy();
+    test_centrality_carries_no_information_beyond_frequency();
     std::puts("expert_cache: geometry, policies, page-table invariants and bounded cooccurrence hold");
     return 0;
 }
