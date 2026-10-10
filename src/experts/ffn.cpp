@@ -10,6 +10,7 @@
 #include "kernels/iq4xs.hpp"
 #include "kernels/q2_0.hpp"
 #include "kernels/q6k.hpp"
+#include "kernels/q8_0.hpp"
 
 #include <cmath>
 
@@ -68,6 +69,9 @@ bool run_gemv(const MatrixSpec& m, const std::uint8_t* w, FfnScratch& s, float* 
             return true;
         case Format::kIq4Nl:
             kernels::iq4nl_gemv_q8_0(w, rows, blocks, s.act_32.data(), out);
+            return true;
+        case Format::kQ8_0:
+            kernels::q8_0_gemv_q8_0(w, rows, blocks, s.act_32.data(), out);
             return true;
         default:
             err = std::string("格式 ") + format_name(m.format) + " 尚无内核，不能参与组装";

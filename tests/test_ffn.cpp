@@ -146,6 +146,9 @@ void dequant_row(experts::Format f, const std::uint8_t* row, std::uint64_t cols,
             case experts::Format::kIq2S:
                 dequant_iq2s_block(blk, tmp);
                 break;
+            case experts::Format::kQ8_0:
+                dequant_q8_0_raw(blk, tmp);
+                break;
             case experts::Format::kQ6K:
                 dequant_q6k_block(blk, tmp);
                 break;
@@ -585,6 +588,32 @@ void test_matches_reference_iq4xs() {
     CHECK(compare(got, ref, "IQ4_XS ffn vs 参考", 1e-5) == 0);
 }
 
+// Q8_0 作权重参与 gate/up 的交叉核对（共享专家的 down 也是这个档，故两端都覆盖到）。
+void test_matches_reference_q80() {
+    const Matrix g = make_matrix_varied(experts::Format::kQ8_0, kFfn, kHidden, 41);
+    const Matrix u = make_matrix_varied(experts::Format::kQ8_0, kFfn, kHidden, 42);
+    const Matrix d = make_matrix_varied(experts::Format::kQ8_0, kHidden, kFfn, 43);
+    const experts::LayerSpec spec =
+        make_spec(experts::Format::kQ8_0, experts::Format::kQ8_0, experts::Format::kQ8_0);
+    CHECK(spec.usable());
+
+    std::vector<float> x(static_cast<std::size_t>(kHidden));
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        x[i] = static_cast<float>((static_cast<int>(i % 35) - 17) * 0.03125);
+    }
+
+    experts::ExpertWeights w{g.bytes.data(), u.bytes.data(), d.bytes.data()};
+    experts::FfnScratch scratch;
+    std::vector<float> out(static_cast<std::size_t>(kHidden), 0.0f);
+    std::string err;
+    CHECK(experts::expert_ffn(spec, w, x.data(), scratch, out.data(), err));
+
+    std::vector<double> ref;
+    ref_ffn(spec, g, u, d, x.data(), ref);
+    std::vector<double> got(out.begin(), out.end());
+    CHECK(compare(got, ref, "Q8_0 ffn vs 参考", 1e-5) == 0);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -601,6 +630,7 @@ int main(int argc, char** argv) {
     test_matches_reference_q6k();
     test_matches_reference_iq3s();
     test_matches_reference_iq4xs();
+    test_matches_reference_q80();
     test_unusable_specs_fail();
     std::puts("ffn: analytic uniform case, double-precision reference and unusable-spec failures hold");
     return 0;

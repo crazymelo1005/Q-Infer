@@ -134,6 +134,7 @@ void test_geometry_and_kernels() {
     };
     const Row rows[] = {
         {Format::kQ2_0, 64, 18, true, ActFormat::kQ8_0},
+        {Format::kQ8_0, 32, 34, true, ActFormat::kQ8_0},
         {Format::kIq4Nl, 32, 18, true, ActFormat::kQ8_0},
         {Format::kIq2Xxs, 256, 66, true, ActFormat::kQ8K},
         {Format::kIq2Xs, 256, 74, true, ActFormat::kQ8K},

@@ -32,7 +32,7 @@ Geometry geometry(Format f) {
         case Format::kQ2_0:  return {64, 18, true, ActFormat::kQ8_0};
         case Format::kQ4_0:  return {32, 18, false, ActFormat::kQ8_0};
         case Format::kQ5_0:  return {32, 22, false, ActFormat::kQ8_0};
-        case Format::kQ8_0:  return {32, 34, false, ActFormat::kQ8_0};  // 本仓库只把它当激活档
+        case Format::kQ8_0:  return {32, 34, true, ActFormat::kQ8_0};  // 既作激活档也作权重档
         case Format::kIq4Nl: return {32, 18, true, ActFormat::kQ8_0};
         // 256 值块：配 Q8_K。
         case Format::kQ2K:    return {256, 84, false, ActFormat::kQ8K};
