@@ -34,6 +34,7 @@ Result arbitrate(std::uint64_t budget_bytes, const std::vector<Request>& request
     pred_idx.reserve(requests.size());
     for (std::size_t i = 0; i < requests.size(); ++i) {
         res.decisions[i].tag = requests[i].tag;
+        res.decisions[i].cls = requests[i].cls;
         res.decisions[i].bytes = requests[i].bytes;
         res.decisions[i].verdict = Verdict::kDropped;
         (requests[i].must ? must_idx : pred_idx).push_back(i);

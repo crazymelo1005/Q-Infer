@@ -44,7 +44,7 @@
 
 预算不足时，预测性请求被主动放弃并计入迟到数，绝不为它插入额外的同步点。三类流量的范围见 [overview.md](../overview.md) 第 5 节。
 
-实现见 `src/scheduling/budget_arbiter`：必需项按类别优先（KV 先于表行）一律准入、超出预算的部分记 overspend；预测性项按收益 ÷ 字节降序贪心，放不下就弃并继续尝试后面的。
+实现见 `src/scheduling/budget_arbiter`：必需项按类别优先（KV 先于表行）一律准入、超出预算的部分记 overspend；预测性项按收益 ÷ 字节降序贪心，放不下就弃并继续尝试后面的。仲裁之上的两件事在 `src/scheduling/step_budget`：每步预算由机器画像推导（`pcie_h2d × 步长 × io_share`，环境2 得 186.8 MiB，字段与换算口径见 [S-52]）；计划层每步的四类需求（[interfaces.md](interfaces.md) 第 4 节）里过 PCIe 的三类转成请求送仲裁，仲裁结果再折成每步观测（interfaces 第 7 节）——观测里的预算用量、超支、迟到三笔账分开记，是引用性能数字的唯一取数口径。
 
 ### 3.3 介质层级与零拷贝
 

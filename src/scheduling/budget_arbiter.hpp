@@ -26,6 +26,7 @@ enum class Verdict : std::uint8_t { kAdmitted, kDropped };
 
 struct Decision {
     std::uint32_t tag = 0;
+    FlowClass cls = FlowClass::kExpert;   // 回填类别，便于按类别汇总观测（step_budget::observe）
     Verdict verdict = Verdict::kDropped;
     std::uint64_t bytes = 0;
 };
