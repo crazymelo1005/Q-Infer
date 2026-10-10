@@ -148,6 +148,8 @@ R-08 记录的同类平台先例伴随 GPU 复位，故失败路径必须是可�
 
 接口、纯 CPU 的 worker、核显占位实现（初始化即报不可用并附探测结论）、总线份额限流器进 `src/experts` 与 `src/scheduling`。核显内核要等 SPIR-V 工具链到位，现状见 engine §13 的实测。接口不绑定图形 API；第一套实现取 Vulkan compute，因为环境2 上它的运行时依赖为零新增。
 
+已落地的是接口这一层：`src/experts/expert_worker`（`ExpertJob`、`ExpertWorker`、`CpuExpertWorker`、核显占位 `IgpuExpertWorker`，以及 8.4 那条重派语义 `run_job_with_fallback`）与 `src/scheduling/bus_share`（份额默认 0 即关闭）。核显内核本身仍待工具链，故占位实现的 `available()` 恒假、失败原因里带上本节引用的探测结论。
+
 ## 9. 尚未定义
 
 以下部分需要随实现决策确定，本阶段不虚构：
