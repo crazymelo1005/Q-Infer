@@ -27,6 +27,7 @@ target_include_directories(qinfer_artifact PUBLIC src)
 
 add_library(qinfer_kernels
   src/kernels/iq4nl.cpp
+  src/kernels/iq2xs.cpp
   src/kernels/ngram.cpp
   src/kernels/ple_gather.cpp
 )
@@ -42,6 +43,9 @@ target_link_libraries(test_budget_arbiter PRIVATE qinfer_scheduling)
 
 add_executable(test_iq4nl tests/test_iq4nl.cpp)
 target_link_libraries(test_iq4nl PRIVATE qinfer_kernels)
+
+add_executable(test_iq2xs tests/test_iq2xs.cpp)
+target_link_libraries(test_iq2xs PRIVATE qinfer_kernels)
 
 add_executable(test_ngram tests/test_ngram.cpp)
 target_link_libraries(test_ngram PRIVATE qinfer_kernels)
@@ -59,6 +63,7 @@ enable_testing()
 add_test(NAME page_table COMMAND test_page_table)
 add_test(NAME budget_arbiter COMMAND test_budget_arbiter)
 add_test(NAME iq4nl COMMAND test_iq4nl)
+add_test(NAME iq2xs COMMAND test_iq2xs)
 add_test(NAME ngram COMMAND test_ngram)
 add_test(NAME row_cache COMMAND test_row_cache)
 add_test(NAME ple_read_path COMMAND test_ple_read_path)

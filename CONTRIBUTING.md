@@ -1,6 +1,6 @@
 # 贡献指南
 
-仓库当前为设计阶段（无实现代码）。以下约定适用于文档与代码的写作、编号与提交；内容口径以 [docs/README.md](docs/README.md)（文档地图）与 [docs/glossary.md](docs/glossary.md)（术语唯一口径）为准。
+仓库处于实现阶段：设计规范见 `docs/design/`，代码自实施顺序序 2 的骨架起逐步落地（见第 7 节）。以下约定适用于文档与代码的写作、编号与提交；内容口径以 [docs/README.md](docs/README.md)（文档地图）与 [docs/glossary.md](docs/glossary.md)（术语唯一口径）为准。
 
 ---
 
@@ -27,8 +27,8 @@
 | `docs/research/` | 事实台账（是什么） |
 | [research/references.md](docs/research/references.md) | 全部出处，按编号登记 |
 | [scripts/docs_checks.py](scripts/docs_checks.py) 与 [.github/workflows/docs-check.yml](.github/workflows/docs-check.yml) | 规范自检：把第 2、3、4 节的规则变成可执行检查（非文档） |
-| [measure/](measure/) | 测量工具与原始结果：机器画像与标定、PCIe 档位与带宽、内存带宽、显存带宽、GGUF 元数据读取、记忆表行访问局部性重放与语料构造、专家路由覆盖曲线、投机 IO 放大、CPU 专家内核与量化 GEMM 微基准、运行中引擎的槽位/命中率/KV 驻留采样、NVMe 往返延迟、KV 精度档的输出一致率（非文档） |
-| [src/](src/) | 引擎实现（C++20）：`artifact/gguf_table`（GGUF 表行读取）、`storage/page_table`（三层存储与页表）、`storage/row_cache`（有界行缓存）、`scheduling/budget_arbiter`（PCIe 字节预算仲裁）、`kernels/ngram`（表行索引哈希）、`kernels/iq4nl`（表行反量化，含 `kernels/fp16`）、`kernels/ple_gather`（head-slowest 拼装） |
+| [measure/](measure/) | 测量工具与原始结果：机器画像与标定、PCIe 档位与带宽、内存带宽、显存带宽、GGUF 元数据读取、记忆表行访问局部性重放与语料构造、专家路由覆盖曲线、投机 IO 放大、CPU 专家内核与量化 GEMM 微基准、运行中引擎的槽位/命中率/KV 驻留采样、NVMe 往返延迟、IQ2_XS 回归期望值生成（gguf-py oracle）、KV 精度档的输出一致率（非文档） |
+| [src/](src/) | 引擎实现（C++20）：`artifact/gguf_table`（GGUF 表行读取）、`storage/page_table`（三层存储与页表）、`storage/row_cache`（有界行缓存）、`scheduling/budget_arbiter`（PCIe 字节预算仲裁）、`kernels/ngram`（表行索引哈希）、`kernels/iq4nl`（表行反量化，含 `kernels/fp16`）、`kernels/iq2xs`（专家权重块的 IQ2_XS 反量化，转录自 ggml）、`kernels/ple_gather`（head-slowest 拼装） |
 | [tests/](tests/) | 引擎实现的回归测试（无第三方框架，`ctest` 驱动） |
 | [CMakeLists.txt](CMakeLists.txt) | 构建入口 |
 | [.github/workflows/build.yml](.github/workflows/build.yml) | 构建与测试（与文档自检并列的第二个 CI 作业） |
@@ -155,7 +155,7 @@ S-<n> | 等级 | 复核状态 | 来源（URL 或文档路径） | 引用日期
 ### 6.4 提交与 PR
 
 - 提交信息首行 `<type>: <祈使句摘要>`，正文写清为什么改、依据哪个 `G-NN` 或 `S-n`。
-  类型：`docs`、`spec`、`research`、`gate`、`adr`、`risk`、`build`、`chore`。
+  类型：`feat`、`test`、`build`、`chore`、`docs`、`spec`、`research`、`gate`、`adr`、`risk`。
 - 一次提交只做一件事；纯格式整理与内容修改分开提交。
 - 已推送的历史不得重写，纠错用新提交。`amend` 只允许用于尚未推送的提交。
 - PR 自检清单：新论断有 `[S-n]` 出处？数字带口径？新术语已登记？新编号已登记？没有第 2 节列出的禁用写法？
@@ -188,6 +188,7 @@ S-<n> | 等级 | 复核状态 | 来源（URL 或文档路径） | 引用日期
 - `python3 measure/engine_cache_probe.py --engine-dir <引擎目录> --base-config <serve 配置> --prompt <提示.txt> --slots auto|N --out <记录.json>`：G-05 / G-06 / G-12 与基线，起一次 serve 实例、发真实提示的 greedy 请求、读 `/metrics` 与引擎日志、停服务，产出该配置的专家槽位、解码命中率、PCIe 占比、KV 驻留与 decode 吞吐。`--repeat N` 在同一实例内连发 N 次并给出中位数与区间（基线口径要求 ≥5 次，故基线必须用 `--repeat`，不能靠多次重启）；`--poll-ms N` 轮询 `/metrics` 的 `live.tok_s` 以给出 decode 步长分布；`--gpu LIST` 与 `--drop-arg <旗标>` 用来改机器形态（如单卡：`--gpu 0 --drop-arg=--layer-split`）。`--from-raw` 可把一份原始记录精简重写（幂等）。需在装有该引擎的环境上运行。
 - `nvcc -O2 -o build/io_roundtrip measure/io_roundtrip.cu && ./build/io_roundtrip --file <大文件> --mode direct --lane ample`：G-10，随机取 16 个 4 KiB 页串行读再一次 H2D，给出读腿与整条往返的 P50 / P99；`--mode cached` 走页缓存，`--hold-gib N` 先占住 N GiB 造出内存紧张的 lane。产物写在 `build/`。
 - `python3 measure/kv_quality.py --run fp16=<log> --run int8=<log> --run k8v4=<log> --run q4_0=<log> --baseline fp16`：G-14 的 top-1 一致率，比对同一提示、同一采样下不同 KV 精度档的贪心输出序列（一致率 = 公共前缀 ÷ 较短长度）。输入是引擎 `generate` 的日志；比对时必须带一条**同配置的对照 run**，并给引擎加 `--adapt-every 0`，否则自适应换入的舍入差异会与精度差异混在一起。零依赖。
+- `PYTHONPATH=<检出>/gguf-py python3 measure/iq2xs_oracle.py --ggml-common <检出>/ggml/src/ggml-common.h --emit-inc > tests/iq2xs_oracle_data.inc`：把 ggml 的 `iq2xs_grid` 从 C 源抽出来与 gguf-py 的打包表示逐字节核对，再用 gguf-py 的独立实现给一份确定性合成块生成回归期望值，写入 `tests/iq2xs_oracle_data.inc`。产出已入库；重生成时整份覆盖。依赖 numpy 与 gguf-py，故不属零依赖工具。
 
 测量结果的存放：原始记录写入 `measure/results/<时间戳>-<测点>-<平台>.json`（Python 脚本与 CUDA 程序都自己落盘）；摘要回填 [docs/design/gates.md](docs/design/gates.md) 的实测记录列，以及 [docs/hardware.md](docs/hardware.md) 的实测值表。每条数值必须标注平台：环境1-WSL、环境1-Windows 或环境2。两套环境对比时必须使用同一份脚本与同一组参数。
 
