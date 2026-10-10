@@ -49,8 +49,8 @@
 | FP8 / FP16 / BF16 | 8 位 / 16 位浮点。BF16 动态范围大，FP8 更省 |
 | NVFP4 | NVIDIA 的 4-bit 浮点格式，Blackwell（sm_120）原生支持 |
 | GGUF | llama.cpp 生态的模型文件格式，内含多种量化档 |
-| IQ2_XS / IQ3_S / IQ3_XXS / IQ4_XS | GGUF 的「I-quant」（重要性加权）量化档：约 2-bit / 3-bit / 4-bit。数字越小越省、质量越低。`IQ3_S` 是 3-bit 级的另一档，见于上游多卡实测（`research/01` §9.4） |
-| Q2_0 / Q5_K_XL | GGUF 的「K-quant / 传统」档位（对比用） |
+| IQ2_XS / IQ2_S / IQ2_XXS / IQ1_M / IQ3_S / IQ3_XXS / IQ4_XS | GGUF 的「I-quant」（重要性加权）量子化档：约 2-bit / 3-bit / 4-bit。数字越小越省、质量越低。`IQ2_S` 为 2.5625 bpw、`IQ2_XS` 为 2.3125 bpw、`IQ2_XXS` 为 2.0625 bpw、`IQ1_M` 约 1.75 bpw；块大小都是 256 个值。参考实例的专家权重逐层混用它们，见 [S-36]（`research/02` §1 与 `research/01` §10） |
+| Q2_0 / Q5_K_XL | GGUF 的传统档位。`Q2_0` 每块 64 个值、18 字节、2.25 bpw，是本项目里唯一能覆盖 640 维（`expert_feed_forward_length`）的 2-bit 档，因为 640 不是 256 的整数倍 |
 | AWQ / GPTQ | 两种主流量化算法（权重分组的 4-bit 量化） |
 | KV 量化 | 对 KV cache 量化（如 `--kv-cache-dtype fp8`），长上下文的省显存关键 |
 | indexer_kv_dtype | vLLM 里单独给索引器 KV 设精度的旋钮 → 说明「索引器精度」是一个独立维度 |

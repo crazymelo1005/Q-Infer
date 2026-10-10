@@ -28,7 +28,7 @@
 | [research/references.md](docs/research/references.md) | 全部出处，按编号登记 |
 | [scripts/docs_checks.py](scripts/docs_checks.py) 与 [.github/workflows/docs-check.yml](.github/workflows/docs-check.yml) | 规范自检：把第 2、3、4 节的规则变成可执行检查（非文档） |
 | [measure/](measure/) | 测量工具与原始结果：机器画像与标定、PCIe 档位与带宽、内存带宽、显存带宽、GGUF 元数据读取、记忆表行访问局部性重放与语料构造、专家路由覆盖曲线、投机 IO 放大、CPU 专家内核与量化 GEMM 微基准、运行中引擎的槽位/命中率/KV 驻留采样、NVMe 往返延迟、IQ2_XS 反量化与点积的回归期望值生成、KV 精度档的输出一致率（非文档） |
-| [src/](src/) | 引擎实现（C++20）：`artifact/gguf_table`（GGUF 表行读取）、`storage/page_table`（三层存储与页表）、`storage/row_cache`（有界行缓存）、`scheduling/budget_arbiter`（PCIe 字节预算仲裁）、`kernels/ngram`（表行索引哈希）、`kernels/iq4nl`（表行反量化，含 `kernels/fp16`）、`kernels/iq2xs`（专家权重块的 IQ2_XS 反量化，表体在 `kernels/iq2xs_tables`）、`kernels/q8k`（激活侧 Q8_K 块量化）、`kernels/iq2xs_dot`（IQ2_XS × Q8_K 的定点点积与逐行 GEMV）、`kernels/ple_gather`（head-slowest 拼装） |
+| [src/](src/) | 引擎实现（C++20）：`artifact/gguf_table`（GGUF 表行读取）、`storage/page_table`（三层存储与页表）、`storage/row_cache`（有界行缓存）、`scheduling/budget_arbiter`（PCIe 字节预算仲裁）、`kernels/ngram`（表行索引哈希）、`kernels/iq4nl`（表行反量化，含 `kernels/fp16`）、`kernels/iq2xs`（IQ2_XS 档的权重块反量化，表体在 `kernels/iq2xs_tables`）、`kernels/q8k`（激活侧 Q8_K 块量化）、`kernels/iq2xs_dot`（IQ2_XS × Q8_K 的定点点积与逐行 GEMV）、`kernels/ple_gather`（head-slowest 拼装）。格式事实与各档的落点见 [S-36](docs/research/references.md) 与 [engine §6](docs/design/engine.md) |
 | [tests/](tests/) | 引擎实现的回归测试（无第三方框架，`ctest` 驱动） |
 | [CMakeLists.txt](CMakeLists.txt) | 构建入口 |
 | [.github/workflows/build.yml](.github/workflows/build.yml) | 构建与测试（与文档自检并列的第二个 CI 作业） |

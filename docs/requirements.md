@@ -9,7 +9,7 @@
 | 项 | 取值 |
 |----|------|
 | 主案例模型 | Qwen3.8-Flash-Next：125B 主参数 MoE（24,576 专家，top-10 / 512）、51B 外挂 n-gram 表、4B MTP 头，48 层（36 层 GDN + 12 层 QSA） |
-| 量化档 | IQ2_XS 至 IQ3_XXS（GGUF） |
+| 量化档 | 低比特 GGUF 混合档：参考实例逐层混用 IQ2_S / IQ2_XXS / IQ1_M（gate-up）与 Q2_0（down），等效约 2.35 bpw（[S-36]）；本项目自带格式另见 [ADR-006](design/adr/ADR-006-precision-policy-nvfp4-fp8-kv.md) |
 | 上下文 | 目标 262K（原生 262,144） |
 | 并发 | 2 至 8 路（参考引擎默认 1，环境2 已开 4，引擎上限 8） |
 | 任务类型 | 代码改写、长文处理、多轮 agent；评测必须使用真实任务集 |
