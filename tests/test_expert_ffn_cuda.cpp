@@ -448,19 +448,19 @@ int manual_model_entry(const char* model, int layer) {
 
 // 整模型一步：不交出去（逐层主机路径）与交出去（48 层逐层交给 CUDA 组）两条路的 logits 该逐位
 // 一致。这条是「设备侧那批真的进了整模型一步」的判据，且要求没有一次重派（否则有层没被接住）。
-int manual_step_entry(const char* model) {
+int manual_step_entry(const char* model, int layers) {
     qinfer::artifact::GgufFile g;
     std::string err;
     if (!g.open(model, err)) {
         std::printf("打不开模型：%s（%s）\n", model, err.c_str());
         return 1;
     }
-    // 真模型几何，与 test_step_loop 的 --model 入口同一套。
+    // 真模型几何，与 test_step_loop 的 --model 入口同一套。层数可截短，用来二分找第一处分歧。
     qinfer::dense::StepConfig cfg;
     cfg.n_embd = 2560;
     cfg.hc = 4;
     cfg.hc_lr = 320;
-    cfg.n_layers = 48;
+    cfg.n_layers = layers;
     cfg.top_k = 10;
     cfg.gdn_head_dim = 128;
     cfg.qsa_head_dim = 256;
@@ -578,11 +578,14 @@ int manual_step_entry(const char* model) {
 int main(int argc, char** argv) {
     if (argc >= 3 && std::string(argv[1]) == "--model") {
         int layer = 0;
+        int layers = 48;
         bool step = false;
         for (int i = 2; i < argc; ++i) {
             const std::string a = argv[i];
             if (a == "--layer" && i + 1 < argc) {
                 layer = std::atoi(argv[++i]);
+            } else if (a == "--layers" && i + 1 < argc) {
+                layers = std::atoi(argv[++i]);
             } else if (a == "--step") {
                 step = true;
             } else if (a != argv[2]) {
@@ -592,7 +595,7 @@ int main(int argc, char** argv) {
                 return 2;
             }
         }
-        if (step) return manual_step_entry(argv[2]);
+        if (step) return manual_step_entry(argv[2], layers);
         return manual_model_entry(argv[2], layer);
     }
     test_device_matches_host();
