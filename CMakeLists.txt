@@ -183,6 +183,9 @@ target_link_libraries(test_expert_worker PRIVATE qinfer_experts)
 add_executable(test_layer_dispatch tests/test_layer_dispatch.cpp)
 target_link_libraries(test_layer_dispatch PRIVATE qinfer_experts)
 
+add_executable(test_norm tests/test_norm.cpp)
+target_link_libraries(test_norm PRIVATE qinfer_dense)
+
 add_executable(test_qsa_indexer tests/test_qsa_indexer.cpp)
 target_link_libraries(test_qsa_indexer PRIVATE qinfer_dense)
 
@@ -252,4 +255,5 @@ add_test(NAME qsa_attend COMMAND test_qsa_attend)
 add_test(NAME rope COMMAND test_rope)
 add_test(NAME qsa_index COMMAND test_qsa_index)
 add_test(NAME qsa_indexer COMMAND test_qsa_indexer)
+add_test(NAME norm COMMAND test_norm)
 add_test(NAME step_record COMMAND test_step_record)

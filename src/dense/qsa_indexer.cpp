@@ -1,5 +1,6 @@
 #include "dense/qsa_indexer.hpp"
 
+#include "dense/norm.hpp"
 #include "dense/rope.hpp"
 
 #include <cmath>
@@ -8,14 +9,11 @@ namespace qinfer::dense {
 
 namespace {
 
-// 归一（分母是 sqrt(mean(x²) + eps)，与 `gdn_l2_norm` 同一口径：eps 加在**均值**上）再逐维乘 gamma。
-// 次序是「先归一、后乘 gamma」——先乘后归一会给出另一个（形状同样正确的）结果。
-void norm_and_scale(const float* row, const float* gamma, std::uint64_t n, float eps, float* out) {
-    double ss = 0.0;
-    for (std::uint64_t d = 0; d < n; ++d) ss += static_cast<double>(row[d]) * static_cast<double>(row[d]);
-    const float scale = static_cast<float>(1.0 / std::sqrt(ss / static_cast<double>(n) +
-                                                          static_cast<double>(eps)));
-    for (std::uint64_t d = 0; d < n; ++d) out[d] = scale * row[d] * gamma[d];
+// 归一这一处与索引器之外的两处（QSA 的 q/k 逐头、收尾的 o）共用 `dense/norm.hpp` 的那一份，
+// 免得三处各写一遍口径（先归一后乘 gamma、eps 加在均值上）。
+inline void norm_and_scale(const float* row, const float* gamma, std::uint64_t n, float eps,
+                           float* out) {
+    rms_norm_rows(row, 1, n, gamma, eps, out);
 }
 
 // 对一行做 NEOX 部分 rope：位置取表里第 pos 组（表由调用方按 n_rot 与 theta 建好）。
