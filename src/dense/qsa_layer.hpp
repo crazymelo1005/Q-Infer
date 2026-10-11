@@ -16,8 +16,11 @@
 #include <string>
 
 #include "artifact/gguf_table.hpp"
+#include "dense/kv_page_cache.hpp"
+#include "dense/qsa_indexer.hpp"
 #include "dense/qsa_select.hpp"
 #include "experts/expert_formats.hpp"
+#include "experts/ffn.hpp"  // FfnScratch（量化投影复用的激活像缓冲）
 
 namespace qinfer::dense {
 
@@ -25,6 +28,7 @@ struct QsaLayer {
     int layer = -1;
     QsaShapes sh;                  // idx_top_k / idx_block / head_dim / n_head / n_head_kv
     std::uint64_t n_rot = 0;       // 部分 rope 的维数（真模型 64）
+    std::uint64_t idx_n_rot = 0;   // 索引器那一侧的 rope 维数（**与 head_dim 无关**，别混）
     std::uint64_t idx_dim = 0;     // 索引器的头宽（真模型 128）
     std::uint64_t idx_n_head = 0;  // 索引器的 q 头数（真模型 4）
     experts::MatrixSpec q, k, v, out;      // 四个注意力投影
@@ -49,7 +53,34 @@ struct QsaLayer {
 // （含「这一层不是 QSA 层」）都返回假并写 err。
 bool build_qsa_layer(const artifact::GgufFile& gguf, int layer, std::uint64_t n_embd,
                      std::uint64_t head_dim, std::uint64_t n_rot, std::uint64_t idx_dim,
+                     std::uint64_t idx_n_rot,
                      std::uint64_t idx_top_k, std::uint64_t idx_block, QsaLayer& out,
                      std::string& err);
+
+// 跨 token 存活的状态 + 复用的中间量。`kv`（分页 KV 与其页表）与 `cos_tab`/`sin_tab`（rope 表）由调用方
+// 配好：本函数只管算，不管页的换入换出（那是存储层的事）。`pos` 是本 token 的 cell 号、`pos_base`
+// 是序列首个 cell 的位置（[S-59]）。
+struct QsaScratch {
+    std::uint64_t pos = 0;
+    std::uint64_t pos_base = 0;
+    KvPageCache kv;
+    QsaIndexerState idx_state;
+    std::vector<float> cos_tab, sin_tab;
+    std::vector<float> q_norm_w, k_norm_w, idx_q_norm_w, idx_k_norm_w;
+    std::vector<std::uint16_t> idx_q_w, idx_k_w;  // 索引器两个投影的 BF16 权重
+    std::vector<std::uint8_t> w_q, w_k, w_v, w_out;
+    experts::FfnScratch gemv;
+    std::vector<float> q_full, k_raw, v_raw, q_ready, k_ready, gate;
+    std::vector<float> idx_q_out, idx_k_out, q_idx;
+    std::vector<float> scores, attn, gated;
+    std::vector<std::uint64_t> ids;
+    std::vector<std::uint16_t> k_f16, v_f16, k_scratch, v_scratch;
+};
+
+// 跑一层一个 token（`out` 长 n_embd，覆盖写）。顺序（[S-57]）：四个注意力投影 → q/门拆分与 q/k 归一+rope
+// → KV 写入 → 索引器两投影与 q 预处理、键追加 → 逐 cell 打分 → 选择 → 按页聚集 → softmax GQA →
+// 乘门 → 输出投影。索引器的两个投影是 BF16，走与路由同一份 bf16 点积（[S-44]）。
+bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const float* x, float* out,
+                   QsaScratch& s, std::string& err);
 
 }  // namespace qinfer::dense

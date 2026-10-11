@@ -110,7 +110,7 @@ Run run_all(const std::vector<float>& gamma, const std::vector<float>& cos_tab,
         const std::uint64_t slot = pos % kR;
         // 错的读法：旋转位置取该块**末个** cell。为了让它真的不同，实现侧仍走原函数、
         // 参考侧用不同的位置——故这里只在参考里体现（见调用处）。
-        CHECK(indexer_key_append(s, kDim, pos, kPosBase, raw.data(), gamma.data(), kEps, cos_tab,
+        CHECK(indexer_key_append(s, kDim, kRot, pos, kPosBase, raw.data(), gamma.data(), kEps, cos_tab,
                                  sin_tab, r.st, err));
         CHECK(err.empty());
         if (slot + 1 == kR) {
@@ -230,9 +230,9 @@ void test_q_prep_and_raw_keys_stay_raw() {
         for (float& t : raw) t = 2.0f * g.next();
         std::vector<float> prenorm(idx_dim, 0.0f);
         rms_norm_rows(raw.data(), 1, idx_dim, nullptr, kEps, prenorm.data());
-        CHECK(indexer_key_append(s, idx_dim, pos, kPosBase, raw.data(), q_norm_w.data(), kEps,
+        CHECK(indexer_key_append(s, idx_dim, kRot, pos, kPosBase, raw.data(), q_norm_w.data(), kEps,
                                  cos_tab, sin_tab, st_raw, err));
-        CHECK(indexer_key_append(s, idx_dim, pos, kPosBase, prenorm.data(), q_norm_w.data(), kEps,
+        CHECK(indexer_key_append(s, idx_dim, kRot, pos, kPosBase, prenorm.data(), q_norm_w.data(), kEps,
                                  cos_tab, sin_tab, st_normed, err));
     }
     CHECK(rel_l1(st_raw.pooled, st_normed.pooled) > 1e-4);
@@ -246,16 +246,16 @@ void test_failures() {
     std::string err;
     CHECK(build_rope_table(kRot, kTheta, 64, cos_tab, sin_tab, err));
     // 状态没开。
-    CHECK(!indexer_key_append(s, kDim, 0, kPosBase, raw.data(), gamma.data(), kEps, cos_tab, sin_tab,
+    CHECK(!indexer_key_append(s, kDim, kRot, 0, kPosBase, raw.data(), gamma.data(), kEps, cos_tab, sin_tab,
                               st, err));
     CHECK(!err.empty());
     err.clear();
     st.reset(s, kDim);
-    CHECK(!indexer_key_append(s, kDim, 0, kPosBase, nullptr, gamma.data(), kEps, cos_tab, sin_tab, st,
+    CHECK(!indexer_key_append(s, kDim, kRot, 0, kPosBase, nullptr, gamma.data(), kEps, cos_tab, sin_tab, st,
                               err));
     CHECK(!err.empty());
     err.clear();
-    CHECK(indexer_key_append(s, kDim, 0, kPosBase, raw.data(), gamma.data(), kEps, cos_tab, sin_tab,
+    CHECK(indexer_key_append(s, kDim, kRot, 0, kPosBase, raw.data(), gamma.data(), kEps, cos_tab, sin_tab,
                              st, err));
     CHECK(err.empty());
     CHECK(st.pooled.size() >= kDim);

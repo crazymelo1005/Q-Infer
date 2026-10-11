@@ -35,7 +35,8 @@ struct QsaIndexerState {
     void reset(const QsaShapes& s, std::uint64_t idx_dim);
 };
 
-bool indexer_key_append(const QsaShapes& s, std::uint64_t idx_dim, std::uint64_t pos,
+bool indexer_key_append(const QsaShapes& s, std::uint64_t idx_dim, std::uint64_t idx_n_rot,
+                        std::uint64_t pos,
                         std::uint64_t pos_base, const float* raw, const float* w_k_norm, float eps,
                         const std::vector<float>& cos_tab, const std::vector<float>& sin_tab,
                         QsaIndexerState& st, std::string& err);

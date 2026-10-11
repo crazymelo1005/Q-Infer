@@ -40,14 +40,15 @@ void QsaIndexerState::reset(const QsaShapes& s, std::uint64_t idx_dim) {
     n_bid = 0;
 }
 
-bool indexer_key_append(const QsaShapes& s, std::uint64_t idx_dim, std::uint64_t pos,
+bool indexer_key_append(const QsaShapes& s, std::uint64_t idx_dim, std::uint64_t idx_n_rot,
+                        std::uint64_t pos,
                         std::uint64_t pos_base, const float* raw, const float* w_k_norm, float eps,
                         const std::vector<float>& cos_tab, const std::vector<float>& sin_tab,
                         QsaIndexerState& st, std::string& err) {
     err.clear();
     const std::uint64_t r = s.idx_block == 0 ? 1 : s.idx_block;
-    if (idx_dim == 0 || s.head_dim == 0) {
-        err = "索引器的几何不成立（idx_dim / head_dim 为 0）";
+    if (idx_dim == 0 || idx_n_rot == 0 || idx_n_rot > idx_dim || idx_n_rot % 2 != 0) {
+        err = "索引器的几何不成立（idx_dim / idx_n_rot 不合法）";
         return false;
     }
     if (raw == nullptr || w_k_norm == nullptr) {
@@ -59,7 +60,9 @@ bool indexer_key_append(const QsaShapes& s, std::uint64_t idx_dim, std::uint64_t
         err = "索引器状态没按几何开好（先调 reset）";
         return false;
     }
-    const std::uint64_t rot = s.head_dim;  // rope 的旋转维数（这份模型是 head_dim 的一部分，由表决定）
+    // rope 的旋转维数是**索引器自己的**（与注意力的 head_dim 无关）——早先这里错用了 s.head_dim，
+    // 在 head_dim > idx_dim 时就越界了（真模型正是 256 > 128），是整层串联的测试把它撞出来的。
+    const std::uint64_t rot = idx_n_rot;
 
     // 序列的第一个 cell：算备用槽的键并把它写进 dead 与 pooled[0]。
     if (pos == 0) {

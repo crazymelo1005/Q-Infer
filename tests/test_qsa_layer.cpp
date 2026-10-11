@@ -6,6 +6,9 @@
 // 缺一张张力、head_dim 与形状不自洽、norm 长度不对）。
 #include "dense/qsa_layer.hpp"
 
+#include "dense/rope.hpp"
+#include <cmath>
+
 #include "check.hpp"
 #include <cstdint>
 #include <cstdio>
@@ -124,8 +127,8 @@ bool build_from(const char* name, const std::vector<TensorSpec>& ts, QsaLayer& o
         err = oerr;
         return false;
     }
-    return build_qsa_layer(g, 3, kN, kHd, /*n_rot=*/4, kIdx, /*idx_top_k=*/2048, /*idx_block=*/4, out,
-                           err);
+    return build_qsa_layer(g, 3, kN, kHd, /*n_rot=*/4, kIdx, /*idx_n_rot=*/4, /*idx_top_k=*/2048,
+                           /*idx_block=*/4, out, err);
 }
 
 void test_builds_and_derives_the_geometry() {
@@ -189,11 +192,74 @@ void test_failures_are_loud() {
     }
 }
 
+// 配上分页 KV（恒等页表、两页共 8 个 cell）与 rope 表。
+void configure(QsaScratch& s) {
+    s.kv.page_size = 4;
+    s.kv.n_head_kv = kNkv;
+    s.kv.head_dim = kHd;
+    s.kv.n_pages = 2;
+    s.kv.reset();
+    s.kv.table = {0, 1};
+    std::string err;
+    CHECK(build_rope_table(/*n_rot=*/4, /*theta=*/1.0e7, /*max_pos=*/64, s.cos_tab, s.sin_tab, err));
+    CHECK(err.empty());
+}
+
+std::vector<float> token_x(std::uint64_t i) {
+    std::vector<float> x(kN);
+    for (std::uint64_t j = 0; j < kN; ++j) {
+        x[j] = 0.05f * static_cast<float>(static_cast<int>((i * 7 + j) % 11) - 5);
+    }
+    return x;
+}
+
+// 跑 4 个 token（R = 4，故第 4 个 token 让第 0 块完成），两个**独立的** scratch 各跑一遍：
+// 输出逐位一致（同配置可复现）；输出有限且非零；pos 与 n_bid 都在前进。
+void test_runs_a_sequence_deterministically() {
+    QsaLayer l;
+    std::string err;
+    const std::filesystem::path p = write_gguf("qinfer_qsa_run.gguf", qsa_tensors("blk.3."));
+    artifact::GgufFile g;
+    CHECK(g.open(p.string(), err));
+    CHECK(build_qsa_layer(g, 3, kN, kHd, 4, kIdx, 4, 2048, 4, l, err));
+    const std::vector<std::vector<float>> xs{token_x(0), token_x(1), token_x(2), token_x(3)};
+
+    std::vector<std::vector<float>> outs(2);
+    std::uint64_t n_bid_seen = 0;
+    for (int run = 0; run < 2; ++run) {
+        QsaScratch s;
+        configure(s);
+        for (std::uint64_t t = 0; t < xs.size(); ++t) {
+            std::vector<float> out(kN, 0.0f);
+            CHECK(run_qsa_layer(g, l, xs[t].data(), out.data(), s, err));
+            CHECK(err.empty());
+            for (float v : out) CHECK(std::isfinite(v));
+            outs[static_cast<std::size_t>(run)].insert(outs[static_cast<std::size_t>(run)].end(),
+                                                       out.begin(), out.end());
+            n_bid_seen = s.idx_state.n_bid;
+        }
+        CHECK(s.pos == xs.size());
+    }
+    // 两个独立 scratch 的结果逐位一致。
+    for (std::size_t i = 0; i < outs[0].size(); ++i) {
+        CHECK(std::bit_cast<std::uint32_t>(outs[0][i]) == std::bit_cast<std::uint32_t>(outs[1][i]));
+    }
+    // 至少有一个非零（整条链路真的算出了东西，而不是全 0 通过）。
+    bool nonzero = false;
+    for (float v : outs[0]) {
+        if (v != 0.0f) nonzero = true;
+    }
+    CHECK(nonzero);
+    // 4 个 cell、R = 4 → 恰好一块完成。
+    CHECK(n_bid_seen == 1);
+}
+
 }  // namespace
 
 int main() {
     test_builds_and_derives_the_geometry();
     test_failures_are_loud();
+    test_runs_a_sequence_deterministically();
     std::puts("qsa_layer: 从张力名与形状建起一层并推出几何（n_head/n_head_kv/idx_n_head），"
               "五种接错都明确报错");
     return 0;
