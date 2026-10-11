@@ -32,7 +32,9 @@ using namespace qinfer::experts;
 
 namespace {
 
+#include "iq1m_oracle_data.inc"
 #include "iq2s_oracle_data.inc"
+#include "iq2xxs_oracle_data.inc"
 #include "q2_0_oracle_data.inc"
 
 constexpr int kHidden = 256;
@@ -95,12 +97,24 @@ std::vector<std::uint8_t> tile(const std::vector<std::uint8_t>& src, int block_b
     return out;
 }
 
-ExpertBytes make_expert(int salt) {
-    const std::vector<std::uint8_t> iq2s = from_hex(kIq2sRealHex);
+// gate/up 的档可换（部署那份 gate/up 是三档混的，故三档都要在「整条前馈」里过一遍）。
+struct GuFormat {
+    Format fmt;
+    int block_bytes;
+    const char* hex;
+};
+
+// 三个档各自的块字节数（256 值一块）与真模型 oracle。
+const GuFormat kGuFormats[3] = {{Format::kIq2S, 82, kIq2sRealHex},
+                                {Format::kIq2Xxs, 66, kIq2xxsRealHex},
+                                {Format::kIq1M, 56, kIq1mRealHex}};
+
+ExpertBytes make_expert(int salt, const GuFormat& gu = kGuFormats[0]) {
+    const std::vector<std::uint8_t> wsrc = from_hex(gu.hex);
     const std::vector<std::uint8_t> q20 = from_hex(kQ20RealHex);
     ExpertBytes e;
-    e.gate = tile(iq2s, 82, static_cast<std::size_t>(kFfn) * 82);
-    e.up = tile(iq2s, 82, static_cast<std::size_t>(kFfn) * 82);
+    e.gate = tile(wsrc, gu.block_bytes, static_cast<std::size_t>(kFfn) * gu.block_bytes);
+    e.up = tile(wsrc, gu.block_bytes, static_cast<std::size_t>(kFfn) * gu.block_bytes);
     e.down = tile(q20, 18, static_cast<std::size_t>(kHidden) * 18);
     // 每个专家的字节不同：把第一个块的第 2 个字节扰动一下（仍落在合法字节上，故仍是真格式的字节）。
     e.gate[2] = static_cast<std::uint8_t>(e.gate[2] ^ (salt & 0x0Fu));
@@ -123,9 +137,11 @@ void must(bool ok, const std::string& err, const char* what) {
     CHECK(ok);
 }
 
-void test_device_matches_host() {
-    const LayerSpec spec = make_spec();
-    const std::vector<ExpertBytes> experts{make_expert(1), make_expert(2)};
+void test_device_matches_host(GuFormat gu) {
+    LayerSpec spec = make_spec();
+    spec.gate.format = gu.fmt;
+    spec.up.format = gu.fmt;
+    const std::vector<ExpertBytes> experts{make_expert(1, gu), make_expert(2, gu)};
     const std::vector<float> x = make_x();
 
     // 主机参考：逐个专家走 expert_ffn。
@@ -143,8 +159,9 @@ void test_device_matches_host() {
     for (std::size_t e = 0; e < experts.size(); ++e) {
         must(dev.upload(static_cast<int>(e), experts[e].view(), err), err, "upload");
     }
-    const std::uint64_t per_expert =
-        static_cast<std::uint64_t>(kFfn) * 82 * 2 + static_cast<std::uint64_t>(kHidden) * 18;
+    const std::uint64_t per_expert = static_cast<std::uint64_t>(kFfn) *
+                                         static_cast<std::uint64_t>(gu.block_bytes) * 2 +
+                                     static_cast<std::uint64_t>(kHidden) * 18;
     CHECK(dev.resident_bytes() == per_expert * experts.size());
     CHECK(dev.uploaded_bytes() == dev.resident_bytes());
 
@@ -167,7 +184,8 @@ void test_device_matches_host() {
         den += std::fabs(static_cast<double>(host[i]));
     }
     const double rel = den > 0.0 ? num / den : num;
-    std::printf("  设备 vs 主机：逐元素位相同 %d/%zu，L1 相对差 %.3g\n", same, got.size(), rel);
+    std::printf("  gate/up = %s：设备 vs 主机逐元素位相同 %d/%zu，L1 相对差 %.3g\n",
+                format_name(gu.fmt), same, got.size(), rel);
     CHECK(den > 0.0);
     CHECK(rel < 1e-6);
     CHECK(same > 0);
@@ -598,7 +616,7 @@ int main(int argc, char** argv) {
         if (step) return manual_step_entry(argv[2], layers);
         return manual_model_entry(argv[2], layer);
     }
-    test_device_matches_host();
+    for (const GuFormat& gu : kGuFormats) test_device_matches_host(gu);
     test_same_slot_twice_gives_that_slot();
     test_unsupported_layers_fail_loudly();
     test_bad_inputs_fail_reply();
