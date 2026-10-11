@@ -54,7 +54,8 @@ bool load_proj_f32(const artifact::GgufFile& g, const artifact::GgufTensorInfo& 
         for (std::uint64_t r = 0; r < rows; ++r) {
             for (std::uint64_t b = 0; b < nblk; ++b) {
                 kernels::q8_0_dequant_block(
-                    reinterpret_cast<const kernels::Q80Block*>(raw.data() + r * row_bytes + b * kBytes),
+                    *reinterpret_cast<const kernels::Q80Block*>(raw.data() + r * row_bytes +
+                                                               b * kBytes),
                     out.data() + r * cols + b * kBlock);
             }
         }
@@ -186,9 +187,9 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
 
     // pre：gr_read(hc_attn_*) → 注意力 → gr_write。
     const GrWeights aw{GrTensor{s.a_norm_f32.data(), GrPrecision::kF32},
-                       GrTensor{s.a_down_bf16.data(), GrPrecision::kF32},
-                       GrTensor{s.a_up_bf16.data(), GrPrecision::kF32},
-                       GrTensor{s.a_inject_bf16.data(), GrPrecision::kF32}};
+                       GrTensor{s.a_down_f32.data(), GrPrecision::kF32},
+                       GrTensor{s.a_up_f32.data(), GrPrecision::kF32},
+                       GrTensor{s.a_inject_f32.data(), GrPrecision::kF32}};
     if (!gr_read(layer.gr, aw, R, 1e-6f, s.mixed.data(), s.inject.data(), s.gr, err)) return false;
     if (layer.kind == LayerKind::kGdn) {
         if (!run_gdn_layer(gguf, layer.gdn, s.mixed.data(), s.block_out.data(), s.gdn, err)) {
@@ -203,9 +204,9 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
 
     // post：gr_read(hc_ffn_*) → MoE → gr_write。
     const GrWeights fw{GrTensor{s.f_norm_f32.data(), GrPrecision::kF32},
-                       GrTensor{s.f_down_bf16.data(), GrPrecision::kF32},
-                       GrTensor{s.f_up_bf16.data(), GrPrecision::kF32},
-                       GrTensor{s.f_inject_bf16.data(), GrPrecision::kF32}};
+                       GrTensor{s.f_down_f32.data(), GrPrecision::kF32},
+                       GrTensor{s.f_up_f32.data(), GrPrecision::kF32},
+                       GrTensor{s.f_inject_f32.data(), GrPrecision::kF32}};
     if (!gr_read(layer.gr, fw, R, 1e-6f, s.mixed.data(), s.inject.data(), s.gr, err)) return false;
     if (!run_moe_layer(gguf, layer.moe, s.mixed.data(), s.block_out.data(), s.moe, err)) return false;
     return gr_write(layer.gr, R, s.block_out.data(), s.inject.data(), R, err);
