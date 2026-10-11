@@ -34,6 +34,10 @@ namespace {
 constexpr int kHidden = 256;
 constexpr int kFfn = 64;
 
+// 一个专家的三矩阵字节数（gate 64×82 + up 64×82 + down 256×18）。
+constexpr std::uint64_t kPerExpertBytes =
+    static_cast<std::uint64_t>(kFfn) * 82 * 2 + static_cast<std::uint64_t>(kHidden) * 18;
+
 std::vector<std::uint8_t> from_hex(const std::string& hex) {
     CHECK(hex.size() % 2 == 0);
     std::vector<std::uint8_t> out;
@@ -276,7 +280,8 @@ void test_worker_computes_a_job_and_stays_resident() {
     must(worker.submit(job, err), err, "submit");
     CHECK(worker.wait(err));
     const std::uint64_t after = worker.uploaded_bytes();
-    CHECK(after == worker.resident_bytes());
+    CHECK(after == 2 * kPerExpertBytes);          // 只搬了两个专家
+    CHECK(worker.resident_bytes() == 4 * kPerExpertBytes);  // 常驻区是按槽位数开的（4 个）
     must(worker.submit(job, err), err, "第二次 submit（两个专家都已在常驻区）");
     CHECK(worker.uploaded_bytes() == after);
     CHECK(worker.stats().jobs == 2 && worker.stats().experts == 4 && worker.stats().failed == 0);
