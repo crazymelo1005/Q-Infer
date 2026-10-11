@@ -38,6 +38,18 @@ void router_logits(const std::uint16_t* w_bf16, int n_expert, int hidden, const 
                        static_cast<std::uint64_t>(hidden), x, logits);
 }
 
+// 权重与激活都不舍 bf16（F32×F32），累加在 double 上——与 bf16 那条的差别只在这一点（ADR-010）。
+void router_logits_f32(const float* w_f32, int n_expert, int hidden, const float* x, float* logits) {
+    for (int e = 0; e < n_expert; ++e) {
+        double acc = 0.0;
+        const float* row = w_f32 + static_cast<std::size_t>(e) * static_cast<std::size_t>(hidden);
+        for (int j = 0; j < hidden; ++j) {
+            acc += static_cast<double>(row[j]) * static_cast<double>(x[j]);
+        }
+        logits[e] = static_cast<float>(acc);
+    }
+}
+
 void router_topk(const float* logits, int n_expert, int k, RouterScratch& s, int* ids,
                  float* weights) {
     s.p.resize(static_cast<std::size_t>(n_expert));
@@ -82,6 +94,23 @@ bool route(const std::uint16_t* w_bf16, int n_expert, int hidden, int k, const f
     }
     scratch.logits.resize(static_cast<std::size_t>(n_expert));
     router_logits(w_bf16, n_expert, hidden, x, scratch.logits.data());
+    router_topk(scratch.logits.data(), n_expert, k, scratch, ids, weights);
+    return true;
+}
+
+bool route_f32(const float* w_f32, int n_expert, int hidden, int k, const float* x,
+           RouterScratch& scratch, int* ids, float* weights, std::string& err) {
+    if (w_f32 == nullptr || x == nullptr || ids == nullptr || weights == nullptr) {
+        err = "参数为空";
+        return false;
+    }
+    if (n_expert <= 0 || hidden <= 0 || k <= 0 || k > n_expert) {
+        err = "几何不合理：n_expert=" + std::to_string(n_expert) + " hidden=" +
+              std::to_string(hidden) + " k=" + std::to_string(k);
+        return false;
+    }
+    scratch.logits.resize(static_cast<std::size_t>(n_expert));
+    router_logits_f32(w_f32, n_expert, hidden, x, scratch.logits.data());
     router_topk(scratch.logits.data(), n_expert, k, scratch, ids, weights);
     return true;
 }

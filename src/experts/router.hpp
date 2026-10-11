@@ -34,8 +34,14 @@ struct RouterSpec {
 bool read_router_spec(const artifact::GgufFile& gguf, int layer, RouterSpec& spec, std::string& err);
 
 // logits = W · bf16(x)：权重与激活都按 bf16 读，累加在 float 上（x 先逐元素转 bf16）。
+void router_logits_f32(const float* w_f32, int n_expert, int hidden, const float* x,
+                       float* logits);
+
 void router_logits(const std::uint16_t* w_bf16, int n_expert, int hidden, const float* x,
                    float* logits);
+
+// 同一件事，但权重声明为 F32 时走这条（ADR-010：路由按张力声明的档读——F32 是 F32×F32，
+// 不把 F32 舍成 bf16 走上面那条，那条契约只属声明为 BF16 的那份 pack）。
 
 struct RouterScratch {
     std::vector<double> p;
@@ -51,5 +57,9 @@ void router_topk(const float* logits, int n_expert, int k, RouterScratch& scratc
 // 一步到位：投影 + 门控。weights 之和为 1，ids 互不相同且按权重降序。
 bool route(const std::uint16_t* w_bf16, int n_expert, int hidden, int k, const float* x,
            RouterScratch& scratch, int* ids, float* weights, std::string& err);
+
+// 同上，路由声明为 F32 时的那条路。
+bool route_f32(const float* w_f32, int n_expert, int hidden, int k, const float* x,
+               RouterScratch& scratch, int* ids, float* weights, std::string& err);
 
 }  // namespace qinfer::experts
