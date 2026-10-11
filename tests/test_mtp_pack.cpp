@@ -106,7 +106,7 @@ std::vector<TensorSpec> engine_fixture() {
     add1(ts, "mtp.pre_fc_norm_embedding.weight", kN, kF32);
     add1(ts, "mtp.pre_fc_norm_hidden.weight", kHcDim, kF32);
     add2(ts, "mtp.fc_embedding.weight", kN, kN, kBF16);
-    add2(ts, "mtp.fc_hidden.weight", kHcDim, kN, kBF16);
+    add2(ts, "mtp.fc_hidden.weight", kN, kN, kBF16);
     add1(ts, "mtp.hyper_connection_mixer.hc_norm.weight", kHcDim, kF32);
     add2(ts, "mtp.hyper_connection_mixer.input_mix_weight_down.weight", kHcDim, kLr, kBF16);
     add2(ts, "mtp.hyper_connection_mixer.input_mix_weight_up.weight", kLr, kHcDim, kBF16);
@@ -208,7 +208,7 @@ void test_both_dialects() {
     CHECK(iq.t == ik.t && iq.rows == kIdxH * kIdx && ik.row_off == iq.rows && ik.rows == kIdx);
     CHECK(iq.block_rows == (kIdxH + 1) * kIdx);
     // fc_hidden 在引擎那份里是独立一张；fc_embed 的输入维是 n_embd。
-    CHECK(a.at(MtpRole::kFcHidden).present() && a.at(MtpRole::kFcHidden).cols == kHcDim);
+    CHECK(a.at(MtpRole::kFcHidden).present() && a.at(MtpRole::kFcHidden).cols == kN);
     CHECK(a.at(MtpRole::kFcEmbed).cols == kN);
     CHECK(a.at(MtpRole::kAttnHcInject).rows == kHc);
     CHECK(a.at(MtpRole::kSGateInp).rows == 1);  // [n_embd × 1] 二维

@@ -216,7 +216,10 @@ bool build_mtp_pack(const artifact::GgufFile& gguf, std::uint64_t n_embd, std::u
         {MtpRole::kPreNormEmbedding, {1, 0, 0, n_embd, Fuse::kNone}},
         {MtpRole::kPreNormHidden, {1, 0, 0, hc_dim, Fuse::kNone}},
         {MtpRole::kFcEmbed, {2, engine ? n_embd : 2 * n_embd, n_embd, 0, Fuse::kNone}},
-        {MtpRole::kFcHidden, {2, hc_dim, n_embd, 0, Fuse::kNone}},
+        // 引擎那份的 fc_hidden 与 fc_embedding 都是 [n_embd × n_embd]（真文件实测 [2560×2560]）：
+        // fc_hidden 是**逐流**施加的同一张矩阵（对 hc 条流各算一次），故输入维是单条流的 n_embd、
+        // 不是整栈的 hc·n_embd。社区那份没有这张（合进 eh_proj 的输入轴）。
+        {MtpRole::kFcHidden, {2, n_embd, n_embd, 0, Fuse::kNone}},
         {MtpRole::kFinalHcNorm, {1, 0, 0, hc_dim, Fuse::kNone}},
         {MtpRole::kFinalHcDown, {2, hc_dim, hc_lr, 0, Fuse::kNone}},
         {MtpRole::kFinalHcUp, {2, hc_lr, hc_dim, 0, Fuse::kNone}},
