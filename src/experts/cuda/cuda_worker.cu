@@ -121,6 +121,68 @@ std::uint32_t device_format_mask() {
            format_bit(Format::kQ2_0);
 }
 
+int cuda_owner_of(int device_count, int n_layers, int layer) {
+    if (device_count <= 0) return 0;
+    if (device_count == 1) return 0;
+    if (n_layers <= 0) return 0;
+    if (layer < 0) layer = 0;
+    if (layer >= n_layers) layer = n_layers - 1;
+    const int base = n_layers / device_count;
+    const int rem = n_layers % device_count;
+    int acc = 0;
+    for (int i = 0; i < device_count; ++i) {
+        const int cnt = base + (i < rem ? 1 : 0);
+        if (layer < acc + cnt) return i;
+        acc += cnt;
+    }
+    return device_count - 1;
+}
+
+bool CudaGroupFleet::init(const std::vector<int>& devices, int slots_per_layer,
+                          ExpertWorker& cpu_fallback, std::string& err) {
+    err.clear();
+    if (devices.empty()) {
+        err = "没有给任何卡";
+        return false;
+    }
+    if (slots_per_layer <= 0) {
+        err = "常驻槽位数必须为正";
+        return false;
+    }
+    workers_.clear();
+    candidates_.clear();
+    // 先把两张表的最终大小定下来：候选表的地址要稳定（MoeOffload 里存的是它的指针）。
+    workers_.resize(devices.size());
+    candidates_.resize(devices.size());
+    for (std::size_t i = 0; i < devices.size(); ++i) {
+        workers_[i] = std::make_unique<CudaExpertWorker>(devices[i], slots_per_layer);
+        if (!workers_[i]->available()) {
+            err = "卡 " + std::to_string(devices[i]) + " 不可用";
+            workers_.clear();
+            candidates_.clear();
+            return false;
+        }
+    }
+    for (std::size_t i = 0; i < devices.size(); ++i) {
+        candidates_[i] = {cuda_group(*workers_[i]), cpu_group(cpu_fallback)};
+    }
+    return true;
+}
+
+int CudaGroupFleet::owner_of(int n_layers, int layer) const {
+    return cuda_owner_of(card_count(), n_layers, layer);
+}
+
+const std::vector<ComputeGroup>& CudaGroupFleet::candidates_for(int owner) const {
+    if (owner < 0 || owner >= card_count()) owner = 0;
+    return candidates_[static_cast<std::size_t>(owner)];
+}
+
+int CudaGroupFleet::device_of(int owner) const {
+    if (owner < 0 || owner >= card_count()) return -1;
+    return workers_[static_cast<std::size_t>(owner)]->device();
+}
+
 ComputeGroup cuda_group(ExpertWorker& worker) {
     ComputeGroup g;
     g.kind = GroupKind::kCuda;

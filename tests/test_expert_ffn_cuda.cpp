@@ -387,6 +387,83 @@ void test_unsupported_role_is_refused_by_the_worker() {
     CHECK(worker.stats().failed == 1);
 }
 
+int count_cards() {
+    int n = 0;
+    for (int d = 0; d < 4; ++d) {
+        CudaExpertWorker probe(d, 1);
+        if (probe.available()) ++n;
+    }
+    return n;
+}
+
+void test_owner_split() {
+    // 连续切分：48 层两张卡 → 24/24；10 层三张卡 → 4/3/3；一张卡全给 0。越界按最后一段算。
+    CHECK(cuda_owner_of(2, 48, 0) == 0);
+    CHECK(cuda_owner_of(2, 48, 23) == 0);
+    CHECK(cuda_owner_of(2, 48, 24) == 1);
+    CHECK(cuda_owner_of(2, 48, 47) == 1);
+    CHECK(cuda_owner_of(1, 48, 47) == 0);
+    CHECK(cuda_owner_of(3, 10, 0) == 0 && cuda_owner_of(3, 10, 3) == 0);
+    CHECK(cuda_owner_of(3, 10, 4) == 1 && cuda_owner_of(3, 10, 6) == 1);
+    CHECK(cuda_owner_of(3, 10, 7) == 2 && cuda_owner_of(3, 10, 9) == 2);
+    CHECK(cuda_owner_of(2, 48, -5) == 0);   // 越界按边界算，不返回 -1
+    CHECK(cuda_owner_of(2, 48, 99) == 1);
+    std::printf("  层切分：48 层/2 卡 → 0..23 / 24..47；10 层/3 卡 → 4/3/3\n");
+}
+
+void test_fleet_and_each_card_runs() {
+    const int cards = count_cards();
+    std::printf("  这台机器可见的卡：%d\n", cards);
+    if (cards < 2) {
+        std::printf("  只有一张卡，跳过按卡分工的用例\n");
+        return;
+    }
+    const LayerSpec spec = make_spec();
+    const std::vector<float> x = make_x();
+    CpuExpertWorker cpu;
+    CudaGroupFleet fleet;
+    std::string err;
+    must(fleet.init({0, 1}, /*slots_per_layer=*/4, cpu, err), err, "fleet.init");
+    CHECK(fleet.card_count() == 2);
+    CHECK(fleet.device_of(0) == 0 && fleet.device_of(1) == 1);
+    for (int owner = 0; owner < 2; ++owner) {
+        const std::vector<ComputeGroup>& cand = fleet.candidates_for(owner);
+        CHECK(cand.size() == 2);
+        CHECK(cand[0].kind == GroupKind::kCuda);      // 本卡的组在前
+        CHECK(!cand[0].fallback);
+        CHECK(cand[1].fallback);                      // CPU 兜底组在后
+        CHECK(cand[0].worker == &fleet.worker(owner));  // 各卡一份，不共用
+    }
+    CHECK(fleet.candidates_for(0)[0].worker != fleet.candidates_for(1)[0].worker);
+
+    // 每张卡都要真的算得对：同一层同一批专家分别交给两张卡，结果都该与主机逐位一致。
+    for (int owner = 0; owner < 2; ++owner) {
+        const ExpertBytes e = make_expert(20 + owner);
+        const ExpertWeights view = e.view();
+        const std::vector<int> ids{3};
+        std::vector<float> got(kHidden, 0.0f);
+        ExpertJob job;
+        job.spec = &spec;
+        job.experts = &view;
+        job.ids = ids.data();
+        job.n = 1;
+        job.x = x.data();
+        job.hidden = kHidden;
+        job.out = got.data();
+        ExpertWorker& w = fleet.worker(owner);
+        must(w.submit(job, err), err, "submit（按卡）");
+        FfnScratch sc;
+        std::vector<float> want(kHidden, 0.0f);
+        must(expert_ffn(spec, view, x.data(), sc, want.data(), err), err, "主机参考（按卡）");
+        for (int i = 0; i < kHidden; ++i) {
+            CHECK(std::bit_cast<std::uint32_t>(got[static_cast<std::size_t>(i)]) ==
+                  std::bit_cast<std::uint32_t>(want[static_cast<std::size_t>(i)]));
+        }
+        std::printf("  卡 %d：一个专家的前馈与主机逐位一致（它算了 %llu 个专家）\n",
+                    fleet.device_of(owner), (unsigned long long) w.stats().experts);
+    }
+}
+
 // ---- 真模型入口 ----
 //
 // 一层 MoE 的两条路：不交出去（逐专家主机路径）与交出去（候选组 + 批量分派 → 设备侧工人）。
@@ -466,7 +543,7 @@ int manual_model_entry(const char* model, int layer) {
 
 // 整模型一步：不交出去（逐层主机路径）与交出去（48 层逐层交给 CUDA 组）两条路的 logits 该逐位
 // 一致。这条是「设备侧那批真的进了整模型一步」的判据，且要求没有一次重派（否则有层没被接住）。
-int manual_step_entry(const char* model, int layers) {
+int manual_step_entry(const char* model, int layers, bool fleet) {
     qinfer::artifact::GgufFile g;
     std::string err;
     if (!g.open(model, err)) {
@@ -506,13 +583,22 @@ int manual_step_entry(const char* model, int layers) {
         return 1;
     }
 
-    CudaExpertWorker worker(0, /*slots_per_layer=*/12);
-    if (!worker.available()) {
-        std::printf("没有可用的 CUDA 设备\n");
-        return 1;
-    }
     CpuExpertWorker cpu;
-    std::vector<ComputeGroup> groups{cuda_group(worker), cpu_group(cpu)};
+    std::vector<ComputeGroup> one_group;
+    CudaExpertWorker single_worker(0, /*slots_per_layer=*/12);
+    CudaGroupFleet dev_fleet;
+    if (fleet) {
+        if (!dev_fleet.init({0, 1}, /*slots_per_layer=*/12, cpu, err)) {
+            std::printf("按卡分工起不来：%s\n", err.c_str());
+            return 1;
+        }
+    } else {
+        if (!single_worker.available()) {
+            std::printf("没有可用的 CUDA 设备\n");
+            return 1;
+        }
+        one_group = {cuda_group(single_worker), cpu_group(cpu)};
+    }
     std::vector<ExpertSource> sources;
     std::vector<MoeOffload> offloads;
     sources.reserve(static_cast<std::size_t>(cfg.n_layers));
@@ -525,7 +611,10 @@ int manual_step_entry(const char* model, int layers) {
     LayerDispatchScratch ds;
     RerouteStats rs{};
     for (int l = 0; l < cfg.n_layers; ++l) {
-        offloads.push_back(MoeOffload{&groups, &sources[static_cast<std::size_t>(l)], &ds, &rs});
+        // 单卡：所有层用同一份候选表；按卡分工：按层切分取本卡那份。
+        const std::vector<ComputeGroup>* cand =
+            fleet ? &dev_fleet.candidates_for(dev_fleet.owner_of(cfg.n_layers, l)) : &one_group;
+        offloads.push_back(MoeOffload{cand, &sources[static_cast<std::size_t>(l)], &ds, &rs});
     }
     cfg.offload_layers = &offloads;
 
@@ -568,12 +657,28 @@ int manual_step_entry(const char* model, int layers) {
     std::printf("整模型一步（48 层逐层交出）：|logits| 主机 %.6g / 设备 %.6g；L1 相对差 %.3g；"
                 "最大绝对差 %.3g；位相同 %d/%zu（首个不同在 %zu）\n",
                 mag_ref, mag_dev, rel, max_abs, same, a.size(), first_diff);
-    std::printf("  选组 routed=%llu rerouted=%llu；工人 jobs=%llu experts=%llu failed=%llu；常驻 %.1f MiB\n",
-                (unsigned long long) rs.routed, (unsigned long long) rs.rerouted,
-                (unsigned long long) worker.stats().jobs,
-                (unsigned long long) worker.stats().experts,
-                (unsigned long long) worker.stats().failed,
-                static_cast<double>(worker.resident_bytes()) / (1024.0 * 1024.0));
+    std::printf("  选组 routed=%llu rerouted=%llu\n", (unsigned long long) rs.routed,
+                (unsigned long long) rs.rerouted);
+    if (fleet) {
+        int busy = 0;
+        for (int i = 0; i < dev_fleet.card_count(); ++i) {
+            const ExpertWorker::Stats& st = dev_fleet.worker(i).stats();
+            std::printf("  卡 %d：jobs=%llu experts=%llu failed=%llu\n", dev_fleet.device_of(i),
+                        (unsigned long long) st.jobs, (unsigned long long) st.experts,
+                        (unsigned long long) st.failed);
+            if (st.jobs > 0) ++busy;
+        }
+        if (busy != dev_fleet.card_count()) {
+            std::printf("  有卡没接到活：层切分没生效\n");
+            return 1;
+        }
+    } else {
+        std::printf("  单卡：jobs=%llu experts=%llu failed=%llu；常驻 %.1f MiB\n",
+                    (unsigned long long) single_worker.stats().jobs,
+                    (unsigned long long) single_worker.stats().experts,
+                    (unsigned long long) single_worker.stats().failed,
+                    static_cast<double>(single_worker.resident_bytes()) / (1024.0 * 1024.0));
+    }
     if (a.size() != b.size()) return 1;
     // 分布级判据（ADR-009）：不是逐位，但差异要小到能说明两边算的是同一件事。
     if (!(rel < 1e-4)) {
@@ -598,6 +703,7 @@ int main(int argc, char** argv) {
         int layer = 0;
         int layers = 48;
         bool step = false;
+        bool fleet = false;
         for (int i = 2; i < argc; ++i) {
             const std::string a = argv[i];
             if (a == "--layer" && i + 1 < argc) {
@@ -606,6 +712,8 @@ int main(int argc, char** argv) {
                 layers = std::atoi(argv[++i]);
             } else if (a == "--step") {
                 step = true;
+            } else if (a == "--fleet") {
+                fleet = true;
             } else if (a != argv[2]) {
                 // 认不出来的参数直接失败：最后一个参数曾经被循环上界跳过，于是「整模型一步」悄悄跑了
                 // 单层入口、对照看着通过——这种静默换入口的错比跑挂更坏。
@@ -613,7 +721,7 @@ int main(int argc, char** argv) {
                 return 2;
             }
         }
-        if (step) return manual_step_entry(argv[2], layers);
+        if (step) return manual_step_entry(argv[2], layers, fleet);
         return manual_model_entry(argv[2], layer);
     }
     for (const GuFormat& gu : kGuFormats) test_device_matches_host(gu);
@@ -623,6 +731,8 @@ int main(int argc, char** argv) {
     test_worker_computes_a_job_and_stays_resident();
     test_select_group_prefers_the_cuda_group();
     test_unsupported_role_is_refused_by_the_worker();
+    test_owner_split();
+    test_fleet_and_each_card_runs();
     std::puts("expert_ffn_cuda: 设备侧一层前馈（权重常驻）、工人与 CUDA 组都成立");
     return 0;
 }

@@ -49,6 +49,32 @@ private:
 // 设备侧内核覆盖的档（位掩码）：gate/up 的 IQ2_S / IQ2_XXS / IQ1_M 与 down 的 Q2_0。
 std::uint32_t device_format_mask();
 
+// 按 [ADR-004](../../docs/design/adr/ADR-004-consumer-dual-gpu-no-tensor-parallel.md) 的层切分把
+// 层连续地分给各卡：`n_layers` 层切成 `device_count` 段，前 `n_layers % device_count` 段各多一层。
+// 连续切分而不是轮流（layer % device_count）：层间只传残差栈，切口越少越好。`layer` 越界时按最后一段算。
+int cuda_owner_of(int device_count, int n_layers, int layer);
+
+// 一台机器上的设备组集合：每张卡一个工人（各自那块卡上的权重常驻区）与一个组；每张卡各有一份候选表
+// 「本卡的组在前、CPU 兜底组在后」。它不管字节来源——调用方按层建 `MoeOffload` 时把候选表指进来。
+class CudaGroupFleet {
+public:
+    // devices 是要用的卡（如 {0,1}）；任何一张不可用都返回假并写 err。cpu_fallback 由调用方持有。
+    bool init(const std::vector<int>& devices, int slots_per_layer, ExpertWorker& cpu_fallback,
+              std::string& err);
+
+    int card_count() const { return static_cast<int>(workers_.size()); }
+    int owner_of(int n_layers, int layer) const;
+    // 第 owner 张卡的候选表（地址在 init 之后稳定，可直接给 MoeOffload.candidates）。
+    const std::vector<ComputeGroup>& candidates_for(int owner) const;
+    // 观测：第 owner 张卡的工人。
+    ExpertWorker& worker(int owner) { return *workers_[static_cast<std::size_t>(owner)]; }
+    int device_of(int owner) const;
+
+private:
+    std::vector<std::unique_ptr<CudaExpertWorker>> workers_;
+    std::vector<std::vector<ComputeGroup>> candidates_;  // 一张卡一份
+};
+
 // 一个 CUDA 组：显存侧组，不持总线份额限流器（它不是主机侧的组），非兜底。
 ComputeGroup cuda_group(ExpertWorker& worker);
 
