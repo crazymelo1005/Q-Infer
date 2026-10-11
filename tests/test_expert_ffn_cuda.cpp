@@ -108,6 +108,12 @@ std::vector<float> make_x() {
     return x;
 }
 
+// 断言带上原来那条 err：不然失败时只知道「返回了假」，看不出为什么（这一片就吃过一次亏）。
+void must(bool ok, const std::string& err, const char* what) {
+    if (!ok) std::printf("    失败：%s（%s）\n", what, err.c_str());
+    CHECK(ok);
+}
+
 void test_device_matches_host() {
     const LayerSpec spec = make_spec();
     const std::vector<ExpertBytes> experts{make_expert(1), make_expert(2)};
@@ -124,10 +130,9 @@ void test_device_matches_host() {
 
     ExpertFfnDevice dev;
     std::string err;
-    CHECK(dev.init(0, spec, static_cast<int>(experts.size()), err));
-    CHECK(err.empty());
+    must(dev.init(0, spec, static_cast<int>(experts.size()), err), err, "init");
     for (std::size_t e = 0; e < experts.size(); ++e) {
-        CHECK(dev.upload(static_cast<int>(e), experts[e].view(), err));
+        must(dev.upload(static_cast<int>(e), experts[e].view(), err), err, "upload");
     }
     const std::uint64_t per_expert =
         static_cast<std::uint64_t>(kFfn) * 82 * 2 + static_cast<std::uint64_t>(kHidden) * 18;
@@ -136,12 +141,13 @@ void test_device_matches_host() {
 
     std::vector<int> slots{0, 1};
     std::vector<float> got(experts.size() * kHidden, 0.0f);
-    CHECK(dev.run(slots.data(), static_cast<int>(experts.size()), x.data(), got.data(), err));
-    CHECK(err.empty());
+    must(dev.run(slots.data(), static_cast<int>(experts.size()), x.data(), got.data(), err), err,
+         "第一次 run");
 
     // 常驻：第二个 run 不再搬权重。
     const std::uint64_t after_first = dev.uploaded_bytes();
-    CHECK(dev.run(slots.data(), static_cast<int>(experts.size()), x.data(), got.data(), err));
+    must(dev.run(slots.data(), static_cast<int>(experts.size()), x.data(), got.data(), err), err,
+         "第二次 run");
     CHECK(dev.uploaded_bytes() == after_first);
 
     int same = 0;
@@ -168,12 +174,14 @@ void test_same_slot_twice_gives_that_slot() {
     std::vector<float> want(kHidden, 0.0f);
     CHECK(expert_ffn(spec, e0.view(), x.data(), sc, want.data(), err));
 
+    // 槽位给两个（一批的专家数不能超过槽位数：结果缓冲是按槽位数开的），但只往 0 号槽放权重，
+    // 再让这一批的两个位置都用 0 号槽——这才是那条「同一槽用两次不串」的用例。
     ExpertFfnDevice dev;
-    CHECK(dev.init(0, spec, 1, err));
-    CHECK(dev.upload(0, e0.view(), err));
+    must(dev.init(0, spec, 2, err), err, "init");
+    must(dev.upload(0, e0.view(), err), err, "upload");
     const std::vector<int> slots{0, 0};
     std::vector<float> got(2 * kHidden, 0.0f);
-    CHECK(dev.run(slots.data(), 2, x.data(), got.data(), err));
+    must(dev.run(slots.data(), 2, x.data(), got.data(), err), err, "同一槽两次");
     for (int e = 0; e < 2; ++e) {
         for (int i = 0; i < kHidden; ++i) {
             CHECK(std::bit_cast<std::uint32_t>(got[static_cast<std::size_t>(e * kHidden + i)]) ==

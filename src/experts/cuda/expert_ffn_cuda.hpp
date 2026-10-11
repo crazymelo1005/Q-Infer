@@ -35,6 +35,7 @@ public:
     // 把一个专家的三矩阵放进 slot（同一槽重复放是覆盖写）。
     bool upload(int slot, const ExpertWeights& w, std::string& err);
     // 算一批：slots[e] 指定第 e 个专家用哪个槽，out 为 n × hidden（专家主序，与工人那套一致）。
+    // n 不能超过 slots——结果的设备缓冲是按槽位数开的（解码步内不分配）；要更大的批就给更大的槽位数。
     bool run(const int* slots, int n, const float* x, float* out, std::string& err);
 
     bool ready() const { return d_w_ != nullptr; }
