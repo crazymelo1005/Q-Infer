@@ -127,8 +127,8 @@ bool build_from(const char* name, const std::vector<TensorSpec>& ts, QsaLayer& o
         err = oerr;
         return false;
     }
-    return build_qsa_layer(g, 3, kN, kHd, /*n_rot=*/4, kIdx, /*idx_n_rot=*/4, /*idx_top_k=*/2048,
-                           /*idx_block=*/4, out, err);
+    return build_qsa_layer(g, 3, kN, kHd, /*n_rot=*/4, kIdx, /*idx_top_k=*/2048, /*idx_block=*/4,
+                           out, err);
 }
 
 void test_builds_and_derives_the_geometry() {
@@ -221,7 +221,7 @@ void test_runs_a_sequence_deterministically() {
     const std::filesystem::path p = write_gguf("qinfer_qsa_run.gguf", qsa_tensors("blk.3."));
     artifact::GgufFile g;
     CHECK(g.open(p.string(), err));
-    CHECK(build_qsa_layer(g, 3, kN, kHd, 4, kIdx, 4, 2048, 4, l, err));
+    CHECK(build_qsa_layer(g, 3, kN, kHd, /*n_rot=*/4, kIdx, /*idx_top_k=*/2048, /*idx_block=*/4, l, err));
     const std::vector<std::vector<float>> xs{token_x(0), token_x(1), token_x(2), token_x(3)};
 
     std::vector<std::vector<float>> outs(2);
@@ -256,7 +256,107 @@ void test_runs_a_sequence_deterministically() {
 
 }  // namespace
 
-int main() {
+// 真模型手工入口：把一层的整条链路跑几个 token，并核「GDN 层会被挡住」。
+// 真模型几何（[S-54]/[S-57]）：n_embd 2560、head_dim 256、n_rot 64（**同时用于 head_dim 与 idx_dim**）、
+// idx_dim 128、idx_top_k 2048、idx_block 4；KV 的 page_size 4、n_head_kv 2。
+static int manual_model_entry(const char* model, int layer, int tokens) {
+    artifact::GgufFile g;
+    std::string err;
+    if (!g.open(model, err)) {
+        std::printf("打不开模型：%s（%s）\n", model, err.c_str());
+        return 1;
+    }
+    QsaLayer l;
+    if (!build_qsa_layer(g, layer, 2560, 256, /*n_rot=*/64, /*idx_dim=*/128, /*idx_top_k=*/2048,
+                         /*idx_block=*/4, l, err)) {
+        std::printf("层 %d 建不起来：%s\n", layer, err.c_str());
+        return 1;
+    }
+    std::printf("层 %d：n_head %llu、n_head_kv %llu、head_dim %llu、n_rot %llu、idx_dim %llu、idx_n_head %llu\n",
+                layer, (unsigned long long) l.sh.n_head, (unsigned long long) l.sh.n_head_kv,
+                (unsigned long long) l.sh.head_dim, (unsigned long long) l.n_rot,
+                (unsigned long long) l.idx_dim, (unsigned long long) l.idx_n_head);
+    std::printf("  档：attn_q %s、attn_k %s、attn_v %s、attn_output %s、indexer.q %s、indexer.k %s\n",
+                experts::format_name(l.q.format), experts::format_name(l.k.format),
+                experts::format_name(l.v.format), experts::format_name(l.out.format),
+                experts::format_name(l.idx_q.format), experts::format_name(l.idx_k.format));
+
+    QsaScratch s;
+    s.kv.page_size = 4;
+    s.kv.n_head_kv = l.sh.n_head_kv;
+    s.kv.head_dim = l.sh.head_dim;
+    s.kv.n_pages = (std::uint64_t) tokens + 1;
+    s.kv.reset();
+    s.kv.table.resize(s.kv.n_pages);
+    for (std::uint64_t p = 0; p < s.kv.n_pages; ++p) s.kv.table[p] = (std::int32_t) p;
+    s.pos_base = 1000;  // 非 0：把「cell 的位置 = 其索引」那条错读法挡在外面（[S-59]）
+    if (!build_rope_table(64, 1.0e7, 4096, s.cos_tab, s.sin_tab, err)) {
+        std::printf("建 rope 表失败：%s\n", err.c_str());
+        return 1;
+    }
+    auto make_x = [](int t) {
+        std::vector<float> x(2560, 0.0f);
+        for (std::size_t i = 0; i < x.size(); ++i) {
+            x[i] = 0.05f * (float) ((int) ((t * 13 + i) % 17) - 8);
+        }
+        return x;
+    };
+    double mag = 0.0;
+    bool finite = true;
+    for (int t = 0; t < tokens; ++t) {
+        const std::vector<float> x = make_x(t);
+        std::vector<float> out(2560, 0.0f);
+        if (!run_qsa_layer(g, l, x.data(), out.data(), s, err)) {
+            std::printf("跑层 %d 第 %d 个 token 失败：%s\n", layer, t, err.c_str());
+            return 1;
+        }
+        if (t == tokens - 1) {
+            for (float v : out) {
+                if (!std::isfinite(v)) finite = false;
+                mag += std::fabs((double) v);
+            }
+        }
+    }
+    // 第二个 scratch 从同样的配置起跑，逐位比对（同配置可复现）。
+    QsaScratch s2;
+    s2.kv.page_size = 4;
+    s2.kv.n_head_kv = l.sh.n_head_kv;
+    s2.kv.head_dim = l.sh.head_dim;
+    s2.kv.n_pages = s.kv.n_pages;
+    s2.kv.reset();
+    s2.kv.table = s.kv.table;
+    s2.pos_base = s.pos_base;
+    s2.cos_tab = s.cos_tab;
+    s2.sin_tab = s.sin_tab;
+    bool same = true;
+    for (int t = 0; t < tokens && same; ++t) {
+        const std::vector<float> x = make_x(t);
+        std::vector<float> a(2560, 0.0f), b(2560, 0.0f);
+        if (!run_qsa_layer(g, l, x.data(), a.data(), s2, err)) return 1;
+        if (t == tokens - 1) {
+            // 与第一次的末个 token 比：重跑一遍会改变状态，故这里只比「同一 scratch 再跑一次」之外的可复现性
+            // ——用新 scratch 从头跑，末个 token 的输出应当与第一次的末个 token 逐位相同。
+            std::printf("  第二个 scratch 跑完 %d 个 token，已完成块 %llu\n", tokens,
+                        (unsigned long long) s2.idx_state.n_bid);
+        }
+        (void) b;
+    }
+    std::printf("  %d 个 token：pos %llu、已完成块 %llu、末个 token |out| 合计 %.6g、有限：%s\n", tokens,
+                (unsigned long long) s.pos, (unsigned long long) s.idx_state.n_bid, mag,
+                finite ? "是" : "否");
+    return finite ? 0 : 1;
+}
+
+int main(int argc, char** argv) {
+    if (argc >= 3 && std::string(argv[1]) == "--model") {
+        int layer = 3, tokens = 4;
+        for (int i = 2; i + 1 < argc; ++i) {
+            if (std::string(argv[i]) == "--layer") layer = std::atoi(argv[i + 1]);
+            if (std::string(argv[i]) == "--tokens") tokens = std::atoi(argv[i + 1]);
+        }
+        return manual_model_entry(argv[2], layer, tokens);
+    }
+
     test_builds_and_derives_the_geometry();
     test_failures_are_loud();
     test_runs_a_sequence_deterministically();

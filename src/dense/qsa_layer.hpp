@@ -27,8 +27,9 @@ namespace qinfer::dense {
 struct QsaLayer {
     int layer = -1;
     QsaShapes sh;                  // idx_top_k / idx_block / head_dim / n_head / n_head_kv
-    std::uint64_t n_rot = 0;       // 部分 rope 的维数（真模型 64）
-    std::uint64_t idx_n_rot = 0;   // 索引器那一侧的 rope 维数（**与 head_dim 无关**，别混）
+    // 部分 rope 的维数。**注意它与注意力和索引器共用一份**——引擎的 QsaShapes 只有一个 n_rot，
+    // 注释明写「64 rotated dims of head_dim (and of idx_dim)」，两边都是 64（见 S-57）。
+    std::uint64_t n_rot = 0;
     std::uint64_t idx_dim = 0;     // 索引器的头宽（真模型 128）
     std::uint64_t idx_n_head = 0;  // 索引器的 q 头数（真模型 4）
     experts::MatrixSpec q, k, v, out;      // 四个注意力投影
@@ -53,7 +54,6 @@ struct QsaLayer {
 // （含「这一层不是 QSA 层」）都返回假并写 err。
 bool build_qsa_layer(const artifact::GgufFile& gguf, int layer, std::uint64_t n_embd,
                      std::uint64_t head_dim, std::uint64_t n_rot, std::uint64_t idx_dim,
-                     std::uint64_t idx_n_rot,
                      std::uint64_t idx_top_k, std::uint64_t idx_block, QsaLayer& out,
                      std::string& err);
 

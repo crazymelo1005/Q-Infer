@@ -66,8 +66,7 @@ bool norm_of(const artifact::GgufTensorInfo& t, const char* what, std::uint64_t 
 
 bool build_qsa_layer(const artifact::GgufFile& gguf, int layer, std::uint64_t n_embd,
                      std::uint64_t head_dim, std::uint64_t n_rot, std::uint64_t idx_dim,
-                     std::uint64_t idx_n_rot, std::uint64_t idx_top_k, std::uint64_t idx_block,
-                     QsaLayer& out,
+                     std::uint64_t idx_top_k, std::uint64_t idx_block, QsaLayer& out,
                      std::string& err) {
     err.clear();
     out = QsaLayer{};
@@ -110,8 +109,8 @@ bool build_qsa_layer(const artifact::GgufFile& gguf, int layer, std::uint64_t n_
         return false;
 
     if (head_dim == 0 || n_rot == 0 || n_rot > head_dim || n_rot % 2 != 0 || idx_dim == 0 ||
-        idx_n_rot == 0 || idx_n_rot > idx_dim || idx_n_rot % 2 != 0) {
-        err = "head_dim / n_rot / idx_dim / idx_n_rot 不合法";
+        n_rot > idx_dim) {
+        err = "head_dim / n_rot / idx_dim 不合法（n_rot 同时受 head_dim 与 idx_dim 约束）";
         return false;
     }
     // 四个投影的输入维都是 n_embd。
@@ -153,7 +152,6 @@ bool build_qsa_layer(const artifact::GgufFile& gguf, int layer, std::uint64_t n_
 
     out.sh = QsaShapes{idx_top_k, idx_block, head_dim, n_head, n_head_kv};
     out.n_rot = n_rot;
-    out.idx_n_rot = idx_n_rot;
     out.idx_dim = idx_dim;
     out.idx_n_head = idx_n_head;
     out.idx_dense_bf16 = out.idx_q.format == experts::Format::kBf16;
@@ -260,12 +258,12 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
     kernels::bf16_gemv(s.idx_q_w.data(), layer.idx_q.rows, layer.idx_q.cols, x, s.idx_q_out.data());
     kernels::bf16_gemv(s.idx_k_w.data(), layer.idx_k.rows, layer.idx_k.cols, x, s.idx_k_out.data());
     s.q_idx.assign(static_cast<std::size_t>(layer.idx_n_head * idx_dim), 0.0f);
-    if (!qsa_indexer_prep(layer.idx_n_head, idx_dim, layer.idx_n_rot, s.pos, s.idx_q_out.data(),
+    if (!qsa_indexer_prep(layer.idx_n_head, idx_dim, layer.n_rot, s.pos, s.idx_q_out.data(),
                           s.idx_q_norm_w.data(), 1e-6f, s.cos_tab, s.sin_tab, s.q_idx.data(), err)) {
         return false;
     }
     if (s.idx_state.dead.empty()) s.idx_state.reset(layer.sh, idx_dim);
-    if (!indexer_key_append(layer.sh, idx_dim, layer.idx_n_rot, s.pos, s.pos_base,
+    if (!indexer_key_append(layer.sh, idx_dim, layer.n_rot, s.pos, s.pos_base,
                             s.idx_k_out.data(),
                             s.idx_k_norm_w.data(), 1e-6f, s.cos_tab, s.sin_tab, s.idx_state, err)) {
         return false;
