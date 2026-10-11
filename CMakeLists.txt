@@ -357,4 +357,16 @@ if(QINFER_ENABLE_CUDA)
   add_executable(test_iq_gemv_cuda tests/test_iq_gemv_cuda.cpp)
   target_link_libraries(test_iq_gemv_cuda PRIVATE qinfer_kernels_cuda)
   add_test(NAME iq_gemv_cuda COMMAND test_iq_gemv_cuda)
+
+  # 设备侧的专家前馈（权重常驻）住在 experts 一侧：它要按档分派、并复用主机的激活量化器，
+  # 故不能塞进只依赖 kernels 的那个库里。
+  add_library(qinfer_experts_cuda
+    src/experts/cuda/expert_ffn_cuda.cu
+  )
+  target_include_directories(qinfer_experts_cuda PUBLIC src)
+  target_link_libraries(qinfer_experts_cuda PUBLIC qinfer_kernels_cuda qinfer_experts)
+
+  add_executable(test_expert_ffn_cuda tests/test_expert_ffn_cuda.cpp)
+  target_link_libraries(test_expert_ffn_cuda PRIVATE qinfer_experts_cuda)
+  add_test(NAME expert_ffn_cuda COMMAND test_expert_ffn_cuda)
 endif()

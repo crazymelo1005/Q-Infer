@@ -38,8 +38,6 @@ bool ensure_tables(std::string& err) {
 }
 
 // 一个码字的 8 个值：格点表那一项按小端取 8 个幅度字节，符号位取自该码字的符号字节。
-// 与主机那份的 grid_index + 内层循环逐句对应（主机对表项取地址再按字节读，这里把整项拷到本地再读，
-// 字节序相同）。
 __device__ __forceinline__ int grid_dot8(const std::int8_t* q8, std::uint16_t idx,
                                          std::uint8_t sign) {
     const std::uint64_t word = c_iq2s_grid[idx];
@@ -123,10 +121,43 @@ bool copy_in(DevBuf& dst, const void* src, std::size_t bytes, const char* what, 
     return true;
 }
 
-}  // namespace
+// 纯启动：三个指针都当作设备指针用，不分配、不拷贝，只等这一次启动结束。常量表在这里保证就位。
+bool launch_kernel(const void* d_w, int n_rows, int n_blocks, const void* d_y, void* d_out,
+                   std::string& err) {
+    if (!ensure_tables(err)) return false;
+    const int threads = 128;
+    const int blocks = (n_rows + threads - 1) / threads;
+    iq2s_gemv_kernel<<<blocks, threads>>>(static_cast<const std::uint8_t*>(d_w), n_rows, n_blocks,
+                                          static_cast<const std::uint8_t*>(d_y),
+                                          static_cast<float*>(d_out));
+    const cudaError_t kst = cudaDeviceSynchronize();
+    if (kst != cudaSuccess) {
+        err = std::string("内核执行失败：") + cudaGetErrorString(kst);
+        return false;
+    }
+    return true;
+}
 
-bool iq2s_gemv_q8k_cuda(const std::uint8_t* w, int n_rows, int n_blocks, const Q8kBlock* y,
-                        float* out, std::string& err) {
+// 自包含入口那一段：把激活与结果在主机与设备之间搬。
+bool launch_with_host_activation(const void* d_w, int n_rows, int n_blocks, const Q8kBlock* y,
+                                 float* out, std::string& err) {
+    const std::size_t y_bytes = static_cast<std::size_t>(n_blocks) * kQ8kBlockBytes;
+    const std::size_t o_bytes = static_cast<std::size_t>(n_rows) * sizeof(float);
+    DevBuf dy, dout;
+    if (!dy.alloc(y_bytes, "激活", err)) return false;
+    if (!dout.alloc(o_bytes, "输出", err)) return false;
+    if (!copy_in(dy, y, y_bytes, "激活", err)) return false;
+    if (!launch_kernel(d_w, n_rows, n_blocks, dy.p, dout.p, err)) return false;
+    const cudaError_t dst = cudaMemcpy(out, dout.p, o_bytes, cudaMemcpyDeviceToHost);
+    if (dst != cudaSuccess) {
+        err = std::string("回传（输出）失败：") + cudaGetErrorString(dst);
+        return false;
+    }
+    return true;
+}
+
+bool check_args(const void* w, const Q8kBlock* y, float* out, int n_rows, int n_blocks,
+                std::string& err) {
     err.clear();
     if (w == nullptr || y == nullptr || out == nullptr) {
         err = "设备入口的指针不完整";
@@ -142,35 +173,33 @@ bool iq2s_gemv_q8k_cuda(const std::uint8_t* w, int n_rows, int n_blocks, const Q
         err = "没有可用的 CUDA 设备";
         return false;
     }
-    if (!ensure_tables(err)) return false;
-
-    const std::size_t w_bytes = static_cast<std::size_t>(n_rows) * n_blocks * kIq2sBlockBytes;
-    const std::size_t y_bytes = static_cast<std::size_t>(n_blocks) * kQ8kBlockBytes;
-    const std::size_t o_bytes = static_cast<std::size_t>(n_rows) * sizeof(float);
-
-    DevBuf dw, dy, dout;
-    if (!dw.alloc(w_bytes, "权重", err)) return false;
-    if (!dy.alloc(y_bytes, "激活", err)) return false;
-    if (!dout.alloc(o_bytes, "输出", err)) return false;
-    if (!copy_in(dw, w, w_bytes, "权重", err)) return false;
-    if (!copy_in(dy, y, y_bytes, "激活", err)) return false;
-
-    const int threads = 128;
-    const int blocks = (n_rows + threads - 1) / threads;
-    iq2s_gemv_kernel<<<blocks, threads>>>(static_cast<const std::uint8_t*>(dw.p), n_rows, n_blocks,
-                                          static_cast<const std::uint8_t*>(dy.p),
-                                          static_cast<float*>(dout.p));
-    const cudaError_t kst = cudaDeviceSynchronize();
-    if (kst != cudaSuccess) {
-        err = std::string("内核执行失败：") + cudaGetErrorString(kst);
-        return false;
-    }
-    const cudaError_t dst = cudaMemcpy(out, dout.p, o_bytes, cudaMemcpyDeviceToHost);
-    if (dst != cudaSuccess) {
-        err = std::string("回传（输出）失败：") + cudaGetErrorString(dst);
-        return false;
-    }
     return true;
+}
+
+}  // namespace
+
+bool iq2s_gemv_q8k_cuda(const std::uint8_t* w, int n_rows, int n_blocks, const Q8kBlock* y,
+                        float* out, std::string& err) {
+    if (!check_args(w, y, out, n_rows, n_blocks, err)) return false;
+    const std::size_t w_bytes = static_cast<std::size_t>(n_rows) * n_blocks * kIq2sBlockBytes;
+    DevBuf dw;
+    if (!dw.alloc(w_bytes, "权重", err)) return false;
+    if (!copy_in(dw, w, w_bytes, "权重", err)) return false;
+    return launch_with_host_activation(dw.p, n_rows, n_blocks, y, out, err);
+}
+
+bool iq2s_gemv_q8k_cuda_ddd(const void* d_w, int n_rows, int n_blocks, const void* d_y,
+                            void* d_out, std::string& err) {
+    err.clear();
+    if (d_w == nullptr || d_y == nullptr || d_out == nullptr) {
+        err = "设备入口的指针不完整";
+        return false;
+    }
+    if (n_rows <= 0 || n_blocks <= 0) {
+        err = "设备入口的行数或块数不是正数";
+        return false;
+    }
+    return launch_kernel(d_w, n_rows, n_blocks, d_y, d_out, err);
 }
 
 }  // namespace qinfer::kernels

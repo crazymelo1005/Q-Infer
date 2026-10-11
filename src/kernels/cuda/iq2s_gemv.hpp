@@ -24,4 +24,8 @@ namespace qinfer::kernels {
 bool iq2s_gemv_q8k_cuda(const std::uint8_t* w, int n_rows, int n_blocks, const Q8kBlock* y,
                         float* out, std::string& err);
 
+// 全部在设备上的那一条：权重、激活、输出都是设备指针，只做一次启动与同步，不分配也不拷贝。
+bool iq2s_gemv_q8k_cuda_ddd(const void* d_w, int n_rows, int n_blocks, const void* d_y,
+                            void* d_out, std::string& err);
+
 }  // namespace qinfer::kernels

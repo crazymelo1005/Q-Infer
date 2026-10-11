@@ -25,4 +25,10 @@ namespace qinfer::kernels {
 bool q2_0_gemv_q8_0_cuda(const std::uint8_t* w, int n_rows, int n_blocks, const Q80Block* y,
                          float* out, std::string& err);
 
+// 全部在设备上的那一条：权重、激活、输出都是设备指针，本入口只做一次启动与同步，不分配也不拷贝
+// （`d_y` 是 2×n_blocks 个 Q8_0 块）。常驻路径用它把一次前馈的几个 kernel 串在同一个流上，
+// 中间不与主机同步——接口约束见 [interfaces.md](../interfaces.md) §8.4（每步只有一个汇合点）。
+bool q2_0_gemv_q8_0_cuda_ddd(const void* d_w, int n_rows, int n_blocks, const void* d_y,
+                             void* d_out, std::string& err);
+
 }  // namespace qinfer::kernels
