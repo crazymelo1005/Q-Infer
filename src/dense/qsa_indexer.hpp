@@ -40,4 +40,14 @@ bool indexer_key_append(const QsaShapes& s, std::uint64_t idx_dim, std::uint64_t
                         const std::vector<float>& cos_tab, const std::vector<float>& sin_tab,
                         QsaIndexerState& st, std::string& err);
 
+// 索引器的 q 预处理：`indexer.q_proj` 的输出 (idx_n_head, idx_dim) 要**按头归一**（gamma 是// `indexer.q_norm`，长 idx_dim）再**过 rope**——`qsa_attend` 那一侧的契约说 q_idx 是// "already normed and rotated by the caller"，故这一步归调用方。
+//
+// 而**键**（`indexer.k_proj` 的输出）是原样存进尾巴的：归一只发生在**池化之后**（`indexer_key_append`
+// 里对均值做），旋转也发生在池化之后（在块首 cell 的位置）。故 `k_idx` 就是原样传出——
+// 「把每个原始键先归一再池化」是那个看似合理的错读法，而 norm∘mean ≠ mean∘norm。
+bool qsa_indexer_prep(std::uint64_t idx_n_head, std::uint64_t idx_dim, std::uint64_t n_rot,
+                      std::uint64_t pos, const float* q_proj_out, const float* q_norm_w, float eps,
+                      const std::vector<float>& cos_tab, const std::vector<float>& sin_tab,
+                      float* q_idx, std::string& err);
+
 }  // namespace qinfer::dense

@@ -101,4 +101,28 @@ bool indexer_key_append(const QsaShapes& s, std::uint64_t idx_dim, std::uint64_t
     return true;
 }
 
+bool qsa_indexer_prep(std::uint64_t idx_n_head, std::uint64_t idx_dim, std::uint64_t n_rot,
+                      std::uint64_t pos, const float* q_proj_out, const float* q_norm_w, float eps,
+                      const std::vector<float>& cos_tab, const std::vector<float>& sin_tab,
+                      float* q_idx, std::string& err) {
+    err.clear();
+    if (idx_n_head == 0 || idx_dim == 0) {
+        err = "索引器 q 的几何不成立";
+        return false;
+    }
+    if (n_rot > idx_dim || n_rot % 2 != 0) {
+        err = "n_rot 必须是正偶数且不超过 idx_dim";
+        return false;
+    }
+    if (q_proj_out == nullptr || q_norm_w == nullptr || q_idx == nullptr) {
+        err = "qsa_indexer_prep 的指针不完整";
+        return false;
+    }
+    rms_norm_rows(q_proj_out, idx_n_head, idx_dim, q_norm_w, eps, q_idx);
+    for (std::uint64_t h = 0; h < idx_n_head; ++h) {
+        rope_row(q_idx + h * idx_dim, n_rot, cos_tab, sin_tab, pos);
+    }
+    return true;
+}
+
 }  // namespace qinfer::dense

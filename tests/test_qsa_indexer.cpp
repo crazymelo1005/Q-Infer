@@ -5,6 +5,7 @@
 // 区分开）；块边界按 R 对齐。另把四处错读法各按错的算一遍要求明显偏离。
 #include "dense/qsa_indexer.hpp"
 
+#include "dense/norm.hpp"
 #include "dense/rope.hpp"
 
 #include "check.hpp"
@@ -186,6 +187,57 @@ void test_rival_readings_are_rejected() {
     CHECK(d > 1e-4);
 }
 
+// 索引器的 q 预处理：按头归一 + rope；并钉住「键是**原样**存的」——把每个原始键先归一再池化，// 得到的池化键与正确做法不同（norm∘mean ≠ mean∘norm），这一条把那条错读法挡在外面。
+void test_q_prep_and_raw_keys_stay_raw() {
+    const QsaShapes s = shapes();
+    const std::uint64_t idx_n_head = 4, idx_dim = kDim;
+    const std::vector<float> q_proj = make(idx_n_head * idx_dim);
+    const std::vector<float> q_norm_w = make(idx_dim);
+    std::vector<float> cos_tab, sin_tab;
+    std::string err;
+    CHECK(build_rope_table(kRot, kTheta, 4096, cos_tab, sin_tab, err));
+    std::vector<float> q_idx(idx_n_head * idx_dim, 0.0f);
+    CHECK(qsa_indexer_prep(idx_n_head, idx_dim, kRot, 3, q_proj.data(), q_norm_w.data(), kEps,
+                           cos_tab, sin_tab, q_idx.data(), err));
+    CHECK(err.empty());
+    // 与「自己归一、自己现算角度」的参考比（逐头）。
+    for (std::uint64_t h = 0; h < idx_n_head; ++h) {
+        std::vector<double> row(idx_dim, 0.0);
+        for (std::uint64_t d = 0; d < idx_dim; ++d) row[d] = q_proj[h * idx_dim + d];
+        double ss = 0.0;
+        for (std::uint64_t d = 0; d < idx_dim; ++d) ss += row[d] * row[d];
+        const double scale = 1.0 / std::sqrt(ss / static_cast<double>(idx_dim) + kEps);
+        for (std::uint64_t d = 0; d < idx_dim; ++d) row[d] = scale * row[d] * q_norm_w[d];
+        for (std::uint64_t i = 0; i < kRot / 2; ++i) {
+            const double ang = 3.0 * std::pow(kTheta, -2.0 * static_cast<double>(i) / static_cast<double>(kRot));
+            float oa = 0.0f, ob = 0.0f;
+            rope_neox_pair(static_cast<float>(row[i]), static_cast<float>(row[i + kRot / 2]),
+                           static_cast<float>(std::cos(ang)), static_cast<float>(std::sin(ang)), oa, ob);
+            row[i] = oa;
+            row[i + kRot / 2] = ob;
+        }
+        for (std::uint64_t d = 0; d < idx_dim; ++d) {
+            CHECK(std::fabs(q_idx[h * idx_dim + d] - static_cast<float>(row[d])) < 1e-6f);
+        }
+    }
+    // 键必须**原样**存：拿「先逐个归一」的键去池化，结果与用原始键不同。
+    QsaIndexerState st_raw, st_normed;
+    st_raw.reset(s, idx_dim);
+    st_normed.reset(s, idx_dim);
+    Lcg g;
+    for (std::uint64_t pos = 0; pos < kR; ++pos) {
+        std::vector<float> raw(idx_dim);
+        for (float& t : raw) t = 2.0f * g.next();
+        std::vector<float> prenorm(idx_dim, 0.0f);
+        rms_norm_rows(raw.data(), 1, idx_dim, nullptr, kEps, prenorm.data());
+        CHECK(indexer_key_append(s, idx_dim, pos, kPosBase, raw.data(), q_norm_w.data(), kEps,
+                                 cos_tab, sin_tab, st_raw, err));
+        CHECK(indexer_key_append(s, idx_dim, pos, kPosBase, prenorm.data(), q_norm_w.data(), kEps,
+                                 cos_tab, sin_tab, st_normed, err));
+    }
+    CHECK(rel_l1(st_raw.pooled, st_normed.pooled) > 1e-4);
+}
+
 void test_failures() {
     const QsaShapes s = shapes();
     QsaIndexerState st;
@@ -214,6 +266,7 @@ void test_failures() {
 int main() {
     test_matches_the_reference_and_the_spare_slot();
     test_rival_readings_are_rejected();
+    test_q_prep_and_raw_keys_stay_raw();
     test_failures();
     std::puts("qsa_indexer: 池化（mean→归一→rope，旋转在块首 cell）与备用槽（序列 cell 0 的键）"
               "都与独立参考一致，三处错读法都被拒");
