@@ -21,6 +21,7 @@
 #include "kernels/q8_0.hpp"
 #include "kernels/q8k.hpp"
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -573,15 +574,26 @@ int manual_step_entry(const char* model, int layers, bool fleet) {
         x[i] = 0.05f * static_cast<float>(static_cast<int>(i % 17) - 8);
     }
 
+    // 先跑一遍当热身：把专家字节带进页缓存。不然第一次跑会把「读盘」算进计时的分母里。
+    {
+        qinfer::dense::StepScratch warm;
+        if (!qinfer::dense::prepare_step_scratch(m, 64, 0, warm, err) ||
+            !qinfer::dense::run_step_model(g, m, x.data(), warm, err)) {
+            std::printf("热身那一遍跑不动：%s\n", err.c_str());
+            return 1;
+        }
+    }
     qinfer::dense::StepScratch s_ref;
     if (!qinfer::dense::prepare_step_scratch(m, 64, 0, s_ref, err)) {
         std::printf("预备 scratch 失败：%s\n", err.c_str());
         return 1;
     }
+    const auto t_host0 = std::chrono::steady_clock::now();
     if (!qinfer::dense::run_step_model(g, m, x.data(), s_ref, err)) {
         std::printf("主机路径跑不动：%s\n", err.c_str());
         return 1;
     }
+    const auto t_host1 = std::chrono::steady_clock::now();
 
     CpuExpertWorker cpu;
     std::vector<ComputeGroup> one_group;
@@ -628,10 +640,16 @@ int manual_step_entry(const char* model, int layers, bool fleet) {
         std::printf("预备 scratch（设备路径）失败：%s\n", err.c_str());
         return 1;
     }
+    const auto t_dev0 = std::chrono::steady_clock::now();
     if (!qinfer::dense::run_step_model(g, m2, x.data(), s_dev, err)) {
         std::printf("设备路径跑不动：%s\n", err.c_str());
         return 1;
     }
+    const auto t_dev1 = std::chrono::steady_clock::now();
+    const double host_s = std::chrono::duration<double>(t_host1 - t_host0).count();
+    const double dev_s = std::chrono::duration<double>(t_dev1 - t_dev0).count();
+    std::printf("  用时：主机 %.3f s、设备 %.3f s（设备/主机 %.2f×；设备侧含首次分配与逐层上传）\n",
+                host_s, dev_s, dev_s / host_s);
 
     // 判据：设备路径按 ADR-009/§8.6 是**分布级**的（每层的 h 量化在舍入边界上可能与主机差一个
     // 量化步，48 层把这点差放大成处处不同），故这里量出相对差并要求它小，同时把位相同的个数报出来
