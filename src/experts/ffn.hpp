@@ -66,6 +66,10 @@ bool moe_ffn(const LayerSpec& spec, const ExpertWeights* ws, const float* route_
 // 测试就是这么分开钉的）。累加在 f32，与路由投影 `router_logits` 同口径。
 float shared_scalar_gate(const std::uint16_t* w_bf16, const float* x, std::uint64_t n);
 
+// 同上，但权重声明为 F32 时走这条（ADR-010：按张力声明的档读。S-50 那条「两个操作数都按 bf16
+// 舍入」只属声明为 BF16 的那份 pack）。
+float shared_scalar_gate_f32(const float* w_f32, const float* x, std::uint64_t n);
+
 // 共享专家的一次前馈：三矩阵走 expert_ffn（SwiGLU 在 gate 上），再整体乘标量门 g。
 // out 为 hidden 长、覆盖写。三矩阵的档必须可用、且标量门必须是 1 维 bf16，否则返回 false。
 bool shared_expert_ffn(const SharedSpec& spec, const ExpertWeights& w,

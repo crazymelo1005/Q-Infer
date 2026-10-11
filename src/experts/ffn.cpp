@@ -133,6 +133,15 @@ float shared_scalar_gate(const std::uint16_t* w_bf16, const float* x, std::uint6
     return 1.0f / (1.0f + std::exp(-acc));
 }
 
+// 权重与激活都不舍 bf16（F32×F32），累加在 double 上——与 bf16 那条的差别只在这一点（ADR-010）。
+float shared_scalar_gate_f32(const float* w_f32, const float* x, std::uint64_t n) {
+    double dot = 0.0;
+    for (std::uint64_t j = 0; j < n; ++j) {
+        dot += static_cast<double>(w_f32[j]) * static_cast<double>(x[j]);
+    }
+    return static_cast<float>(1.0 / (1.0 + std::exp(-dot)));
+}
+
 bool shared_expert_ffn(const SharedSpec& spec, const ExpertWeights& w,
                        const std::uint16_t* gate_inp_bf16, const float* x, float* out,
                        FfnScratch& scratch, std::string& err) {
