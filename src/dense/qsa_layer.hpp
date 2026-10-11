@@ -24,6 +24,8 @@
 
 namespace qinfer::dense {
 
+struct KvWindow;  // 常驻窗口（见 dense/kv_window.hpp）：非空时由它管逻辑页的搬入
+
 struct QsaLayer {
     int layer = -1;
     QsaShapes sh;                  // idx_top_k / idx_block / head_dim / n_head / n_head_kv
@@ -64,6 +66,9 @@ struct QsaScratch {
     std::uint64_t pos = 0;
     std::uint64_t pos_base = 0;
     KvPageCache kv;
+    // 常驻窗口（可空）。非空时本层不再假定「表里预填了恒等映射」：写入与聚集前后会经窗口把需要的
+    // 逻辑页搬入、并在本次使用期间钉住（刚写入的那一页也在其中）。见 dense/kv_window.hpp。
+    KvWindow* window = nullptr;
     QsaIndexerState idx_state;
     std::vector<float> cos_tab, sin_tab;
     std::vector<float> q_norm_w, k_norm_w, idx_q_norm_w, idx_k_norm_w;

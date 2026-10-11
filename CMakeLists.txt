@@ -52,6 +52,7 @@ add_library(qinfer_dense
   src/dense/block_layer.cpp
   src/dense/step_loop.cpp
   src/dense/token_embed.cpp
+  src/dense/kv_window.cpp
 )
 target_include_directories(qinfer_dense PUBLIC src)
 target_link_libraries(qinfer_dense PUBLIC qinfer_kernels qinfer_artifact qinfer_experts)
@@ -248,6 +249,9 @@ target_link_libraries(test_step_loop PRIVATE qinfer_dense qinfer_artifact)
 add_executable(test_token_embed tests/test_token_embed.cpp)
 target_link_libraries(test_token_embed PRIVATE qinfer_dense qinfer_artifact)
 
+add_executable(test_kv_window tests/test_kv_window.cpp)
+target_link_libraries(test_kv_window PRIVATE qinfer_dense qinfer_artifact)
+
 add_executable(test_step_record tests/test_step_record.cpp)
 target_link_libraries(test_step_record PRIVATE qinfer_experts)
 
@@ -299,5 +303,6 @@ add_test(NAME model_head COMMAND test_model_head)
 add_test(NAME block_layer COMMAND test_block_layer)
 add_test(NAME step_loop COMMAND test_step_loop)
 add_test(NAME token_embed COMMAND test_token_embed)
+add_test(NAME kv_window COMMAND test_kv_window)
 add_test(NAME bf16_gemv COMMAND test_bf16_gemv)
 add_test(NAME step_record COMMAND test_step_record)

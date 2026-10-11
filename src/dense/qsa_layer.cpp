@@ -1,5 +1,6 @@
 #include "dense/qsa_layer.hpp"
 
+#include "dense/kv_window.hpp"
 #include "dense/norm.hpp"
 #include "dense/qsa_attend.hpp"
 #include "dense/qsa_index.hpp"
@@ -195,6 +196,14 @@ bool project(const artifact::GgufFile& g, const artifact::GgufTensorInfo& t,
     return experts::run_gemv(spec, w.data(), sc, out, err);
 }
 
+// 把逻辑页搬入常驻窗口（非空时）。逻辑页表由窗口自己维护（准入写、驱逐写回 -1）；没挂窗口时表由
+// 调用方预填（恒等映射），这里是空操作。
+bool touch_page(QsaScratch& s, std::uint64_t logical, std::string& err) {
+    if (s.window == nullptr) return true;
+    std::uint64_t phys = 0;
+    return s.window->ensure(logical, phys, err);
+}
+
 }  // namespace
 
 bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const float* x, float* out,
@@ -250,6 +259,18 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
     s.v_f16.assign(s.v_raw.size(), 0);
     for (std::size_t i = 0; i < s.k_ready.size(); ++i) s.k_f16[i] = kernels::f32_to_f16_bits(s.k_ready[i]);
     for (std::size_t i = 0; i < s.v_raw.size(); ++i) s.v_f16[i] = kernels::f32_to_f16_bits(s.v_raw[i]);
+    // 本 cell 所在的逻辑页要常驻，且**在本步内钉住**（刚写进去的 K/V 不能被换出）。
+    bool append_pinned = false;
+    std::uint64_t append_page = 0;
+    if (s.window != nullptr) {
+        if (s.kv.page_size == 0) {
+            err = "挂了常驻窗口但 page_size 是 0";
+            return false;
+        }
+        append_page = s.pos / s.kv.page_size;
+        if (!touch_page(s, append_page, err) || !s.window->pin(append_page, err)) return false;
+        append_pinned = true;
+    }
     if (!kv_append(s.kv, s.pos, KvCell{s.k_f16.data(), s.v_f16.data()}, err)) return false;
 
     // 4. 索引器：q 走 bf16 投影 + 归一 + rope；键走 bf16 投影后**原样**交给池化。
@@ -279,9 +300,26 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
     const std::uint64_t width = qsa_selection_width(n_kv, layer.sh);
     if (!qsa_select(s.scores.data(), n_kv, width, s.ids, err)) return false;
     const std::uint64_t n_ids = s.ids.size();
+    // 选中的 cell 所在页都要常驻（按页去重，只搬一次），并在聚集期间钉住。
+    std::vector<std::uint64_t> gather_pages;
+    if (s.window != nullptr) {
+        for (std::uint64_t id : s.ids) {
+            const std::uint64_t pg = id / s.kv.page_size;
+            bool seen = false;
+            for (std::uint64_t q : gather_pages) {
+                if (q == pg) seen = true;
+            }
+            if (seen) continue;
+            if (!touch_page(s, pg, err) || !s.window->pin(pg, err)) return false;
+            gather_pages.push_back(pg);
+        }
+    }
     s.k_scratch.assign(static_cast<std::size_t>(n_ids * layer.sh.n_head_kv * hd), 0);
     s.v_scratch.assign(s.k_scratch.size(), 0);
     if (!kv_gather(s.kv, s.ids.data(), n_ids, s.k_scratch.data(), s.v_scratch.data(), err)) return false;
+    for (std::uint64_t pg : gather_pages) {
+        if (!s.window->unpin(pg, err)) return false;
+    }
 
     // 6. softmax GQA → 乘门 → 输出投影。
     s.attn.assign(static_cast<std::size_t>(layer.sh.n_head * hd), 0.0f);
@@ -296,6 +334,7 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
     if (!project(gguf, *layer.t_out, layer.out, s.gated.data(), s.w_out, s.gemv, out, err)) {
         return false;
     }
+    if (append_pinned && !s.window->unpin(append_page, err)) return false;
     ++s.pos;
     return true;
 }
