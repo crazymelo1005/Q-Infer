@@ -28,4 +28,21 @@ inline std::uint16_t f32_to_bf16_bits(float s) {
     return static_cast<std::uint16_t>((u + (0x7FFFu + ((u >> 16) & 1u))) >> 16);
 }
 
+// bf16 权重的一行点积式投影：`out[o] = Σ_i bf16(w[o·cols+i]) · bf16(x[i])`，累加在 float 上。
+//
+// 两处口径，都有实测来源：**激活也要按 bf16 舍入**（权重是 bf16 时 ggml 会把激活转到权重的 vec_dot_type；
+// 引擎自注此处的路由投影若改用 fp16 会引入 8.100e-03 的误差并翻掉选择，见 S-44）；累加在 float 上。
+// 三处用同一份：路由门控（S-44）、以及 QSA 索引器的两个投影（那份 artifact 里它们是 BF16，见 S-54）。
+inline void bf16_gemv(const std::uint16_t* w_bf16, std::uint64_t rows, std::uint64_t cols,
+                      const float* x, float* out) {
+    for (std::uint64_t o = 0; o < rows; ++o) {
+        const std::uint16_t* row = w_bf16 + o * cols;
+        float acc = 0.0f;
+        for (std::uint64_t i = 0; i < cols; ++i) {
+            acc += bf16_bits_to_f32(row[i]) * bf16_bits_to_f32(f32_to_bf16_bits(x[i]));
+        }
+        out[o] = acc;
+    }
+}
+
 }  // namespace qinfer::kernels

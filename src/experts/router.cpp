@@ -32,15 +32,10 @@ bool read_router_spec(const artifact::GgufFile& gguf, int layer, RouterSpec& spe
 
 void router_logits(const std::uint16_t* w_bf16, int n_expert, int hidden, const float* x,
                    float* logits) {
-    for (int e = 0; e < n_expert; ++e) {
-        const std::uint16_t* row = w_bf16 + static_cast<std::size_t>(e) * hidden;
-        float acc = 0.0f;
-        for (int j = 0; j < hidden; ++j) {
-            acc += kernels::bf16_bits_to_f32(row[j]) * kernels::bf16_bits_to_f32(
-                                                          kernels::f32_to_bf16_bits(x[j]));
-        }
-        logits[e] = acc;
-    }
+    // 与 QSA 索引器那两个 BF16 投影同一份算术（权重与激活都按 bf16 读、float 累加），
+    // 故直接走共用那一份，免得两处各写一遍口径。
+    kernels::bf16_gemv(w_bf16, static_cast<std::uint64_t>(n_expert),
+                       static_cast<std::uint64_t>(hidden), x, logits);
 }
 
 void router_topk(const float* logits, int n_expert, int k, RouterScratch& s, int* ids,

@@ -186,6 +186,9 @@ target_link_libraries(test_expert_worker PRIVATE qinfer_experts)
 add_executable(test_layer_dispatch tests/test_layer_dispatch.cpp)
 target_link_libraries(test_layer_dispatch PRIVATE qinfer_experts)
 
+add_executable(test_bf16_gemv tests/test_bf16_gemv.cpp)
+target_link_libraries(test_bf16_gemv PRIVATE qinfer_kernels)
+
 add_executable(test_qsa_layer tests/test_qsa_layer.cpp)
 target_link_libraries(test_qsa_layer PRIVATE qinfer_dense qinfer_artifact)
 
@@ -271,4 +274,5 @@ add_test(NAME norm COMMAND test_norm)
 add_test(NAME kv_page_cache COMMAND test_kv_page_cache)
 add_test(NAME qsa_qk_prep COMMAND test_qsa_qk_prep)
 add_test(NAME qsa_layer COMMAND test_qsa_layer)
+add_test(NAME bf16_gemv COMMAND test_bf16_gemv)
 add_test(NAME step_record COMMAND test_step_record)
