@@ -526,23 +526,42 @@ int manual_step_entry(const char* model) {
         return 1;
     }
 
+    // 判据：设备路径按 ADR-009/§8.6 是**分布级**的（每层的 h 量化在舍入边界上可能与主机差一个
+    // 量化步，48 层把这点差放大成处处不同），故这里量出相对差并要求它小，同时把位相同的个数报出来
+    // ——不假装逐位一致，也不因为不逐位就判它错。
     const std::vector<float>& a = s_ref.head.logits;
     const std::vector<float>& b = s_dev.head.logits;
     int same = 0;
-    double mag = 0.0;
+    double mag_ref = 0.0, mag_dev = 0.0, l1 = 0.0, max_abs = 0.0;
+    std::size_t first_diff = a.size();
     for (std::size_t i = 0; i < a.size() && i < b.size(); ++i) {
-        if (std::bit_cast<std::uint32_t>(a[i]) == std::bit_cast<std::uint32_t>(b[i])) ++same;
-        mag += std::fabs(static_cast<double>(b[i]));
+        const double d = std::fabs(static_cast<double>(b[i]) - static_cast<double>(a[i]));
+        if (std::bit_cast<std::uint32_t>(a[i]) == std::bit_cast<std::uint32_t>(b[i])) {
+            ++same;
+        } else if (first_diff == a.size()) {
+            first_diff = i;
+        }
+        if (d > max_abs) max_abs = d;
+        l1 += d;
+        mag_ref += std::fabs(static_cast<double>(a[i]));
+        mag_dev += std::fabs(static_cast<double>(b[i]));
     }
-    std::printf("整模型一步（48 层逐层交出）：logits 逐位一致：%s（位相同 %d/%zu，|logits| 合计 %.6g）\n",
-                same == static_cast<int>(a.size()) ? "是" : "否", same, a.size(), mag);
+    const double rel = mag_ref > 0.0 ? l1 / mag_ref : l1;
+    std::printf("整模型一步（48 层逐层交出）：|logits| 主机 %.6g / 设备 %.6g；L1 相对差 %.3g；"
+                "最大绝对差 %.3g；位相同 %d/%zu（首个不同在 %zu）\n",
+                mag_ref, mag_dev, rel, max_abs, same, a.size(), first_diff);
     std::printf("  选组 routed=%llu rerouted=%llu；工人 jobs=%llu experts=%llu failed=%llu；常驻 %.1f MiB\n",
                 (unsigned long long) rs.routed, (unsigned long long) rs.rerouted,
                 (unsigned long long) worker.stats().jobs,
                 (unsigned long long) worker.stats().experts,
                 (unsigned long long) worker.stats().failed,
                 static_cast<double>(worker.resident_bytes()) / (1024.0 * 1024.0));
-    if (a.size() != b.size() || same != static_cast<int>(a.size())) return 1;
+    if (a.size() != b.size()) return 1;
+    // 分布级判据（ADR-009）：不是逐位，但差异要小到能说明两边算的是同一件事。
+    if (!(rel < 1e-4)) {
+        std::printf("  两条路的差异超出分布级容差\n");
+        return 1;
+    }
     if (rs.rerouted != 0) {
         std::printf("  有重派：说明有层没被设备侧接住\n");
         return 1;
