@@ -79,6 +79,7 @@
 | lookahead / `STRATA_LOOKAHEAD` | Strata 的跨层预测性预取开关；深度由 `STRATA_LOOKAHEAD_K` 定 |
 | `STRATA_IO_PREFETCH` / `STRATA_IO_PF_STAGE` | Strata 的文件层整块预取与「暂存式」预取变体。后者在 16GB 内存 lane 实测 −32.6%、32GB lane +25.7%，故默认关闭（见 [design/gates.md](design/gates.md) 的 G-10） |
 | 共现图 / co-occurrence | 维护「同一 token 或同一会话内被一起激活」的专家对统计，作为专家替换策略的输入。属概率性预测，与 §4 的确定性表行索引不同级 |
+| 计算组（compute group） | 后端接入的最小单位：设备 + 队列 + 内存池 + 能力表 + 它争用的那一种资源（过 PCIe 的字节或共享 DDR 的份额）。CPU、核显、每张 CUDA 卡各是一组，见 [ADR-011](design/adr/ADR-011-compute-group-abstraction.md) 与 [design/interfaces.md](design/interfaces.md) 第 8 节 |
 | 三类流量 | 过 PCIe 的三类搬运：专家权重、n-gram 表行、KV。区别于「四条数据流」——「专家流（RAM→CPU）」走内存总线，不过 PCIe。§4.1 的字节预算仲裁的对象就是这三类 |
 | scatter-add | 把 CPU 与 GPU 各自算出的专家结果按专家 slot 累加合并到同一输出缓冲区（[engine.md](design/engine.md) §6） |
 | prompt lookup / suffix | 一种投机起草：从上下文已有文本里抄若干 token 当草稿（最多 5）。代码改写类提速 6–11%，其它文本基本不变（`research/01` §6 / `research/04`） |

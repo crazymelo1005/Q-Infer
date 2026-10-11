@@ -56,7 +56,7 @@
 
 ## 接口与边界
 
-- 接口：见 [interfaces.md](../interfaces.md) 第 8 节。该节只覆盖「专家分担」这一条缝；本节第一部分的三处无条件用途是各自独立的管线，不经过它。接口本身不绑定图形 API。
+- 接口：见 [interfaces.md](../interfaces.md) 第 8 节与 [ADR-011](ADR-011-compute-group-abstraction.md)。该节只覆盖「专家分担」这一条缝，核显是其中的一个计算组；本节第一部分的三处无条件用途是各自独立的管线，不经过它。接口本身不绑定图形 API。
 - 边界：核显与 CPU 总吞吐共同受 ≈70GB/s 约束。
 
 接口与运行时的实测现状（2026-10-10，工具 `measure/igpu_probe.c`，记录 `measure/results/20261010T195533-igpuprobe-环境2.json`）：
