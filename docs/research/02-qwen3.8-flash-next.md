@@ -304,6 +304,8 @@ MTP 头在 HF 上不是一个单独文件：官方 checkpoint（`Qwen/Qwen3.8-Fl
 
 这一层前向的上游权威在环境2 本机上就有：`~/projects/ref_repos/vllm` 是 **v0.31.0**，实现落在 `vllm/models/qwen4_exp/nvidia/mtp.py`（与 `amd/mtp.py`），配套 `common/hyperconnection.py`、`nvidia/indexer_qsa.py`、`nvidia/qsa.py`、`nvidia/ple_layer.py`。**注意版本差**：参考引擎的 `mtp.hpp` 自述转写自 vLLM **0.30.0** 的 `qwen4_exp`，而本机这份是 **0.31.0**——两边对同一层若有改动，需以本机这份为准并回头核对引擎那份是否同步（同 `spec 4`/`spec 6` 那类不一致，登记时不要混用）。社区那份 `blk.48.*` 的 `nextn.eh_proj`/`enorm`/`hnorm` 命名即出自这条上游线（llama.cpp 侧同样有 `src/models/qwen4exp.cpp` 与 `conversion/qwen4exp.py`，在 `strata-run/third_party/llama.cpp/` 下）。
 
+**入口两方言的等价性已由上游证实**（`vllm/models/qwen4_exp/nvidia/mtp.py` v0.31.0，2026-10-11 读取）：l.190-191 的注释明写「`residual_linear_shared` fusion: fc_embedding projects the token embedding, **fc_hidden (shared across HC branches)** projects the ...」——fc_hidden 是**跨 hc 条流共用**的一张矩阵；l.294-296 是 embedding 支（`pre_fc_norm_embedding` → `fc_embedding` → [T, H]）；l.304-307 是残差支（`pre_fc_norm_hidden(hidden_states.flatten(-2))` 先把 hc 维压平、**整栈 HC·N 一次归一**，再 `.view(...)` 变回逐流后调 `fc_hidden`）。与引擎那份的 `mtp.cpp` l.488-497 逐句对应。故社区那份把两张矩阵融进 `eh_proj`（输入轴 5120 = 2560 + 2560）后，**逐流**应用它就等价于「engine 的 `fc_embedding@e` 广播 + `fc_hidden@h_c`」——两种 pack 在数学上同一件事，只是融合让「共享的 e 那半」也跟着按流算了一遍（结果相同）。社区那份的 `enorm`/`hnorm`/`eh_proj` 命名出自 llama.cpp 的转换脚本，vLLM 本体仍叫 `pre_fc_norm_*`/`fc_*`。
+
 ## 来源
 
 | 编号 | 用于章节 | 内容 |
