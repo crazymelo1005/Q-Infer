@@ -103,4 +103,17 @@ bool run_step_model(const artifact::GgufFile& gguf, const StepModel& model, cons
     return run_model_head(gguf, model.head, s.R.data(), s.head, err);
 }
 
+bool run_token_step(const artifact::GgufFile& gguf, const StepModel& model, const TokenEmbed& e,
+                    std::uint64_t token, StepScratch& s, std::string& err) {
+    err.clear();
+    if (e.n_embd != model.cfg.n_embd) {
+        err = "TokenEmbed 的行宽 " + std::to_string(e.n_embd) + " 与模型的 n_embd " +
+              std::to_string(model.cfg.n_embd) + " 不一致";
+        return false;
+    }
+    s.embd.assign(static_cast<std::size_t>(e.n_embd), 0.0f);
+    if (!read_token_embedding(gguf, e, token, s.embd.data(), err)) return false;
+    return run_step_model(gguf, model, s.embd.data(), s, err);
+}
+
 }  // namespace qinfer::dense

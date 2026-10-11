@@ -21,6 +21,7 @@
 #include "dense/block_layer.hpp"
 #include "dense/layer_map.hpp"
 #include "dense/model_head.hpp"
+#include "dense/token_embed.hpp"
 
 namespace qinfer::dense {
 
@@ -55,8 +56,9 @@ bool build_step_model(const artifact::GgufFile& gguf, const StepConfig& cfg, Ste
 struct StepScratch {
     std::vector<BlockScratch> blocks;
     HeadScratch head;
-    std::vector<float> R;  // hc·n_embd
-    bool ready = false;    // QSA 层的 KV 与 rope 是否已配好（未配则 run 明确报错）
+    std::vector<float> R;     // hc·n_embd
+    std::vector<float> embd;  // n_embd，`run_token_step` 读进来的那一行 token embedding
+    bool ready = false;       // QSA 层的 KV 与 rope 是否已配好（未配则 run 明确报错）
 };
 
 // 给每层 QSA 配分页 KV（`n_pages` 个物理页、恒等页表）与 rope 表；`pos_base` 是序列首个 cell 的位置
@@ -67,5 +69,10 @@ bool prepare_step_scratch(const StepModel& model, std::uint64_t n_pages, std::ui
 // 跑一个 token：`x_embd` 长 n_embd（残差栈的初值来源）。logits 在 `s.head.logits`（长 = 词表）。
 bool run_step_model(const artifact::GgufFile& gguf, const StepModel& model, const float* x_embd,
                     StepScratch& s, std::string& err);
+
+// 便捷入口：从 token id 读 embedding 行（`token_embd.weight`）再跑一步。等价于先
+// `read_token_embedding` 到 `s.embd` 再 `run_step_model(..., s.embd.data(), ...)`。
+bool run_token_step(const artifact::GgufFile& gguf, const StepModel& model, const TokenEmbed& e,
+                    std::uint64_t token, StepScratch& s, std::string& err);
 
 }  // namespace qinfer::dense

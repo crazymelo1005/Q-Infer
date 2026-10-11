@@ -14,6 +14,7 @@
 
 #include "check.hpp"
 #include "kernels/bf16.hpp"
+#include "kernels/fp16.hpp"
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -212,11 +213,35 @@ std::vector<TensorSpec> head_tensors() {
     return ts;
 }
 
+// token_embd.weight：IQ4_XS，[256 × 8]。d = fp16(0.5 + 0.1·r)、尺度字节固定成 ls = 33（dl = d）、
+// 码字节按 (j·7 + r·13 + 5 + ib) 变化（与 test_token_embed 同一套构造）。
+void push_row_block(std::vector<std::uint8_t>& out, std::uint64_t r) {
+    const std::uint16_t d = kernels::f32_to_f16_bits(0.5f + 0.1f * static_cast<float>(r));
+    out.push_back(static_cast<std::uint8_t>(d & 0xFF));
+    out.push_back(static_cast<std::uint8_t>(d >> 8));
+    out.push_back(0xAA);
+    out.push_back(0xAA);
+    for (int i = 0; i < 4; ++i) out.push_back(0x11);
+    for (int ib = 0; ib < 8; ++ib) {
+        for (int j = 0; j < 16; ++j) {
+            out.push_back(
+                static_cast<std::uint8_t>((j * 7 + static_cast<int>(r) * 13 + 5 + ib) & 0xFF));
+        }
+    }
+}
+
+std::vector<std::uint8_t> token_embd_data() {
+    std::vector<std::uint8_t> data;
+    for (std::uint64_t r = 0; r < kVocab; ++r) push_row_block(data, r);
+    return data;
+}
+
 // 两层的小模型：层 0 GDN、层 1 QSA。两层的 hc 权重不同（norm 基值 1.0），靠层类型差异把「层序对调」暴露。
 std::vector<TensorSpec> model_tensors() {
     std::vector<TensorSpec> ts = layer_tensors("blk.0.", /*gdn=*/true, 1.0f);
     append(ts, layer_tensors("blk.1.", /*gdn=*/false, 2.0f));
     append(ts, head_tensors());
+    ts.push_back({"token_embd.weight", {kN, kVocab}, 23, token_embd_data()});
     return ts;
 }
 
@@ -407,6 +432,53 @@ void test_failures() {
     }
 }
 
+// token id → embedding 行 → 步循环 → logits → 贪心下一个 token：最小的生成环。
+void test_token_generation() {
+    const std::filesystem::path p = write_gguf("qinfer_step_gen.gguf", model_tensors());
+    artifact::GgufFile g;
+    std::string err;
+    CHECK(g.open(p.string(), err));
+    StepModel m;
+    CHECK(build_step_model(g, two_layer_config(), m, err));
+    TokenEmbed e;
+    CHECK(build_token_embed(g, kN, e, err));
+    CHECK(e.vocab == kVocab);
+
+    const auto generate = [&](std::vector<std::uint64_t>& seq) {
+        StepScratch s;
+        CHECK(prepare_step_scratch(m, 4, 0, s, err));
+        std::uint64_t tok = 3;  // 起点
+        for (int i = 0; i < 3; ++i) {
+            CHECK(run_token_step(g, m, e, tok, s, err));
+            CHECK(err.empty());
+            for (float v : s.head.logits) CHECK(std::isfinite(v));
+            tok =
+                static_cast<std::uint64_t>(greedy_argmax(s.head.logits.data(), s.head.logits.size()));
+            CHECK(tok < e.vocab);
+            seq.push_back(tok);
+        }
+    };
+    std::vector<std::uint64_t> seq0, seq1;
+    generate(seq0);
+    generate(seq1);
+    CHECK(seq0.size() == 3 && seq0 == seq1);  // 两次独立跑给出同一串
+    std::printf("  贪心生成 3 个 token：%llu → %llu → %llu\n", (unsigned long long) seq0[0],
+                (unsigned long long) seq0[1], (unsigned long long) seq0[2]);
+
+    // run_token_step 与「先读 embedding 再 run_step_model」等价（同配置逐位同 logits）。
+    StepScratch a, b;
+    CHECK(prepare_step_scratch(m, 4, 0, a, err));
+    CHECK(prepare_step_scratch(m, 4, 0, b, err));
+    CHECK(run_token_step(g, m, e, 5, a, err));
+    std::vector<float> row(kN, 0.0f);
+    CHECK(read_token_embedding(g, e, 5, row.data(), err));
+    CHECK(run_step_model(g, m, row.data(), b, err));
+    for (std::size_t i = 0; i < a.head.logits.size(); ++i) {
+        CHECK(std::bit_cast<std::uint32_t>(a.head.logits[i]) ==
+              std::bit_cast<std::uint32_t>(b.head.logits[i]));
+    }
+}
+
 // 真模型手工入口：整模型跑几个 token，打印判型摘要与 logits 概况。
 int manual_model_entry(const char* model, int tokens) {
     artifact::GgufFile g;
@@ -484,7 +556,8 @@ int main(int argc, char** argv) {
     test_order_and_layers_matter();
     test_state_advances();
     test_failures();
+    test_token_generation();
     std::puts("step_loop: 按层表串起 GDN+QSA 两层并出 logits；层序对调 / 少跑一层 / 不跑循环都可观测，"
-              "逐层状态各归各层，三种接错都明确报错");
+              "逐层状态各归各层，token→embedding→logits→贪心的最小生成环可复现，三种接错都明确报错");
     return 0;
 }
