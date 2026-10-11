@@ -11,8 +11,9 @@
 //   3. 一批里同时出现常驻与临时缓冲两种来源仍然正确（这一路抓「临时区被下一次读覆写」）。
 //   4. 字节预算用尽时全走临时缓冲仍然正确。
 //   5. 钉住的槽位算完要解开：引用计数漏解会让这些槽位再也换不掉，用 blocked 计数抓。
-//   6. 首选工人不可用时改派 fallback，结果不变、且不可用的那个不该被调用（失败计数为 0）。
-//   7. 参数不合法（n 为 0、空指针）明确失败。
+//   6. 选组：不可用的组直接跳过（不被调用），档不齐的组不接，只有兜底组接得住时才用它。
+//   7. 选中的组提交失败时改派兜底组，结果不变，且选组时记进本步份额的字节要退回。
+//   8. 参数不合法（n 为 0、空指针）明确失败。
 #include "experts/layer_dispatch.hpp"
 
 #include "check.hpp"
@@ -30,6 +31,22 @@
 #include <fstream>
 #include <string>
 #include <vector>
+
+namespace {
+
+// 测试用：只有 CPU 组的候选列表（多数用例只需要它）。
+std::vector<qinfer::experts::ComputeGroup> cpu_only(qinfer::experts::ExpertWorker& cpu) {
+    return {qinfer::experts::cpu_group(cpu)};
+}
+
+// 测试用：核显组（持份额限流器）+ CPU 兜底组。
+std::vector<qinfer::experts::ComputeGroup> igpu_only(qinfer::experts::ExpertWorker& igpu,
+                                                     qinfer::experts::ExpertWorker& cpu,
+                                                     qinfer::scheduling::BusShareLimiter& bus) {
+    return {qinfer::experts::igpu_group(igpu, bus), qinfer::experts::cpu_group(cpu)};
+}
+
+}  // namespace
 
 using namespace qinfer;
 using namespace qinfer::experts;
@@ -305,7 +322,7 @@ void test_matches_direct_and_accumulates() {
     LayerDispatchScratch ds;
     RerouteStats rs{};
     std::string err;
-    CHECK(dispatch_layer_batch(fx.ml, src, cpu, cpu, ids.data(), w.data(),
+    CHECK(dispatch_layer_batch(fx.ml, src, cpu_only(cpu), ids.data(), w.data(),
                                static_cast<int>(ids.size()), x.data(), got.data(), ds, rs, err));
     CHECK(err.empty());
     CHECK(rs.routed == 1 && rs.rerouted == 0);
@@ -339,7 +356,7 @@ void test_input_order_does_not_change_output() {
         LayerDispatchScratch ds;
         RerouteStats rs{};
         std::string err;
-        CHECK(dispatch_layer_batch(fx.ml, src, cpu, cpu, p.data(), pw.data(),
+        CHECK(dispatch_layer_batch(fx.ml, src, cpu_only(cpu), p.data(), pw.data(),
                                    static_cast<int>(p.size()), x.data(), got.data(), ds, rs, err));
         CHECK(same_bits(got, want, "换传参顺序"));
         if (!prev.empty()) CHECK(same_bits(got, prev, "两次排列之间"));
@@ -363,7 +380,7 @@ void test_resident_and_transient_in_one_batch() {
     LayerDispatchScratch ds;
     RerouteStats rs{};
     std::string err;
-    CHECK(dispatch_layer_batch(fx.ml, src, cpu, cpu, ids.data(), w.data(), 3, x.data(), got.data(),
+    CHECK(dispatch_layer_batch(fx.ml, src, cpu_only(cpu), ids.data(), w.data(), 3, x.data(), got.data(),
                                ds, rs, err));
     CHECK(err.empty());
     CHECK(src.blocked_admissions() == 2);  // 后两个都走了「组内全不可驱逐」
@@ -384,7 +401,7 @@ void test_budget_exhausted_goes_transient() {
     LayerDispatchScratch ds;
     RerouteStats rs{};
     std::string err;
-    CHECK(dispatch_layer_batch(fx.ml, src, cpu, cpu, ids.data(), w.data(), 3, x.data(), got.data(),
+    CHECK(dispatch_layer_batch(fx.ml, src, cpu_only(cpu), ids.data(), w.data(), 3, x.data(), got.data(),
                                ds, rs, err));
     CHECK(src.transient_reads() == 3);
     CHECK(src.residents() == 0);
@@ -408,7 +425,7 @@ void test_pinned_slots_are_released() {
         const std::vector<float> w(ids.size(), 0.5f);
         src.begin_token();
         std::vector<float> got(static_cast<std::size_t>(kHidden), 0.0f);
-        CHECK(dispatch_layer_batch(fx.ml, src, cpu, cpu, ids.data(), w.data(),
+        CHECK(dispatch_layer_batch(fx.ml, src, cpu_only(cpu), ids.data(), w.data(),
                                    static_cast<int>(ids.size()), x.data(), got.data(), ds, rs,
                                    err));
         CHECK(same_bits(got, direct_reference(fx.g, fx.ml, ids, w, x.data(), 0.0f), "换槽位轮次"));
@@ -417,7 +434,8 @@ void test_pinned_slots_are_released() {
     CHECK(src.residents() == 2);
 }
 
-void test_reroute_keeps_results() {
+void test_unavailable_group_is_skipped() {
+    // 核显组不可用（份额也没给）：选组要直接跳过它、用 CPU 组，而不是「先提交、失败、再改派」。
     const Fixture fx("qinfer_dispatch_reroute.gguf", 3);
     const std::vector<float> x = make_x();
     const std::vector<int> ids{1, 3, 0};
@@ -427,17 +445,50 @@ void test_reroute_keeps_results() {
     src.begin_token();
     IgpuExpertWorker igpu(/*device_usable=*/false);
     CpuExpertWorker cpu;
+    qinfer::scheduling::BusShareLimiter bus(0);  // 份额为 0 即关闭
     std::vector<float> got(static_cast<std::size_t>(kHidden), 0.0f);
     LayerDispatchScratch ds;
     RerouteStats rs{};
     std::string err;
-    CHECK(dispatch_layer_batch(fx.ml, src, igpu, cpu, ids.data(), w.data(), 3, x.data(), got.data(),
-                               ds, rs, err));
+    CHECK(dispatch_layer_batch(fx.ml, src, igpu_only(igpu, cpu, bus), ids.data(), w.data(), 3,
+                               x.data(), got.data(), ds, rs, err));
+    CHECK(err.empty());
+    CHECK(rs.routed == 1 && rs.rerouted == 0);
+    // 不可用的组不该被调用：它的计数必须保持 0（否则观测里会全是假失败）。
+    CHECK(igpu.stats().jobs == 0 && igpu.stats().failed == 0);
+    CHECK(same_bits(got, direct_reference(fx.g, fx.ml, ids, w, x.data(), 0.0f), "跳过不可用的组"));
+}
+
+void test_selected_group_failure_reroutes_and_refunds_share() {
+    // 一个「可用、档也齐、份额也够」的组被选中后提交失败：这一批改派给 CPU 组，且选组时记进本步
+    // 份额的字节要原额退回——不退的话，被白吃的尝试会把本步的份额耗掉（interfaces §8.3）。
+    const Fixture fx("qinfer_dispatch_refund.gguf", 3);
+    const std::vector<float> x = make_x();
+    const std::vector<int> ids{0, 2, 3};
+    const std::vector<float> w{0.5f, 0.3f, 0.2f};
+
+    ExpertSource src = fx.source(8, 1, 0);
+    src.begin_token();
+    IgpuExpertWorker igpu(/*device_usable=*/true);  // 可用，但内核还没接入 -> submit 必定失败
+    CpuExpertWorker cpu;
+    qinfer::scheduling::BusShareLimiter bus(64ull * 1024 * 1024);  // 份额给足，选组会选中它
+    ComputeGroup lazy = igpu_group(igpu, bus);
+    lazy.caps.formats = supported_format_mask();  // 刻意做成「档齐、但算不了」的组
+    std::vector<ComputeGroup> groups{lazy, cpu_group(cpu)};
+
+    std::vector<float> got(static_cast<std::size_t>(kHidden), 0.0f);
+    LayerDispatchScratch ds;
+    RerouteStats rs{};
+    std::string err;
+    CHECK(dispatch_layer_batch(fx.ml, src, groups, ids.data(), w.data(), 3, x.data(), got.data(), ds,
+                               rs, err));
     CHECK(err.empty());
     CHECK(rs.rerouted == 1 && rs.routed == 0);
-    // 不可用的工人不该被调用：它的失败计数必须保持 0（否则观测里会全是假失败）。
-    CHECK(igpu.stats().failed == 0);
-    CHECK(same_bits(got, direct_reference(fx.g, fx.ml, ids, w, x.data(), 0.0f), "重派到 CPU"));
+    CHECK(igpu.stats().failed == 1);  // 它被调过，且失败了
+    CHECK(cpu.stats().jobs == 1);     // 结果由兜底组给出
+    CHECK(bus.used() == 0);           // 份额退了回去
+    CHECK(bus.refusals() == 0);       // 选组时是受理，不是被拒
+    CHECK(same_bits(got, direct_reference(fx.g, fx.ml, ids, w, x.data(), 0.0f), "改派后的结果"));
 }
 
 void test_reduction_order_is_expert_id_ascending() {
@@ -471,7 +522,7 @@ void test_reduction_order_is_expert_id_ascending() {
     std::vector<float> got(hidden, 0.0f);
     LayerDispatchScratch ds;
     RerouteStats rs{};
-    CHECK(dispatch_layer_batch(fx.ml, src, cpu, cpu, ids.data(), w.data(), 3, x.data(), got.data(),
+    CHECK(dispatch_layer_batch(fx.ml, src, cpu_only(cpu), ids.data(), w.data(), 3, x.data(), got.data(),
                                ds, rs, err));
     CHECK(rank_is_ascending_by_id(ids, ds.order));
     CHECK(same_bits(got, ref_id, "批量路径与 id 升序参考"));
@@ -489,15 +540,15 @@ void test_bad_inputs_fail_loudly() {
     std::vector<float> got(static_cast<std::size_t>(kHidden), 0.0f);
 
     std::string err;
-    CHECK(!dispatch_layer_batch(fx.ml, src, cpu, cpu, ids.data(), w.data(), 0, x.data(), got.data(),
+    CHECK(!dispatch_layer_batch(fx.ml, src, cpu_only(cpu), ids.data(), w.data(), 0, x.data(), got.data(),
                                 ds, rs, err));
     CHECK(!err.empty());
     err.clear();
-    CHECK(!dispatch_layer_batch(fx.ml, src, cpu, cpu, nullptr, w.data(), 1, x.data(), got.data(),
+    CHECK(!dispatch_layer_batch(fx.ml, src, cpu_only(cpu), nullptr, w.data(), 1, x.data(), got.data(),
                                 ds, rs, err));
     CHECK(!err.empty());
     err.clear();
-    CHECK(!dispatch_layer_batch(fx.ml, src, cpu, cpu, ids.data(), w.data(), 1, nullptr, got.data(),
+    CHECK(!dispatch_layer_batch(fx.ml, src, cpu_only(cpu), ids.data(), w.data(), 1, nullptr, got.data(),
                                 ds, rs, err));
     CHECK(!err.empty());
     // 三个坏用例都没有提交作业，故工人的计数保持 0（观测里不该出现假作业）。
@@ -548,7 +599,7 @@ int manual_model_entry(const char* model, int layer, int k) {
     std::vector<float> got(hidden, 0.0f);
     LayerDispatchScratch ds;
     RerouteStats rs{};
-    if (!dispatch_layer_batch(ml, src, cpu, cpu, ids.data(), wts.data(), k, x.data(), got.data(), ds,
+    if (!dispatch_layer_batch(ml, src, cpu_only(cpu), ids.data(), wts.data(), k, x.data(), got.data(), ds,
                               rs, err)) {
         std::printf("批量路径失败：%s\n", err.c_str());
         return 1;
@@ -588,9 +639,10 @@ int main(int argc, char** argv) {
     test_resident_and_transient_in_one_batch();
     test_budget_exhausted_goes_transient();
     test_pinned_slots_are_released();
-    test_reroute_keeps_results();
+    test_unavailable_group_is_skipped();
+    test_selected_group_failure_reroutes_and_refunds_share();
     test_reduction_order_is_expert_id_ascending();
     test_bad_inputs_fail_loudly();
-    std::puts("layer_dispatch: 批取、钉住与拷出、重派、以及按专家 id 全序归并都成立");
+    std::puts("layer_dispatch: 批取、钉住与拷出、选组与重派退份额、以及按专家 id 全序归并都成立");
     return 0;
 }

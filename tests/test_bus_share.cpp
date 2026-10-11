@@ -1,7 +1,8 @@
 // DDR 总线份额限流器的回归（interfaces.md 第 8.2 节）。不引第三方框架。
 //
-// 四条：默认 0 即关闭、关闭时一律不受理（含 0 字节）；份额内可以累计用完、刚好等量时仍可；
-// 单次超过份额直接拒（不做部分准入）；每步清零后可以重新用。
+// 五条：默认 0 即关闭、关闭时一律不受理（含 0 字节）；份额内可以累计用完、刚好等量时仍可；
+// 单次超过份额直接拒（不做部分准入）；每步清零后可以重新用；退回本步已记的份额（重派用），
+// 退得比记的多要拒绝而不是静默夹到 0。
 #include "scheduling/bus_share.hpp"
 
 #include "check.hpp"
@@ -71,6 +72,21 @@ void test_start_step_resets_usage() {
     CHECK(lim.refusals() == 1);  // 拒收计数不随步清零（它是累计观测量）
 }
 
+void test_release_returns_the_booking() {
+    BusShareLimiter lim(10 * kMib);
+    CHECK(lim.try_acquire(4 * kMib));
+    CHECK(lim.release(4 * kMib));
+    CHECK(lim.used() == 0);
+    CHECK(lim.remaining() == 10 * kMib);
+    CHECK(lim.refusals() == 0);  // 退回不是拒收
+    // 退得比记的多：拒绝并保持原状，不静默夹到 0——账本不一致要能被看见。
+    CHECK(lim.try_acquire(3 * kMib));
+    CHECK(!lim.release(3 * kMib + 1));
+    CHECK(lim.used() == 3 * kMib);
+    CHECK(lim.release(3 * kMib));
+    CHECK(lim.used() == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -79,6 +95,7 @@ int main() {
     test_oversized_single_request_is_refused_whole();
     test_zero_byte_request_does_not_consume_nor_count();
     test_start_step_resets_usage();
-    std::puts("bus_share: 份额为 0 即关闭、份额内累计、超量整拒、每步清零");
+    test_release_returns_the_booking();
+    std::puts("bus_share: 份额为 0 即关闭、份额内累计、超量整拒、每步清零、退回不夹零");
     return 0;
 }

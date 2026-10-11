@@ -49,7 +49,7 @@ bool CpuExpertWorker::wait(std::string& err) {
 bool IgpuExpertWorker::submit(const ExpertJob& job, std::string& err) {
     (void) job;
     ++stats_.failed;
-    err = device_usable_ ? "核显内核尚未接入（interfaces §8.6）"
+    err = device_usable_ ? "核显内核尚未接入（interfaces §8.7）"
                          : "核显不可用：本机无计算运行时（无 Level Zero；OpenCL 只注册了 nvidia.icd），"
                            "且该设备在 Vulkan 的 192 项扩展里没有 integer_dot_product";
     return false;

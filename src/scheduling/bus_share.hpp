@@ -44,6 +44,14 @@ public:
         return true;
     }
 
+    // 退回本步已记的份额：作业被改派给别的组时，那次搬运没有发生，账要退。
+    // 退得比记的多说明账本已经不一致了（调用方记错了数），此时拒绝并保持原状，不静默夹到 0。
+    bool release(std::uint64_t bytes) {
+        if (bytes > used_) return false;
+        used_ -= bytes;
+        return true;
+    }
+
 private:
     std::uint64_t share_ = 0;
     std::uint64_t used_ = 0;

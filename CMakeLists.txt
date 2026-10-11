@@ -66,6 +66,7 @@ add_library(qinfer_experts
   src/experts/router.cpp
   src/experts/moe_layer.cpp
   src/experts/expert_worker.cpp
+  src/experts/compute_group.cpp
   src/experts/expert_source.cpp
   src/experts/layer_dispatch.cpp
   src/experts/step_record.cpp
@@ -192,6 +193,9 @@ target_link_libraries(test_bus_share PRIVATE qinfer_scheduling)
 add_executable(test_expert_worker tests/test_expert_worker.cpp)
 target_link_libraries(test_expert_worker PRIVATE qinfer_experts)
 
+add_executable(test_compute_group tests/test_compute_group.cpp)
+target_link_libraries(test_compute_group PRIVATE qinfer_experts)
+
 add_executable(test_layer_dispatch tests/test_layer_dispatch.cpp)
 target_link_libraries(test_layer_dispatch PRIVATE qinfer_experts)
 
@@ -293,6 +297,7 @@ add_test(NAME router COMMAND test_router)
 add_test(NAME moe_layer COMMAND test_moe_layer)
 add_test(NAME bus_share COMMAND test_bus_share)
 add_test(NAME expert_worker COMMAND test_expert_worker)
+add_test(NAME compute_group COMMAND test_compute_group)
 add_test(NAME layer_dispatch COMMAND test_layer_dispatch)
 add_test(NAME gated_residual COMMAND test_gated_residual)
 add_test(NAME gdn_preprocess COMMAND test_gdn_preprocess)

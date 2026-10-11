@@ -24,10 +24,10 @@ bool unpin_all(ExpertSource& src, std::vector<std::uint64_t>& pinned, std::strin
 
 }  // namespace
 
-bool dispatch_layer_batch(const MoeLayer& layer, ExpertSource& src, ExpertWorker& primary,
-                          ExpertWorker& fallback, const int* ids, const float* route_weight, int n,
-                          const float* x, float* out, LayerDispatchScratch& s, RerouteStats& rs,
-                          std::string& err) {
+bool dispatch_layer_batch(const MoeLayer& layer, ExpertSource& src,
+                          const std::vector<ComputeGroup>& candidates, const int* ids,
+                          const float* route_weight, int n, const float* x, float* out,
+                          LayerDispatchScratch& s, RerouteStats& rs, std::string& err) {
     err.clear();
     if (ids == nullptr || route_weight == nullptr || x == nullptr || out == nullptr) {
         err = "批量分派的指针不完整";
@@ -88,7 +88,7 @@ bool dispatch_layer_batch(const MoeLayer& layer, ExpertSource& src, ExpertWorker
         }
     }
 
-    // 3. 一批交出去，在汇合点等回来。
+    // 3. 选一组交出去，在汇合点等回来。
     s.batch_out.assign(static_cast<std::size_t>(n) * hidden, 0.0f);
     ExpertJob job;
     job.spec = &layer.spec;
@@ -98,7 +98,46 @@ bool dispatch_layer_batch(const MoeLayer& layer, ExpertSource& src, ExpertWorker
     job.hidden = layer.hidden;
     job.out = s.batch_out.data();
 
-    if (!run_job_with_fallback(primary, fallback, job, rs, err)) {
+    // 兜底组先找出来：选中别的组而它失败时，这一批改派给它（interfaces §8.5）。
+    const ComputeGroup* fallback = nullptr;
+    for (const ComputeGroup& g : candidates) {
+        if (g.fallback) {
+            fallback = &g;
+            break;
+        }
+    }
+    if (fallback == nullptr || fallback->worker == nullptr) {
+        err = "候选里没有可用的兜底组（CPU 组）";
+        std::string ignore;
+        unpin_all(src, s.pinned, ignore);
+        return false;
+    }
+
+    std::string why;
+    const GroupPick pick = select_group(candidates, job, why);
+    if (pick.group == nullptr) {
+        err = "没有计算组能接这一批：" + why;
+        std::string ignore;
+        unpin_all(src, s.pinned, ignore);
+        return false;
+    }
+
+    const std::uint64_t rerouted_before = rs.rerouted;
+    const bool ran = run_job_with_fallback(*pick.group->worker, *fallback->worker, job, rs, err);
+    // 这一批真由选中的组做完，才留着选组时记进本步份额的那笔字节；改派与被拒都说明搬运没发生。
+    const bool moved = ran && rs.rerouted == rerouted_before;
+    bool released = true;
+    if (!moved && pick.booked_bytes != 0 && pick.group->bus != nullptr) {
+        released = pick.group->bus->release(pick.booked_bytes);
+    }
+    if (!ran) {
+        if (!released) err += "；且退回本步份额失败（账本与记账不一致）";
+        std::string ignore;
+        unpin_all(src, s.pinned, ignore);
+        return false;
+    }
+    if (!released) {
+        err = "退回本步份额失败：账本与记账不一致";
         std::string ignore;
         unpin_all(src, s.pinned, ignore);
         return false;

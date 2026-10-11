@@ -2,7 +2,7 @@
 //
 // 语义边界：worker 的语义是「算这批专家的人」，CPU 与核显同形，调度器按算力强度与带宽强度分派
 // （proposals.md 的 P-04）。这里不引入设备概念，也不引入第二条同步路径——wait() 由步循环在**同一步
-// 的汇合点**调用（interfaces §8.3）。
+// 的汇合点**调用（interfaces §8.4）。
 //
 // 粒度是一层一批：每步至多 48 次提交，队列开销可忽略；不再切细，因为每步只有一个汇合点。
 #pragma once
@@ -35,7 +35,7 @@ public:
 
     virtual const char* name() const = 0;
 
-    // 能否用：无运行时、无可用设备、设备节点打不开都在这里返回假（interfaces §8.4）。
+    // 能否用：无运行时、无可用设备、设备节点打不开都在这里返回假（interfaces §8.5）。
     virtual bool available() const = 0;
 
     // 提交一批。返回假时 err 写明原因；此时 out 的内容未定义，调用方应改派。
@@ -78,7 +78,7 @@ private:
     Stats stats_;
 };
 
-// interfaces §8.4 的失败重派：先试 worker，失败则用 fallback 跑同一批并把这次计入 rerouted。
+// interfaces §8.5 的失败重派：先试 worker，失败则用 fallback 跑同一批并把这次计入 rerouted。
 struct RerouteStats {
     std::uint64_t routed = 0;
     std::uint64_t rerouted = 0;
