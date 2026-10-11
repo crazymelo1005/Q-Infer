@@ -33,6 +33,7 @@
 | [`design/adr/ADR-007`](design/adr/ADR-007-ngram-table-on-demand-read.md) | 表行访问：预取还是按需读 | 接受（取代 ADR-003） |
 | [`design/adr/ADR-008`](design/adr/ADR-008-implementation-stack-and-kernel-reuse.md) | 实现栈、内核复用口径与许可 | 接受 |
 | [`design/adr/ADR-009`](design/adr/ADR-009-correctness-acceptance-criteria.md) | 正确性验收：逐位还是分布级 | 接受 |
+| [`design/adr/ADR-010`](design/adr/ADR-010-router-precision-declared-format.md) | 路由按张力声明的档读（bf16 那条契约只属引擎那份 pack） | 接受 |
 | [glossary.md](glossary.md) | 术语的唯一口径 | 完成 |
 | [hardware.md](hardware.md) | 两套测试环境的硬件规格 | 完成 |
 | [research/01-strata-engine.md](research/01-strata-engine.md) | 参考范本引擎的原理与边界 | 完成 |
