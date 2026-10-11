@@ -81,12 +81,10 @@ bool build_block_layer(const artifact::GgufFile& gguf, int layer, std::uint64_t 
         return false;
     }
 
-    // 判型（用层表那条口径：[S-54] 的 QSA 有 attn_q、GDN 有 attn_qkv，互斥）。
-    std::vector<LayerMapRow> rows;
-    if (!scan_layers(gguf, layer + 1, rows, err)) return false;
-    out.kind = rows[static_cast<std::size_t>(layer)].kind;
-    if (out.kind == LayerKind::kUnknown) {
-        err = "层 " + std::to_string(layer) + " 判不出类型";
+    // 判型（用层表那条口径：[S-54] 的 QSA 有 attn_q、GDN 有 attn_qkv，互斥）。只看**这一层**：
+    // MTP 的 pack 里只有 blk.48，走全模型那条 scan_layers 会被 0..47 的缺席挡住。
+    if (!judge_layer(gguf, layer, out.kind, err)) {
+        err = "层 " + std::to_string(layer) + " 判不出类型：" + err;
         return false;
     }
 

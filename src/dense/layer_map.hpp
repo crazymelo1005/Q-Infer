@@ -23,7 +23,11 @@ struct LayerMapRow {
     std::string why;  // 判不出来时写清「两种层的张力都缺/都有」之类
 };
 
-// 扫描 0..n_layers-1。任一层的判型失败会记进该行并让整体返回假（不静默跳过）。
+// 判**单独一层**的类型（只看那一层的注意力张力名）。MTP 那一层就是这样——它的 pack 里只有
+// ，没有 0..47，故不能走 scan_layers 那条「全模型」的路。
+bool judge_layer(const artifact::GgufFile& gguf, int layer, LayerKind& out, std::string& err);
+
+// 扫描 0..n_layers-1。任一层的判型失败会记进该行并让整体返回 false（不静默跳过）。
 bool scan_layers(const artifact::GgufFile& gguf, int n_layers, std::vector<LayerMapRow>& out,
                  std::string& err);
 
