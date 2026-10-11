@@ -109,19 +109,28 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
     const int k = layer.top_k;
     const std::size_t hidden = static_cast<std::size_t>(layer.hidden);
 
-    // 路由矩阵：bf16，2 字节 × hidden × n_expert。
-    s.router_w.resize(hidden * static_cast<std::size_t>(layer.n_expert));
-    if (!gguf.read_at(layer.router->offset, reinterpret_cast<std::uint8_t*>(s.router_w.data()),
-                      s.router_w.size() * 2)) {
+    // 路由矩阵：档随张力声明走（ADR-010）——bf16 每元素 2 字节、F32 每元素 4 字节，两条各读各的。
+    const bool router_bf16 = layer.router_spec.type == 30;
+    const std::size_t router_elems = hidden * static_cast<std::size_t>(layer.n_expert);
+    s.router_w.resize(router_elems);
+    s.router_w_f32.assign(router_elems, 0.0f);
+    std::uint8_t* router_dst = router_bf16
+                                   ? reinterpret_cast<std::uint8_t*>(s.router_w.data())
+                                   : reinterpret_cast<std::uint8_t*>(s.router_w_f32.data());
+    if (!gguf.read_at(layer.router->offset, router_dst, router_elems * (router_bf16 ? 2u : 4u))) {
         err = "读路由矩阵失败";
         return false;
     }
     s.ids.resize(static_cast<std::size_t>(k));
     s.weights.resize(static_cast<std::size_t>(k));
-    if (!route(s.router_w.data(), static_cast<int>(layer.n_expert), static_cast<int>(hidden), k, x,
-               s.router, s.ids.data(), s.weights.data(), err)) {
-        return false;
-    }
+    const bool routed =
+        router_bf16 ? route(s.router_w.data(), static_cast<int>(layer.n_expert),
+                            static_cast<int>(hidden), k, x, s.router, s.ids.data(),
+                            s.weights.data(), err)
+                    : route_f32(s.router_w_f32.data(), static_cast<int>(layer.n_expert),
+                                static_cast<int>(hidden), k, x, s.router, s.ids.data(),
+                                s.weights.data(), err);
+    if (!routed) return false;
     if (ids_out != nullptr) {
         for (int i = 0; i < k; ++i) ids_out[i] = s.ids[static_cast<std::size_t>(i)];
     }

@@ -59,7 +59,8 @@ bool build_moe_layer(const artifact::GgufFile& gguf, int layer, int top_k, MoeLa
 struct MoeScratch {
     RouterScratch router;
     FfnScratch ffn;
-    std::vector<std::uint16_t> router_w;  // 路由矩阵（bf16）
+    std::vector<std::uint16_t> router_w;      // 路由矩阵（声明为 BF16 时）
+    std::vector<float> router_w_f32;          // 路由矩阵（声明为 F32 时，ADR-010）
     std::vector<std::uint8_t> gate, up, down;
     std::vector<float> expert_out;
     std::vector<int> ids;

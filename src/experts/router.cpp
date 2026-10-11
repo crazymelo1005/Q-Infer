@@ -19,8 +19,10 @@ bool read_router_spec(const artifact::GgufFile& gguf, int layer, RouterSpec& spe
         err = name + " 的维度数不是 2";
         return false;
     }
-    if (t->type != 30) {  // ggml_type 30 = BF16
-        err = name + " 的类型码是 " + std::to_string(t->type) + "，不是 BF16（30）";
+    // 档随张力声明走（ADR-010）：30 = BF16 走「权重与激活都舍 bf16」那条，0 = F32 走 F32×F32。
+    if (t->type != 30 && t->type != 0) {
+        err = name + " 的类型码是 " + std::to_string(t->type) +
+              "，既不是 BF16（30）也不是 F32（0）";
         return false;
     }
     spec.hidden = t->dims[0];
