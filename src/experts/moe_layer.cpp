@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "experts/layer_dispatch.hpp"
+
 namespace qinfer::experts {
 
 namespace {
@@ -105,7 +107,8 @@ bool build_moe_layer(const artifact::GgufFile& gguf, int layer, int top_k, MoeLa
 }
 
 bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const float* x, float* out,
-                   MoeScratch& s, std::string& err, int* ids_out, float* weights_out) {
+                   MoeScratch& s, std::string& err, int* ids_out, float* weights_out,
+                   const MoeOffload* offload) {
     const int k = layer.top_k;
     const std::size_t hidden = static_cast<std::size_t>(layer.hidden);
 
@@ -163,6 +166,23 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
     std::sort(s.order.begin(), s.order.end(),
               [&s](int a, int b) { return s.ids[static_cast<std::size_t>(a)] <
                                            s.ids[static_cast<std::size_t>(b)]; });
+
+    // 把这一批交出去（interfaces §8）：批量分派自己就按专家 id 升序把结果并进 out，权重也按
+    // 位置取，故与本函数下面那条逐专家路径同序、逐位一样。
+    if (offload != nullptr) {
+        if (offload->candidates == nullptr || offload->source == nullptr ||
+            offload->scratch == nullptr) {
+            err = "交出去的入口给得不完整（候选组 / 字节来源 / 批量缓冲）";
+            return false;
+        }
+        RerouteStats local_stats;
+        RerouteStats& rs = offload->stats != nullptr ? *offload->stats : local_stats;
+        if (!dispatch_layer_batch(layer, *offload->source, *offload->candidates, s.ids.data(),
+                                  s.weights.data(), k, x, out, *offload->scratch, rs, err)) {
+            return false;
+        }
+        return add_shared_expert(gguf, layer, x, out, s, err);
+    }
 
     for (int t = 0; t < k; ++t) {
         const std::size_t i = static_cast<std::size_t>(s.order[static_cast<std::size_t>(t)]);

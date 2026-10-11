@@ -10,8 +10,11 @@
 //   3. 槽位：同一批里两个专家用同一个槽时，两次结果都等于该槽里那份权重（不串）。
 //   4. 越出支持范围明确失败：down 的激活搭档不是 Q8_0、或三矩阵里有设备侧没有内核的档。
 //   5. 入参不合法明确失败。
+#include "artifact/gguf_table.hpp"
 #include "experts/cuda/cuda_worker.hpp"
 #include "experts/cuda/expert_ffn_cuda.hpp"
+#include "experts/layer_dispatch.hpp"
+#include "experts/moe_layer.hpp"
 
 #include "check.hpp"
 #include "kernels/q8_0.hpp"
@@ -365,9 +368,93 @@ void test_unsupported_role_is_refused_by_the_worker() {
     CHECK(worker.stats().failed == 1);
 }
 
+// ---- 真模型入口 ----
+//
+// 一层 MoE 的两条路：不交出去（逐专家主机路径）与交出去（候选组 + 批量分派 → 设备侧工人）。
+// 两条路的归并顺序相同，故结果该逐位一样。同时要求 `rs.routed == 1`——真的由选中的组做完，
+// 而不是被静默改派给 CPU；不然这条对照是空转。
+int manual_model_entry(const char* model, int layer) {
+    qinfer::artifact::GgufFile g;
+    std::string err;
+    if (!g.open(model, err)) {
+        std::printf("打不开模型：%s（%s）\n", model, err.c_str());
+        return 1;
+    }
+    MoeLayer ml;
+    if (!build_moe_layer(g, layer, /*top_k=*/10, ml, err)) {
+        std::printf("构建层 %d 的 MoE 失败：%s\n", layer, err.c_str());
+        return 1;
+    }
+    const std::size_t hidden = static_cast<std::size_t>(ml.hidden);
+    std::vector<float> x(hidden);
+    for (std::size_t i = 0; i < hidden; ++i) {
+        x[i] = static_cast<float>(static_cast<int>(i % 31) - 15) * 0.0625f;
+    }
+
+    MoeScratch s_host;
+    std::vector<float> out_host(hidden, 0.0f);
+    std::vector<int> ids(static_cast<std::size_t>(ml.top_k), 0);
+    std::vector<float> weights(static_cast<std::size_t>(ml.top_k), 0.0f);
+    if (!run_moe_layer(g, ml, x.data(), out_host.data(), s_host, err, ids.data(), weights.data())) {
+        std::printf("主机路径失败：%s\n", err.c_str());
+        return 1;
+    }
+
+    CudaExpertWorker worker(0, /*slots_per_layer=*/32);
+    if (!worker.available()) {
+        std::printf("没有可用的 CUDA 设备，设备路径没法跑\n");
+        return 1;
+    }
+    CpuExpertWorker cpu;
+    std::vector<ComputeGroup> groups{cuda_group(worker), cpu_group(cpu)};
+    ExpertSource src(g, "blk." + std::to_string(layer) + ".ffn_", ml.spec,
+                     qinfer::storage::PolicyKind::kLru, /*slots=*/64, /*ways=*/8, /*budget=*/0);
+    LayerDispatchScratch ds;
+    RerouteStats rs{};
+    MoeOffload off{&groups, &src, &ds, &rs};
+    MoeScratch s_dev;
+    std::vector<float> out_dev(hidden, 0.0f);
+    if (!run_moe_layer(g, ml, x.data(), out_dev.data(), s_dev, err, nullptr, nullptr, &off)) {
+        std::printf("设备路径失败：%s\n", err.c_str());
+        return 1;
+    }
+
+    int same = 0;
+    double mag = 0.0;
+    for (std::size_t i = 0; i < hidden; ++i) {
+        if (std::bit_cast<std::uint32_t>(out_host[i]) == std::bit_cast<std::uint32_t>(out_dev[i])) {
+            ++same;
+        }
+        mag += std::fabs(static_cast<double>(out_dev[i]));
+    }
+    const bool bitwise = same == static_cast<int>(hidden);
+    std::printf("层 %d：top-%d（%s），两条路逐位一致：%s（位相同 %d/%zu，|设备输出| 合计 %.6g）\n",
+                layer, ml.top_k, ml.shared.present ? "含共享专家" : "无共享专家",
+                bitwise ? "是" : "否", same, hidden, mag);
+    std::printf("  选组 routed=%llu rerouted=%llu；工人 jobs=%llu experts=%llu failed=%llu；常驻 %.3f MiB\n",
+                (unsigned long long) rs.routed, (unsigned long long) rs.rerouted,
+                (unsigned long long) worker.stats().jobs,
+                (unsigned long long) worker.stats().experts,
+                (unsigned long long) worker.stats().failed,
+                static_cast<double>(worker.resident_bytes()) / (1024.0 * 1024.0));
+    if (!bitwise) return 1;
+    if (rs.routed != 1 || rs.rerouted != 0) {
+        std::printf("  选组不对：这一批该由选中的组做完\n");
+        return 1;
+    }
+    return 0;
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc >= 3 && std::string(argv[1]) == "--model") {
+        int layer = 0;
+        for (int i = 2; i + 1 < argc; ++i) {
+            if (std::string(argv[i]) == "--layer") layer = std::atoi(argv[i + 1]);
+        }
+        return manual_model_entry(argv[2], layer);
+    }
     test_device_matches_host();
     test_same_slot_twice_gives_that_slot();
     test_unsupported_layers_fail_loudly();

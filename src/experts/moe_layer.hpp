@@ -77,6 +77,22 @@ struct MoeScratch {
     int source_layer = -1;
 };
 
+// 前向声明：这几个类型定义在 `experts/layer_dispatch.hpp`，而那个头要用本头的 MoeLayer，故只能
+// 前向声明、不能互相包含。
+struct ComputeGroup;
+struct LayerDispatchScratch;
+struct RerouteStats;
+
+// 「把未命中专家这批算力交出去」的入口（interfaces §8）：给了这一项就改走批量分派（候选计算组 +
+// 字节来源 + 批量的中间缓冲），不给就还是逐专家的主机路径。两条路的归并顺序相同（按专家 id 升序），
+// 故同配置下逐位一样。
+struct MoeOffload {
+    const std::vector<ComputeGroup>* candidates = nullptr;  // 候选组（按本层的档给）
+    ExpertSource* source = nullptr;                         // 字节来源（含该层的缓存）
+    LayerDispatchScratch* scratch = nullptr;                // 批量的中间缓冲
+    RerouteStats* stats = nullptr;                          // 重派计数（观测用，可为空）
+};
+
 // 跑一层：读路由矩阵 → 路由出 top-k → 逐个读该专家的三矩阵并前馈 → 按权重累加 → 有共享专家则再加。
 // 组合口径是 `y = Σ wᵢ·expertᵢ + shared`：路由侧按权重、共享侧**不加权**直接相加（[S-50]）。
 // out 长 hidden，覆盖写（MoE 输出本身）。若 ids 与 weights 非空则回填路由结果，便于核对。
@@ -86,7 +102,7 @@ struct MoeScratch {
 // 配置下无法逐位复现。`src/experts/layer_dispatch` 的批量路径用的就是同一顺序。
 bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const float* x, float* out,
                    MoeScratch& scratch, std::string& err, int* ids_out = nullptr,
-                   float* weights_out = nullptr);
+                   float* weights_out = nullptr, const MoeOffload* offload = nullptr);
 
 // 加上这一层的共享专家（`y += shared`）。该层没有共享专家时什么也不做、返回真。
 // 单独抽出来是因为共享专家不属于「未命中专家」那一批：批量分担走 `layer_dispatch`，共享专家在

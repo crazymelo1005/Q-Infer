@@ -59,6 +59,9 @@ struct BlockScratch {
     GdnScratch gdn;
     QsaScratch qsa;
     experts::MoeScratch moe;
+    // 可选的「把未命中专家这批算力交出去」（interfaces §8）。为空就走逐专家的主机路径。
+    // 由调用方按本层的档给候选组与字节来源；见 `experts/moe_layer.hpp` 的 MoeOffload。
+    const experts::MoeOffload* offload = nullptr;
 };
 
 // 跑一层：R 是 (hc, n_embd)，**就地**被两次 gr_write 改写。QSA 层的 KV/rope 由调用方在

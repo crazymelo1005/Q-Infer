@@ -208,7 +208,10 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
                        GrTensor{s.f_up_f32.data(), GrPrecision::kF32},
                        GrTensor{s.f_inject_f32.data(), GrPrecision::kF32}};
     if (!gr_read(layer.gr, fw, R, 1e-6f, s.mixed.data(), s.inject.data(), s.gr, err)) return false;
-    if (!run_moe_layer(gguf, layer.moe, s.mixed.data(), s.block_out.data(), s.moe, err)) return false;
+    if (!run_moe_layer(gguf, layer.moe, s.mixed.data(), s.block_out.data(), s.moe, err, nullptr,
+                       nullptr, s.offload)) {
+        return false;
+    }
     return gr_write(layer.gr, R, s.block_out.data(), s.inject.data(), R, err);
 }
 
