@@ -53,6 +53,7 @@ add_library(qinfer_dense
   src/dense/step_loop.cpp
   src/dense/token_embed.cpp
   src/dense/kv_window.cpp
+  src/dense/spec_decode.cpp
 )
 target_include_directories(qinfer_dense PUBLIC src)
 target_link_libraries(qinfer_dense PUBLIC qinfer_kernels qinfer_artifact qinfer_experts)

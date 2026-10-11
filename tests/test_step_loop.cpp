@@ -10,6 +10,7 @@
 //      都前进了）；新 scratch 从头跑则与第一次逐位一致；
 //   4. 接错必须报错：层数与文件不符、缺输出头、没预备 scratch 就跑。
 // 真权重在 --model 入口跑（环境2）。
+#include "dense/spec_decode.hpp"
 #include "dense/step_loop.hpp"
 
 #include "check.hpp"
@@ -479,6 +480,131 @@ void test_token_generation() {
     }
 }
 
+// 平路贪心：从 start 起生成 n 个 token（不做投机）。作为「投机不改变序列」这条性质的基准。
+std::vector<std::uint64_t> plain_greedy(const artifact::GgufFile& g, const StepModel& m,
+                                        const TokenEmbed& e, std::uint64_t start, std::size_t n) {
+    std::string err;
+    StepScratch s;
+    CHECK(prepare_step_scratch(m, 32, 0, s, err));
+    std::uint64_t tok = start;
+    std::vector<std::uint64_t> seq;
+    for (std::size_t i = 0; i < n; ++i) {
+        CHECK(run_token_step(g, m, e, tok, s, err));
+        tok = static_cast<std::uint64_t>(greedy_argmax(s.head.logits.data(), s.head.logits.size()));
+        seq.push_back(tok);
+    }
+    return seq;
+}
+
+// 投机解码：接受/拒绝只影响模型步数，不改变贪心轨迹；草稿全对时一轮 k 次前向产出 k+1 个 token。
+void test_spec_decode() {
+    const std::filesystem::path p = write_gguf("qinfer_step_spec.gguf", model_tensors());
+    artifact::GgufFile g;
+    std::string err;
+    CHECK(g.open(p.string(), err));
+    StepModel m;
+    CHECK(build_step_model(g, two_layer_config(), m, err));
+    TokenEmbed e;
+    CHECK(build_token_embed(g, kN, e, err));
+    const std::uint64_t start = 3;
+    const std::vector<std::uint64_t> base = plain_greedy(g, m, e, start, 14);
+    CHECK(base.size() == 14);
+
+    const auto fresh = [&](StepScratch& s, SpecDecoder& d) {
+        CHECK(prepare_step_scratch(m, 32, 0, s, err));
+        CHECK(spec_commit(g, m, e, start, s, d, err));  // 先喂入起点，得到对下一格的预测
+    };
+    const auto steps = [&](const StepScratch& s) { return s.blocks[0].gdn.conv.tokens; };
+
+    // 未 prime 就跑：明确报错。
+    {
+        StepScratch s;
+        SpecDecoder d;
+        CHECK(prepare_step_scratch(m, 32, 0, s, err));
+        std::vector<std::uint64_t> out;
+        CHECK(!spec_step(g, m, e, nullptr, 0, s, d, out, err));
+        CHECK(err.find("spec_commit") != std::string::npos);
+    }
+    // 草稿 0 个：一轮正好 1 个 token、1 次前向。
+    {
+        StepScratch s;
+        SpecDecoder d;
+        fresh(s, d);
+        const std::uint64_t before = steps(s);
+        std::vector<std::uint64_t> out;
+        CHECK(spec_step(g, m, e, nullptr, 0, s, d, out, err));
+        CHECK(out.size() == 1u && out[0] == base[0]);
+        CHECK(steps(s) - before == 1u);
+    }
+    // 草稿全对（k=3）：一轮产出 4 个（3 个接受的草稿 + 1 个 bonus），且与基准的前 4 个逐位一致。
+    {
+        StepScratch s;
+        SpecDecoder d;
+        fresh(s, d);
+        const std::uint64_t before = steps(s);
+        const std::vector<std::uint64_t> draft{base[0], base[1], base[2]};
+        std::vector<std::uint64_t> out;
+        CHECK(spec_step(g, m, e, draft.data(), draft.size(), s, d, out, err));
+        CHECK(out.size() == 4u);
+        for (std::size_t i = 0; i < 4; ++i) CHECK(out[i] == base[i]);
+        // 顺序验证：每提交一个 token 一次前向（4 个 token = 4 次）。**投机带来的省法在并行验证**
+        // （k 个草稿一次前向），那条路要批式前向，不在本片；本片钉的是接受规则与状态纪律。
+        CHECK(steps(s) - before == 4u);
+    }
+    // 第一格就对不上：接受 0 个，产出 1 个（目标模型自己的），与基准一致。
+    {
+        StepScratch s;
+        SpecDecoder d;
+        fresh(s, d);
+        const std::vector<std::uint64_t> draft{(base[0] + 1) % kVocab, base[1], base[2]};
+        std::vector<std::uint64_t> out;
+        CHECK(spec_step(g, m, e, draft.data(), draft.size(), s, d, out, err));
+        CHECK(out.size() == 1u && out[0] == base[0]);
+    }
+    // 前两个对、第三个错：接受 2 个 + 1 个 bonus，与基准前 3 个一致。
+    {
+        StepScratch s;
+        SpecDecoder d;
+        fresh(s, d);
+        const std::vector<std::uint64_t> draft{base[0], base[1], (base[2] + 1) % kVocab, base[3]};
+        std::vector<std::uint64_t> out;
+        CHECK(spec_step(g, m, e, draft.data(), draft.size(), s, d, out, err));
+        CHECK(out.size() == 3u);
+        for (std::size_t i = 0; i < 3; ++i) CHECK(out[i] == base[i]);
+    }
+    // 序列不变性：连续多轮（草稿长度与对错刻意变化）跑出的整串必须与基准逐位一致。
+    {
+        StepScratch s;
+        SpecDecoder d;
+        fresh(s, d);
+        const std::size_t ks[5] = {1, 3, 0, 2, 4};
+        std::vector<std::uint64_t> produced;
+        int round = 0;
+        while (produced.size() < base.size() && round < 100) {
+            const std::size_t k = ks[round % 5];
+            const std::size_t at = produced.size();
+            std::vector<std::uint64_t> draft(k, 0);
+            for (std::size_t i = 0; i < k; ++i) {
+                const std::size_t idx = at + i;
+                draft[i] = idx < base.size() ? base[idx] : 0;
+                if (round % 3 == 0 && i + 1 == k) draft[i] = (draft[i] + 1) % kVocab;  // 有意错一格
+            }
+            std::vector<std::uint64_t> got;
+            CHECK(spec_step(g, m, e, draft.data(), k, s, d, got, err));
+            CHECK(!got.empty());
+            for (std::uint64_t t : got) produced.push_back(t);
+            ++round;
+        }
+        CHECK(produced.size() >= base.size());
+        for (std::size_t i = 0; i < base.size(); ++i) CHECK(produced[i] == base[i]);
+        std::printf("  投机：%d 轮产出 %zu 个 token（基准 %zu 个，逐位一致）\n", round, produced.size(),
+                    base.size());
+        // 每次前向恰好对应一个已提交的 token（+1 是最初喂入起点那次），故投机不省前向总数，
+        // 省的是「轮数」：轮均产出 15/6 = 2.5 个 token。
+        CHECK(steps(s) == produced.size() + 1);
+    }
+}
+
 // 真模型手工入口：整模型跑几个 token，打印判型摘要与 logits 概况。
 int manual_model_entry(const char* model, int tokens) {
     artifact::GgufFile g;
@@ -557,7 +683,9 @@ int main(int argc, char** argv) {
     test_state_advances();
     test_failures();
     test_token_generation();
+    test_spec_decode();
     std::puts("step_loop: 按层表串起 GDN+QSA 两层并出 logits；层序对调 / 少跑一层 / 不跑循环都可观测，"
-              "逐层状态各归各层，token→embedding→logits→贪心的最小生成环可复现，三种接错都明确报错");
+              "逐层状态各归各层，token→embedding→logits→贪心的最小生成环可复现，三种接错都明确报错；"
+              "投机解码接受/拒绝只改步数、不改序列");
     return 0;
 }
