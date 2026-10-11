@@ -137,6 +137,8 @@ CPU 侧执行未命中专家，用 AVX2 量化内核：
 3. 归并。CPU 与 GPU 的结果在同一缓冲区按专家槽位累加合并，避免额外的同步。
 4. 同步点最小化。每步只有一次显存与主机之间的汇合。
 
+设备侧已开工，第一块内核是 Q2_0 的逐行点积（`src/kernels/cuda/q2_0_gemv.cu`；部署那份 down 投影全 48 层用的就是这一档），语义照本仓库主机那份 `src/kernels/q2_0` 写、在真模型字节上与它逐行对照（`tests/test_q2_0_cuda`，只在 `-DQINFER_ENABLE_CUDA=ON` 时构建）。为什么不复用上游的 CUDA 实现：ggml 那条（`ggml/src/ggml-cuda/mmvq.cu` 与 `vecdotq.cuh` 的 Q2_0 分支）把权重配的是 Q8_1 激活——带 d 与 s 两个尺度、整数累加时要四舍五入——而本仓库的激活搭档是 Q8_0，配对物不同，抄过来就是另一套数值行为。gate/up 各档的设备内核、批式前向、权重常驻与按卡分工、图捕获都还没做。
+
 目标负载的专家权重是逐层换档的：gate/up 为 IQ2_S / IQ2_XXS / IQ1_M，down 全 48 层为 Q2_0（专家字节合计 35.45 GB、等效约 2.35 bpw；逐层清单见 [S-36] 与 [`../research/02-qwen3.8-flash-next.md`](../research/02-qwen3.8-flash-next.md) §1）。down 只能用 Q2_0 这类每块 64 个值的档，因为 640（`expert_feed_forward_length`）不是 256 的整数倍。所以解码侧按「层 × 张量」分派格式。这张映射是逐文件的数据、不是固定表：环境2 上现有两档（部署的 IQ2 档与另一份 IQ3_XXS 档）的逐层映射互不相同，同名档位覆盖的层数也不同（[S-36]、[S-38]），故分派表在加载时从 GGUF 的逐张量类型读出——实现见 `src/experts/expert_formats`，它按层组装 gate/up/down 三个矩阵的档与块几何，并把「缺张力 / 类型码不认识 / 几何不成立 / 无内核」分别记进 problems 而不是静默跳过。按实测，部署那份 48 层已全部可用（gate/up 逐层为 IQ2_S 34 层 / IQ2_XXS 11 层 / IQ1_M 3 层，down 全为 Q2_0）；另一档的 48 层也已全部可用（gate/up 里 IQ3_XXS 6 层补上内核后不再有缺口）。
 
 三矩阵的组装在 `src/experts/ffn`：gate/up 的输入是 hidden、输出是 ffn，down 反过来；激活按每个矩阵自己的档选（256 值块的档配 Q8_K，32/64 值块的档配 Q8_0——见 [S-42] 的块几何与 S-37 / S-40 / S-41 的配对；激活量化器的尺度以 fp16 存，见 [S-43]），门控用 SwiGLU（引擎的 MoE 路径就是 swiglu，见其 `src/core/layer.cpp`），路由权重由调用方给出、按专家累加。gate 与 up 共用同一组激活，故两者的激活档必须一致；不一致直接失败而不是各算各的。真权重上已与双精度参考实现对过（三层 × 三个专家），不可用的层明确报错。
@@ -216,7 +218,7 @@ IQ2_XS 这一档的块反量化与「与 Q8_K 的定点点积」已实现：`src
 | 图捕获 | 解码步的稠密部分用图捕获，消除小批量下的启动开销 |
 | 主机内核 | AVX2 加码本查表；按核心类型分池；专家槽位按缓存行对齐以避免伪共享 |
 | 同步 | 每步一次汇合；预取完成用事件通知，不用轮询 |
-| 语言与构建 | C++20 + CMake（≥3.28），依赖面为零；主机侧不依赖 CUDA，使 CI 能在无 GPU 的 runner 上守住不变量（[ADR-008](adr/ADR-008-implementation-stack-and-kernel-reuse.md)） |
+| 语言与构建 | C++20 + CMake（≥3.28），依赖面为零；主机侧不依赖 CUDA，使 CI 能在无 GPU 的 runner 上守住不变量。CUDA 侧由 `-DQINFER_ENABLE_CUDA=ON` 单独打开（默认关），见 [ADR-008](adr/ADR-008-implementation-stack-and-kernel-reuse.md) |
 | 内核来源 | 第三方量化内核以裁剪子集入库，而不是外部依赖：本设计要插桩的位置正是内核边界，需要冻结的数值行为（[ADR-008](adr/ADR-008-implementation-stack-and-kernel-reuse.md)） |
 
 ## 12. 服务与调度

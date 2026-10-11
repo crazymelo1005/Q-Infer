@@ -322,3 +322,29 @@ add_test(NAME mtp_entry COMMAND test_mtp_entry)
 add_test(NAME kv_window COMMAND test_kv_window)
 add_test(NAME bf16_gemv COMMAND test_bf16_gemv)
 add_test(NAME step_record COMMAND test_step_record)
+
+# ---- CUDA 内核（默认关闭）----
+# ADR-008 第 2 条：骨架不依赖 CUDA，CI 在没有 GPU 的 runner 上只编主机侧、照样跑测试。
+# 打开时才需要 nvcc，且要单独一份构建目录（例如 -B build/cuda -DQINFER_ENABLE_CUDA=ON）。
+option(QINFER_ENABLE_CUDA "构建 CUDA 内核（需要 nvcc）" OFF)
+if(QINFER_ENABLE_CUDA)
+  enable_language(CUDA)
+  # CUDA::cudart 这个导入目标由 FindCUDAToolkit 提供，语言启用本身不会建它。
+  find_package(CUDAToolkit REQUIRED)
+  set(CMAKE_CUDA_STANDARD 20)
+  set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+  # 环境1 与环境2 的卡都是 RTX 5060 Ti（sm_120）；换卡时用 -DCMAKE_CUDA_ARCHITECTURES 覆盖。
+  if(NOT CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES 120)
+  endif()
+
+  add_library(qinfer_kernels_cuda
+    src/kernels/cuda/q2_0_gemv.cu
+  )
+  target_include_directories(qinfer_kernels_cuda PUBLIC src)
+  target_link_libraries(qinfer_kernels_cuda PUBLIC qinfer_kernels CUDA::cudart)
+
+  add_executable(test_q2_0_cuda tests/test_q2_0_cuda.cpp)
+  target_link_libraries(test_q2_0_cuda PRIVATE qinfer_kernels_cuda)
+  add_test(NAME q2_0_cuda COMMAND test_q2_0_cuda)
+endif()
