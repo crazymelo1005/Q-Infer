@@ -10,6 +10,7 @@
 //   3. 槽位：同一批里两个专家用同一个槽时，两次结果都等于该槽里那份权重（不串）。
 //   4. 越出支持范围明确失败：down 的激活搭档不是 Q8_0、或三矩阵里有设备侧没有内核的档。
 //   5. 入参不合法明确失败。
+#include "experts/cuda/cuda_worker.hpp"
 #include "experts/cuda/expert_ffn_cuda.hpp"
 
 #include "check.hpp"
