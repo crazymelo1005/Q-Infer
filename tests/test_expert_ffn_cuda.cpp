@@ -11,6 +11,7 @@
 //   4. 越出支持范围明确失败：down 的激活搭档不是 Q8_0、或三矩阵里有设备侧没有内核的档。
 //   5. 入参不合法明确失败。
 #include "artifact/gguf_table.hpp"
+#include "dense/step_loop.hpp"
 #include "experts/cuda/cuda_worker.hpp"
 #include "experts/cuda/expert_ffn_cuda.hpp"
 #include "experts/layer_dispatch.hpp"
@@ -445,14 +446,125 @@ int manual_model_entry(const char* model, int layer) {
     return 0;
 }
 
+// 整模型一步：不交出去（逐层主机路径）与交出去（48 层逐层交给 CUDA 组）两条路的 logits 该逐位
+// 一致。这条是「设备侧那批真的进了整模型一步」的判据，且要求没有一次重派（否则有层没被接住）。
+int manual_step_entry(const char* model) {
+    qinfer::artifact::GgufFile g;
+    std::string err;
+    if (!g.open(model, err)) {
+        std::printf("打不开模型：%s（%s）\n", model, err.c_str());
+        return 1;
+    }
+    // 真模型几何，与 test_step_loop 的 --model 入口同一套。
+    qinfer::dense::StepConfig cfg;
+    cfg.n_embd = 2560;
+    cfg.hc = 4;
+    cfg.hc_lr = 320;
+    cfg.n_layers = 48;
+    cfg.top_k = 10;
+    cfg.gdn_head_dim = 128;
+    cfg.qsa_head_dim = 256;
+    cfg.n_rot = 64;
+    cfg.idx_dim = 128;
+    cfg.idx_top_k = 2048;
+    cfg.idx_block = 4;
+    qinfer::dense::StepModel m;
+    if (!qinfer::dense::build_step_model(g, cfg, m, err)) {
+        std::printf("建整模型失败：%s\n", err.c_str());
+        return 1;
+    }
+    std::vector<float> x(2560);
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        x[i] = 0.05f * static_cast<float>(static_cast<int>(i % 17) - 8);
+    }
+
+    qinfer::dense::StepScratch s_ref;
+    if (!qinfer::dense::prepare_step_scratch(m, 64, 0, s_ref, err)) {
+        std::printf("预备 scratch 失败：%s\n", err.c_str());
+        return 1;
+    }
+    if (!qinfer::dense::run_step_model(g, m, x.data(), s_ref, err)) {
+        std::printf("主机路径跑不动：%s\n", err.c_str());
+        return 1;
+    }
+
+    CudaExpertWorker worker(0, /*slots_per_layer=*/12);
+    if (!worker.available()) {
+        std::printf("没有可用的 CUDA 设备\n");
+        return 1;
+    }
+    CpuExpertWorker cpu;
+    std::vector<ComputeGroup> groups{cuda_group(worker), cpu_group(cpu)};
+    std::vector<ExpertSource> sources;
+    std::vector<MoeOffload> offloads;
+    sources.reserve(static_cast<std::size_t>(cfg.n_layers));
+    offloads.reserve(static_cast<std::size_t>(cfg.n_layers));
+    for (int l = 0; l < cfg.n_layers; ++l) {
+        sources.emplace_back(g, "blk." + std::to_string(l) + ".ffn_", m.blocks[l].moe.spec,
+                             qinfer::storage::PolicyKind::kFifo, /*slots=*/16, /*ways=*/4,
+                             /*budget=*/0);
+    }
+    LayerDispatchScratch ds;
+    RerouteStats rs{};
+    for (int l = 0; l < cfg.n_layers; ++l) {
+        offloads.push_back(MoeOffload{&groups, &sources[static_cast<std::size_t>(l)], &ds, &rs});
+    }
+    cfg.offload_layers = &offloads;
+
+    qinfer::dense::StepModel m2;
+    if (!qinfer::dense::build_step_model(g, cfg, m2, err)) {
+        std::printf("建整模型（含交出表）失败：%s\n", err.c_str());
+        return 1;
+    }
+    qinfer::dense::StepScratch s_dev;
+    if (!qinfer::dense::prepare_step_scratch(m2, 64, 0, s_dev, err)) {
+        std::printf("预备 scratch（设备路径）失败：%s\n", err.c_str());
+        return 1;
+    }
+    if (!qinfer::dense::run_step_model(g, m2, x.data(), s_dev, err)) {
+        std::printf("设备路径跑不动：%s\n", err.c_str());
+        return 1;
+    }
+
+    const std::vector<float>& a = s_ref.head.logits;
+    const std::vector<float>& b = s_dev.head.logits;
+    int same = 0;
+    double mag = 0.0;
+    for (std::size_t i = 0; i < a.size() && i < b.size(); ++i) {
+        if (std::bit_cast<std::uint32_t>(a[i]) == std::bit_cast<std::uint32_t>(b[i])) ++same;
+        mag += std::fabs(static_cast<double>(b[i]));
+    }
+    std::printf("整模型一步（48 层逐层交出）：logits 逐位一致：%s（位相同 %d/%zu，|logits| 合计 %.6g）\n",
+                same == static_cast<int>(a.size()) ? "是" : "否", same, a.size(), mag);
+    std::printf("  选组 routed=%llu rerouted=%llu；工人 jobs=%llu experts=%llu failed=%llu；常驻 %.1f MiB\n",
+                (unsigned long long) rs.routed, (unsigned long long) rs.rerouted,
+                (unsigned long long) worker.stats().jobs,
+                (unsigned long long) worker.stats().experts,
+                (unsigned long long) worker.stats().failed,
+                static_cast<double>(worker.resident_bytes()) / (1024.0 * 1024.0));
+    if (a.size() != b.size() || same != static_cast<int>(a.size())) return 1;
+    if (rs.rerouted != 0) {
+        std::printf("  有重派：说明有层没被设备侧接住\n");
+        return 1;
+    }
+    if (rs.routed != static_cast<std::uint64_t>(cfg.n_layers)) {
+        std::printf("  交出的层数不对：%llu\n", (unsigned long long) rs.routed);
+        return 1;
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     if (argc >= 3 && std::string(argv[1]) == "--model") {
         int layer = 0;
+        bool step = false;
         for (int i = 2; i + 1 < argc; ++i) {
             if (std::string(argv[i]) == "--layer") layer = std::atoi(argv[i + 1]);
+            if (std::string(argv[i]) == "--step") step = true;
         }
+        if (step) return manual_step_entry(argv[2]);
         return manual_model_entry(argv[2], layer);
     }
     test_device_matches_host();

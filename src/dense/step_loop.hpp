@@ -51,6 +51,11 @@ struct StepConfig {
 
     // 每步 PCIe 预算的画像输入。`pcie_h2d_gbps == 0` 表示这一步不做预算仲裁（观测记 0）。
     scheduling::ProfileInputs profile;
+
+    // 可选的「把未命中专家那批交出去」（interfaces §8）：给了就**逐层**交给它指定的候选组。
+    // 调用方按层的档建好每层一份（长度须等于 n_layers），每层一份字节来源；不给就还是逐专家的
+    // 主机路径。两条路的归并顺序相同，故逐位一样（见 experts/moe_layer.hpp 的 MoeOffload）。
+    const std::vector<experts::MoeOffload>* offload_layers = nullptr;
 };
 
 struct StepModel {

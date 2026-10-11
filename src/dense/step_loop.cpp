@@ -59,6 +59,16 @@ bool prepare_step_scratch(const StepModel& model, std::uint64_t n_pages, std::ui
     const std::size_t n = static_cast<std::size_t>(model.cfg.n_layers);
     out.R.assign(static_cast<std::size_t>(model.cfg.n_embd * model.cfg.hc), 0.0f);
     out.blocks.resize(n);
+    // 交出（interfaces §8）：把调用方按层建好的那一条挂到该层的 scratch 上，跑每一步时逐层生效。
+    if (model.cfg.offload_layers != nullptr) {
+        if (model.cfg.offload_layers->size() != n) {
+            err = "交出表给的层数与模型的层数不一致";
+            return false;
+        }
+        for (std::size_t l = 0; l < n; ++l) {
+            out.blocks[l].offload = &(*model.cfg.offload_layers)[l];
+        }
+    }
     for (std::size_t l = 0; l < n; ++l) {
         const BlockLayer& bl = model.blocks[l];
         if (bl.kind != LayerKind::kQsa) continue;

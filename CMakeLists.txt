@@ -368,6 +368,7 @@ if(QINFER_ENABLE_CUDA)
   target_link_libraries(qinfer_experts_cuda PUBLIC qinfer_kernels_cuda qinfer_experts)
 
   add_executable(test_expert_ffn_cuda tests/test_expert_ffn_cuda.cpp)
-  target_link_libraries(test_expert_ffn_cuda PRIVATE qinfer_experts_cuda)
+  # 这个入口还要跑整模型一步（`run_step_model`），故另连 dense 与 artifact。
+  target_link_libraries(test_expert_ffn_cuda PRIVATE qinfer_experts_cuda qinfer_dense qinfer_artifact)
   add_test(NAME expert_ffn_cuda COMMAND test_expert_ffn_cuda)
 endif()
