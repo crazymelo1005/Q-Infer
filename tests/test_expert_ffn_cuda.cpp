@@ -604,10 +604,13 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens) {
 
     CpuExpertWorker cpu;
     std::vector<ComputeGroup> one_group;
-    CudaExpertWorker single_worker(0, /*slots_per_layer=*/12);
+    // 槽位要按「这几步会碰到的不同专家数」给足：一步 10 个，3 步最多 30 个。给不够不会错（按 §8.5
+    // 退回 CPU），但那样量出来的就不是设备路径了。真正的答案是专家缓存那套淘汰与配额（interfaces §5）。
+    constexpr int kSlots = 32;
+    CudaExpertWorker single_worker(0, kSlots);
     CudaGroupFleet dev_fleet;
     if (fleet) {
-        if (!dev_fleet.init({0, 1}, /*slots_per_layer=*/12, cpu, err)) {
+        if (!dev_fleet.init({0, 1}, kSlots, cpu, err)) {
             std::printf("按卡分工起不来：%s\n", err.c_str());
             return 1;
         }
