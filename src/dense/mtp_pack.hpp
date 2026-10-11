@@ -111,6 +111,6 @@ struct MtpPack {
 bool build_mtp_pack(const artifact::GgufFile& gguf, std::uint64_t n_embd, std::uint64_t hc,
                     std::uint64_t hc_lr, std::uint64_t head_dim, std::uint64_t n_rot,
                     std::uint64_t idx_dim, std::uint64_t idx_n_head, std::uint64_t top_k,
-                    MtpPack& out, std::string& err);
+                    MtpPack& out, std::string& err, bool entry_only = false);
 
 }  // namespace qinfer::dense

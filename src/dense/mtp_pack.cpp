@@ -181,7 +181,7 @@ std::uint64_t MtpSlice::row_bytes() const {
 bool build_mtp_pack(const artifact::GgufFile& gguf, std::uint64_t n_embd, std::uint64_t hc,
                     std::uint64_t hc_lr, std::uint64_t head_dim, std::uint64_t n_rot,
                     std::uint64_t idx_dim, std::uint64_t idx_n_head, std::uint64_t top_k,
-                    MtpPack& out, std::string& err) {
+                    MtpPack& out, std::string& err, bool entry_only) {
     err.clear();
     out = MtpPack{};
     out.n_embd = n_embd;
@@ -250,7 +250,12 @@ bool build_mtp_pack(const artifact::GgufFile& gguf, std::uint64_t n_embd, std::u
         {MtpRole::kSDown, {2, 0, 0, 0, Fuse::kNone}},
         {MtpRole::kSGateInp, {engine ? 2 : 1, n_embd, engine ? 1 : 0, n_embd, Fuse::kNone}},
     };
+    const auto is_entry = [](MtpRole r) {
+        return r == MtpRole::kPreNormEmbedding || r == MtpRole::kPreNormHidden ||
+               r == MtpRole::kFcEmbed || r == MtpRole::kFcHidden;
+    };
     for (const Job& j : jobs) {
+        if (entry_only && !is_entry(j.role)) continue;
         const std::size_t idx = static_cast<std::size_t>(j.role);
         const char* name = engine ? kNames[idx].engine : kNames[idx].blk48;
         if (name == nullptr) {
@@ -266,6 +271,12 @@ bool build_mtp_pack(const artifact::GgufFile& gguf, std::uint64_t n_embd, std::u
     }
     // 社区那份没有独立的 fc_hidden：入口投影是一张 eh_proj 吃 concat(e, h)，故 kFcHidden 缺席
     // （由调用方按 eh_proj 的输入轴两半理解，而不是把它当成两张独立的 fc）。
+
+    // 只要入口时到此为止（入口不依赖注意力/MoE/索引器那几张）。
+    if (entry_only) {
+        out.self_contained_head = !engine;
+        return true;
+    }
 
     // 由形状反推 n_head / n_head_kv / idx_n_head / 每专家前馈维，并互相核对。
     const MtpSlice& q = out.at(MtpRole::kAttnQ);
