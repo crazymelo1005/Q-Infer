@@ -496,6 +496,17 @@ int manual_model_entry(const char* model, int layer) {
         std::printf("主机路径失败：%s\n", err.c_str());
         return 1;
     }
+    // 主机那条 MoE 的用时（先热身一遍再计，免得把读盘算进去）——把「一步 54 ms/层」拆开要用它。
+    double host_moe_ms = 0.0;
+    for (int rep = 0; rep < 2; ++rep) {
+        const auto a = std::chrono::steady_clock::now();
+        if (!run_moe_layer(g, ml, x.data(), out_host.data(), s_host, err, nullptr, nullptr)) {
+            std::printf("主机路径热身失败：%s\n", err.c_str());
+            return 1;
+        }
+        const auto b = std::chrono::steady_clock::now();
+        host_moe_ms = std::chrono::duration<double, std::milli>(b - a).count();
+    }
 
     CudaExpertWorker worker(0, /*slots_per_layer=*/32);
     if (!worker.available()) {
@@ -511,10 +522,14 @@ int manual_model_entry(const char* model, int layer) {
     MoeOffload off{&groups, &src, &ds, &rs};
     MoeScratch s_dev;
     std::vector<float> out_dev(hidden, 0.0f);
+    const auto d0 = std::chrono::steady_clock::now();
     if (!run_moe_layer(g, ml, x.data(), out_dev.data(), s_dev, err, nullptr, nullptr, &off)) {
         std::printf("设备路径失败：%s\n", err.c_str());
         return 1;
     }
+    const auto d1 = std::chrono::steady_clock::now();
+    std::printf("  单层 MoE 用时：主机 %.2f ms、设备 %.2f ms（设备侧含首次分配与上传）\n",
+                host_moe_ms, std::chrono::duration<double, std::milli>(d1 - d0).count());
 
     int same = 0;
     double mag = 0.0;
