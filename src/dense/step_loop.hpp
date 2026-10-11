@@ -22,6 +22,9 @@
 #include "dense/layer_map.hpp"
 #include "dense/model_head.hpp"
 #include "dense/token_embed.hpp"
+#include "experts/step_record.hpp"
+#include "scheduling/step_budget.hpp"
+#include "storage/expert_cache.hpp"
 
 namespace qinfer::dense {
 
@@ -39,6 +42,15 @@ struct StepConfig {
     std::uint64_t idx_dim = 0;
     std::uint64_t idx_top_k = 0;
     std::uint64_t idx_block = 0;
+
+    // 专家缓存（engine §5）：`cache_slots == 0` 表示按需直读（与最早的实现一致）。逐层套用。
+    std::size_t cache_slots = 0;
+    int cache_ways = 8;
+    std::uint64_t cache_byte_budget = 0;
+    qinfer::storage::PolicyKind cache_policy = qinfer::storage::PolicyKind::kLru;
+
+    // 每步 PCIe 预算的画像输入。`pcie_h2d_gbps == 0` 表示这一步不做预算仲裁（观测记 0）。
+    scheduling::ProfileInputs profile;
 };
 
 struct StepModel {
@@ -59,6 +71,10 @@ struct StepScratch {
     std::vector<float> R;     // hc·n_embd
     std::vector<float> embd;  // n_embd，`run_token_step` 读进来的那一行 token embedding
     bool ready = false;       // QSA 层的 KV 与 rope 是否已配好（未配则 run 明确报错）
+
+    // 每步观测（interfaces §7 的预算与缓存两侧）。`last_record` 由 `run_step_model` 每次覆写。
+    experts::StepRecord last_record;
+    bool has_record = false;
 };
 
 // 给每层 QSA 配分页 KV（`n_pages` 个物理页、恒等页表）与 rope 表；`pos_base` 是序列首个 cell 的位置
@@ -67,8 +83,12 @@ bool prepare_step_scratch(const StepModel& model, std::uint64_t n_pages, std::ui
                           StepScratch& out, std::string& err);
 
 // 跑一个 token：`x_embd` 长 n_embd（残差栈的初值来源）。logits 在 `s.head.logits`（长 = 词表）。
+// `demand` 非空且 `cfg.profile.pcie_h2d_gbps > 0` 时，本步经仲裁器记一次预算观测（interfaces §7）；
+// 否则预算那几项记 0（预算的**预测性**专家需求来自共现与会话亲和，本仓库尚无该来源）。
+// 无论走不走预算，缓存侧的观测都会写进 `s.last_record`。
 bool run_step_model(const artifact::GgufFile& gguf, const StepModel& model, const float* x_embd,
-                    StepScratch& s, std::string& err);
+                    StepScratch& s, std::string& err,
+                    const scheduling::StepDemand* demand = nullptr);
 
 // 便捷入口：从 token id 读 embedding 行（`token_embd.weight`）再跑一步。等价于先
 // `read_token_embedding` 到 `s.embd` 再 `run_step_model(..., s.embd.data(), ...)`。

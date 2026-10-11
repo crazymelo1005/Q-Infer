@@ -605,6 +605,102 @@ void test_spec_decode() {
     }
 }
 
+// 专家缓存与每步观测接进步循环：缓存对数值透明，观测记的是本步增量与步末占用；给了需求就走仲裁器。
+void test_cache_and_budget() {
+    const std::filesystem::path p = write_gguf("qinfer_step_cache.gguf", model_tensors());
+    artifact::GgufFile g;
+    std::string err;
+    CHECK(g.open(p.string(), err));
+
+    StepConfig plain = two_layer_config();
+    StepConfig cached = two_layer_config();
+    cached.cache_slots = 4;
+    cached.cache_ways = 4;
+
+    StepModel mp, mc;
+    CHECK(build_step_model(g, plain, mp, err));
+    CHECK(build_step_model(g, cached, mc, err));
+    CHECK(mp.blocks[0].moe.cache_slots == 0);   // 直读
+    CHECK(mc.blocks[0].moe.cache_slots == 4);   // 缓存配置逐层套用
+    CHECK(mc.blocks[1].moe.cache_slots == 4);
+
+    const std::vector<float> x = make_embd();
+    StepScratch sp, sc;
+    CHECK(prepare_step_scratch(mp, 4, 0, sp, err));
+    CHECK(prepare_step_scratch(mc, 4, 0, sc, err));
+    CHECK(run_step_model(g, mp, x.data(), sp, err));
+    CHECK(run_step_model(g, mc, x.data(), sc, err));
+    // 缓存对数值透明：两条路径逐位一致。
+    for (std::size_t i = 0; i < sp.head.logits.size(); ++i) {
+        CHECK(std::bit_cast<std::uint32_t>(sp.head.logits[i]) ==
+              std::bit_cast<std::uint32_t>(sc.head.logits[i]));
+    }
+    // 直读那条路没有缓存可观测 → 记录里缓存侧全 0。
+    CHECK(sp.has_record);
+    CHECK(sp.last_record.cache_hits == 0 && sp.last_record.cache_misses == 0);
+    // 缓存那条路：第一步是首次填充（全未命中），步末有常驻。
+    CHECK(sc.has_record);
+    CHECK(sc.last_record.cache_misses == 4u);  // 2 层 × top-2 专家
+    CHECK(sc.last_record.cache_hits == 0u);
+    CHECK(sc.last_record.hit_rate == 0.0);
+    CHECK(sc.last_record.residents == 4u && sc.last_record.bytes_resident > 0u);
+
+    // 第二步：路由与上一步相同（路由器全 1 → top-2 恒为 {0,1}）→ 全部命中。
+    CHECK(run_step_model(g, mc, x.data(), sc, err));
+    CHECK(sc.last_record.cache_hits == 4u);
+    CHECK(sc.last_record.cache_misses == 0u);
+    CHECK(sc.last_record.hit_rate == 1.0);
+    CHECK(sc.last_record.cache_evictions == 0u);
+
+    // 只给一个槽位：同一个 token 内的第二个专家换不掉第一个 → 被拒 + 走临时缓冲，数值仍不变。
+    StepConfig tiny = cached;
+    tiny.cache_slots = 1;
+    tiny.cache_ways = 1;
+    StepModel mt;
+    CHECK(build_step_model(g, tiny, mt, err));
+    StepScratch st;
+    CHECK(prepare_step_scratch(mt, 4, 0, st, err));
+    CHECK(run_step_model(g, mt, x.data(), st, err));
+    CHECK(st.last_record.cache_blocked >= 1u || st.last_record.cache_transient >= 1u);
+    for (std::size_t i = 0; i < st.head.logits.size(); ++i) {
+        CHECK(std::bit_cast<std::uint32_t>(st.head.logits[i]) ==
+              std::bit_cast<std::uint32_t>(sp.head.logits[i]));
+    }
+
+    // 预算侧：给了需求且画像里有带宽 → 走仲裁器；必需项超出预算记超支，预测性项放不下记迟到。
+    StepConfig budgeted = two_layer_config();
+    budgeted.profile.pcie_h2d_gbps = 28.64;
+    budgeted.profile.step_ms = 12.74;
+    budgeted.profile.io_share = 0.5;
+    StepModel mb;
+    CHECK(build_step_model(g, budgeted, mb, err));
+    StepScratch sb;
+    CHECK(prepare_step_scratch(mb, 4, 0, sb, err));
+    StepModel mm;
+    scheduling::StepDemand demand;
+    demand.step = 7;
+    demand.kv_bytes = 400u * 1024 * 1024;  // 必需项远超一步预算（环境2 画像约 186.8 MiB）
+    demand.table = scheduling::TableDemand{16, 90, 1.133};
+    for (std::uint32_t e = 0; e < 4; ++e) {
+        demand.experts.push_back(scheduling::ExpertCandidate{e, 0.5 - 0.1 * e, 200u * 1024 * 1024});
+    }
+    CHECK(run_step_model(g, mb, x.data(), sb, err, &demand));
+    const experts::StepRecord& r = sb.last_record;
+    CHECK(r.step == 7);
+    CHECK(r.budget_bytes == scheduling::step_budget_bytes(budgeted.profile));
+    CHECK(r.budget_bytes > 0u && r.admitted_bytes > 0u);
+    CHECK(r.overspend_bytes > 0u);       // 必需项超预算
+    CHECK(r.late_requests > 0u);         // 预测性项放不下
+    CHECK(r.budget_used > 0.0);
+    // 不给需求 → 预算那几项留 0（表示这一步没做仲裁），缓存侧照记。
+    StepScratch s2;
+    CHECK(prepare_step_scratch(mc, 4, 0, s2, err));
+    CHECK(run_step_model(g, mc, x.data(), s2, err));
+    CHECK(s2.last_record.budget_bytes == 0u && s2.last_record.budget_used == 0.0);
+    CHECK(s2.last_record.cache_misses == 4u);
+    (void) mm;
+}
+
 // 真模型手工入口：整模型跑几个 token，打印判型摘要与 logits 概况。
 int manual_model_entry(const char* model, int tokens) {
     artifact::GgufFile g;
@@ -684,6 +780,7 @@ int main(int argc, char** argv) {
     test_failures();
     test_token_generation();
     test_spec_decode();
+    test_cache_and_budget();
     std::puts("step_loop: 按层表串起 GDN+QSA 两层并出 logits；层序对调 / 少跑一层 / 不跑循环都可观测，"
               "逐层状态各归各层，token→embedding→logits→贪心的最小生成环可复现，三种接错都明确报错；"
               "投机解码接受/拒绝只改步数、不改序列");

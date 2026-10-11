@@ -38,6 +38,12 @@ bool build_step_model(const artifact::GgufFile& gguf, const StepConfig& cfg, Ste
             err = "层 " + std::to_string(l) + " 建不起来：" + err;
             return false;
         }
+        // 专家缓存的配置逐层套用（engine §5）；`cache_slots == 0` 时保持按需直读。
+        experts::MoeLayer& ml = out.blocks[static_cast<std::size_t>(l)].moe;
+        ml.cache_slots = cfg.cache_slots;
+        ml.cache_ways = cfg.cache_ways;
+        ml.cache_byte_budget = cfg.cache_byte_budget;
+        ml.cache_policy = cfg.cache_policy;
     }
     return build_model_head(gguf, cfg.n_embd, cfg.hc, cfg.hc_lr, out.head, err);
 }
@@ -76,7 +82,7 @@ bool prepare_step_scratch(const StepModel& model, std::uint64_t n_pages, std::ui
 }
 
 bool run_step_model(const artifact::GgufFile& gguf, const StepModel& model, const float* x_embd,
-                    StepScratch& s, std::string& err) {
+                    StepScratch& s, std::string& err, const scheduling::StepDemand* demand) {
     err.clear();
     if (x_embd == nullptr) {
         err = "run_step_model 的 embedding 为空";
@@ -94,12 +100,49 @@ bool run_step_model(const artifact::GgufFile& gguf, const StepModel& model, cons
 
     // 残差栈的初值：同一个向量广播到 hc 条流（[S-61]）。
     hc_broadcast_init(x_embd, model.cfg.n_embd, model.cfg.hc, s.R.data());
+    experts::StepRecord rec;
+    rec.step = demand != nullptr ? demand->step : 0;
     for (std::size_t l = 0; l < n; ++l) {
+        // 缓存侧的每步增量：按层取「本步前后」的快照差（首次调用时源还没建，前快照记全 0，
+        // 于是这一层的首次填充就正确地记成这一步的未命中）。
+        const experts::MoeScratch& ms = s.blocks[l].moe;
+        const experts::CacheSnapshot prev = ms.source != nullptr
+                                                ? experts::CacheSnapshot::of(*ms.source)
+                                                : experts::CacheSnapshot{};
         if (!run_block_layer(gguf, model.blocks[l], s.R.data(), s.blocks[l], err)) {
             err = "层 " + std::to_string(l) + " 跑不动：" + err;
             return false;
         }
+        if (ms.source != nullptr) {
+            const experts::CacheSnapshot now = experts::CacheSnapshot::of(*ms.source);
+            const auto inc = [](std::uint64_t a, std::uint64_t b) { return a > b ? a - b : 0; };
+            rec.cache_hits += inc(now.hits, prev.hits);
+            rec.cache_misses += inc(now.misses, prev.misses);
+            rec.cache_evictions += inc(now.replaced, prev.replaced);
+            rec.cache_blocked += inc(now.blocked, prev.blocked);
+            rec.cache_transient += inc(now.transient_reads, prev.transient_reads);
+            rec.residents += now.residents;
+            rec.bytes_resident += now.bytes_resident;
+            rec.page_entries += now.page_entries;
+        }
     }
+    // 预算侧：给了需求且画像里有带宽才走仲裁器；否则那几项留 0（表示这一步没做仲裁）。
+    if (demand != nullptr && model.cfg.profile.pcie_h2d_gbps > 0.0) {
+        const std::uint64_t budget = scheduling::step_budget_bytes(model.cfg.profile);
+        const scheduling::Result r = scheduling::arbitrate(budget, scheduling::build_requests(*demand));
+        const scheduling::StepObservation ob = scheduling::observe(r, budget, demand->step);
+        rec.budget_bytes = ob.budget_bytes;
+        rec.admitted_bytes = ob.admitted_bytes;
+        rec.overspend_bytes = ob.overspend_bytes;
+        rec.late_requests = ob.late_requests;
+        rec.late_bytes = ob.late_bytes;
+        rec.budget_used = ob.budget_used;
+    }
+    const std::uint64_t accesses = rec.cache_hits + rec.cache_misses;
+    rec.hit_rate = accesses > 0 ? static_cast<double>(rec.cache_hits) / static_cast<double>(accesses) : 0.0;
+    s.last_record = rec;
+    s.has_record = true;
+
     return run_model_head(gguf, model.head, s.R.data(), s.head, err);
 }
 
