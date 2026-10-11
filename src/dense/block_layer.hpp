@@ -51,8 +51,9 @@ bool build_block_layer(const artifact::GgufFile& gguf, int layer, std::uint64_t 
 
 struct BlockScratch {
     std::vector<float> a_norm_f32, f_norm_f32;
-    std::vector<std::uint16_t> a_down_bf16, a_up_bf16, a_inject_bf16;
-    std::vector<std::uint16_t> f_down_bf16, f_up_bf16, f_inject_bf16;
+    // 两组 hc_* 的三个投影一律解成 F32 存（档由文件声明：BF16 放大无损、Q8_0 逐块反量化，ADR-010）。
+    std::vector<float> a_down_f32, a_up_f32, a_inject_f32;
+    std::vector<float> f_down_f32, f_up_f32, f_inject_f32;
     GrScratch gr;
     std::vector<float> mixed, inject, block_out;
     GdnScratch gdn;

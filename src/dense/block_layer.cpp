@@ -2,10 +2,68 @@
 
 #include "experts/ffn.hpp"
 #include "kernels/bf16.hpp"
+#include "kernels/q8_0.hpp"
+#include "kernels/bf16.hpp"
 
 namespace qinfer::dense {
 
 namespace {
+
+// 把一张 hc_* 投影的字节按**它自己声明的档**解成 F32（ADR-010）：BF16 是 f32 的高半、放大无损；
+// F32 直读；Q8_0 逐块反量化。真模型里主模型部署那份是 BF16、社区 MTP pack 是 Q8_0。
+bool load_proj_f32(const artifact::GgufFile& g, const artifact::GgufTensorInfo& t,
+                   std::vector<float>& out, std::string& err) {
+    if (t.dims.empty()) {
+        err = t.name + " 没有维度";
+        return false;
+    }
+    const std::uint64_t cols = t.dims[0];
+    const std::uint64_t rows = t.dims.size() >= 2 ? t.dims[1] : 1;
+    if (t.type == 0) {  // F32
+        out.resize(static_cast<std::size_t>(t.elements()));
+        if (!g.read_at(t.offset, reinterpret_cast<std::uint8_t*>(out.data()), out.size() * 4)) {
+            err = t.name + " 读失败";
+            return false;
+        }
+        return true;
+    }
+    if (t.type == 30) {  // BF16 → F32（无损）
+        std::vector<std::uint16_t> tmp(static_cast<std::size_t>(t.elements()));
+        if (!g.read_at(t.offset, reinterpret_cast<std::uint8_t*>(tmp.data()), tmp.size() * 2)) {
+            err = t.name + " 读失败";
+            return false;
+        }
+        out.resize(tmp.size());
+        for (std::size_t i = 0; i < tmp.size(); ++i) out[i] = kernels::bf16_bits_to_f32(tmp[i]);
+        return true;
+    }
+    if (t.type == 8) {  // Q8_0：每块 32 值 / 34 字节（2 字节 fp16 尺度 + 32 个 int8 码）
+        constexpr std::uint64_t kBlock = 32, kBytes = 34;
+        if (cols == 0 || cols % kBlock != 0) {
+            err = t.name + " 的列数 " + std::to_string(cols) + " 不是 Q8_0 块元素数的整数倍";
+            return false;
+        }
+        const std::uint64_t nblk = cols / kBlock;
+        const std::uint64_t row_bytes = nblk * kBytes;
+        std::vector<std::uint8_t> raw(static_cast<std::size_t>(rows * row_bytes));
+        if (!g.read_at(t.offset, raw.data(), raw.size())) {
+            err = t.name + " 读失败";
+            return false;
+        }
+        out.assign(static_cast<std::size_t>(rows * cols), 0.0f);
+        for (std::uint64_t r = 0; r < rows; ++r) {
+            for (std::uint64_t b = 0; b < nblk; ++b) {
+                kernels::q8_0_dequant_block(
+                    reinterpret_cast<const kernels::Q80Block*>(raw.data() + r * row_bytes + b * kBytes),
+                    out.data() + r * cols + b * kBlock);
+            }
+        }
+        return true;
+    }
+    err = t.name + " 的档（码 " + std::to_string(t.type) +
+          "）本路径不支持（只收 F32 / BF16 / Q8_0）";
+    return false;
+}
 
 const artifact::GgufTensorInfo* need(const artifact::GgufFile& g, const std::string& name,
                                      std::string& err) {
@@ -39,30 +97,20 @@ bool need_gr_group(const artifact::GgufFile& g, const std::string& prefix,
 bool load_gr_group(const artifact::GgufFile& g, const artifact::GgufTensorInfo& n,
                    const artifact::GgufTensorInfo& d, const artifact::GgufTensorInfo& u,
                    const artifact::GgufTensorInfo& inj, std::vector<float>& n_f32,
-                   std::vector<std::uint16_t>& d_bf16, std::vector<std::uint16_t>& u_bf16,
-                   std::vector<std::uint16_t>& inj_bf16, std::string& err) {
+                   std::vector<float>& d_f32, std::vector<float>& u_f32,
+                   std::vector<float>& inj_f32, std::string& err) {
     if (!n_f32.empty()) return true;
     if (n.type != 0) {  // F32
         err = n.name + " 不是 F32（hc_*_norm 在这份 GGUF 里是 F32，[S-53]）";
         return false;
     }
-    const std::uint32_t bf16 = 30;
-    if (d.type != bf16 || u.type != bf16 || inj.type != bf16) {
-        err = d.name + " / " + u.name + " / " + inj.name + " 不是 BF16，本路径按 BF16 读";
-        return false;
-    }
     n_f32.resize(static_cast<std::size_t>(n.elements()));
-    d_bf16.resize(static_cast<std::size_t>(d.elements()));
-    u_bf16.resize(static_cast<std::size_t>(u.elements()));
-    inj_bf16.resize(static_cast<std::size_t>(inj.elements()));
-    if (!g.read_at(n.offset, reinterpret_cast<std::uint8_t*>(n_f32.data()), n_f32.size() * 4) ||
-        !g.read_at(d.offset, reinterpret_cast<std::uint8_t*>(d_bf16.data()), d_bf16.size() * 2) ||
-        !g.read_at(u.offset, reinterpret_cast<std::uint8_t*>(u_bf16.data()), u_bf16.size() * 2) ||
-        !g.read_at(inj.offset, reinterpret_cast<std::uint8_t*>(inj_bf16.data()), inj_bf16.size() * 2)) {
-        err = "读 hc_* 权重失败";
+    if (!g.read_at(n.offset, reinterpret_cast<std::uint8_t*>(n_f32.data()), n_f32.size() * 4)) {
+        err = "读 " + n.name + " 失败";
         return false;
     }
-    return true;
+    return load_proj_f32(g, d, d_f32, err) && load_proj_f32(g, u, u_f32, err) &&
+           load_proj_f32(g, inj, inj_f32, err);
 }
 
 }  // namespace
@@ -127,9 +175,9 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
     }
     const std::uint64_t n_embd = layer.n_embd;
     if (!load_gr_group(gguf, *layer.a_norm, *layer.a_down, *layer.a_up, *layer.a_inject,
-                       s.a_norm_f32, s.a_down_bf16, s.a_up_bf16, s.a_inject_bf16, err) ||
+                       s.a_norm_f32, s.a_down_f32, s.a_up_f32, s.a_inject_f32, err) ||
         !load_gr_group(gguf, *layer.f_norm, *layer.f_down, *layer.f_up, *layer.f_inject,
-                       s.f_norm_f32, s.f_down_bf16, s.f_up_bf16, s.f_inject_bf16, err)) {
+                       s.f_norm_f32, s.f_down_f32, s.f_up_f32, s.f_inject_f32, err)) {
         return false;
     }
     s.mixed.assign(static_cast<std::size_t>(n_embd), 0.0f);
@@ -138,9 +186,9 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
 
     // pre：gr_read(hc_attn_*) → 注意力 → gr_write。
     const GrWeights aw{GrTensor{s.a_norm_f32.data(), GrPrecision::kF32},
-                       GrTensor{s.a_down_bf16.data(), GrPrecision::kBf16},
-                       GrTensor{s.a_up_bf16.data(), GrPrecision::kBf16},
-                       GrTensor{s.a_inject_bf16.data(), GrPrecision::kBf16}};
+                       GrTensor{s.a_down_bf16.data(), GrPrecision::kF32},
+                       GrTensor{s.a_up_bf16.data(), GrPrecision::kF32},
+                       GrTensor{s.a_inject_bf16.data(), GrPrecision::kF32}};
     if (!gr_read(layer.gr, aw, R, 1e-6f, s.mixed.data(), s.inject.data(), s.gr, err)) return false;
     if (layer.kind == LayerKind::kGdn) {
         if (!run_gdn_layer(gguf, layer.gdn, s.mixed.data(), s.block_out.data(), s.gdn, err)) {
@@ -155,9 +203,9 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
 
     // post：gr_read(hc_ffn_*) → MoE → gr_write。
     const GrWeights fw{GrTensor{s.f_norm_f32.data(), GrPrecision::kF32},
-                       GrTensor{s.f_down_bf16.data(), GrPrecision::kBf16},
-                       GrTensor{s.f_up_bf16.data(), GrPrecision::kBf16},
-                       GrTensor{s.f_inject_bf16.data(), GrPrecision::kBf16}};
+                       GrTensor{s.f_down_bf16.data(), GrPrecision::kF32},
+                       GrTensor{s.f_up_bf16.data(), GrPrecision::kF32},
+                       GrTensor{s.f_inject_bf16.data(), GrPrecision::kF32}};
     if (!gr_read(layer.gr, fw, R, 1e-6f, s.mixed.data(), s.inject.data(), s.gr, err)) return false;
     if (!run_moe_layer(gguf, layer.moe, s.mixed.data(), s.block_out.data(), s.moe, err)) return false;
     return gr_write(layer.gr, R, s.block_out.data(), s.inject.data(), R, err);
