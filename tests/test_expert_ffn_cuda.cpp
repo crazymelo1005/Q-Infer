@@ -560,9 +560,18 @@ int main(int argc, char** argv) {
     if (argc >= 3 && std::string(argv[1]) == "--model") {
         int layer = 0;
         bool step = false;
-        for (int i = 2; i + 1 < argc; ++i) {
-            if (std::string(argv[i]) == "--layer") layer = std::atoi(argv[i + 1]);
-            if (std::string(argv[i]) == "--step") step = true;
+        for (int i = 2; i < argc; ++i) {
+            const std::string a = argv[i];
+            if (a == "--layer" && i + 1 < argc) {
+                layer = std::atoi(argv[++i]);
+            } else if (a == "--step") {
+                step = true;
+            } else if (a != argv[2]) {
+                // 认不出来的参数直接失败：最后一个参数曾经被循环上界跳过，于是「整模型一步」悄悄跑了
+                // 单层入口、对照看着通过——这种静默换入口的错比跑挂更坏。
+                std::printf("不认识的参数：%s\n", a.c_str());
+                return 2;
+            }
         }
         if (step) return manual_step_entry(argv[2]);
         return manual_model_entry(argv[2], layer);
