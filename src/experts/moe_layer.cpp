@@ -198,8 +198,12 @@ bool add_shared_expert(const artifact::GgufFile& gguf, const MoeLayer& layer, co
     // 共享专家：路由侧按权重、共享侧不加权，直接加（`y = Σ wᵢ·expertᵢ + shared`，[S-50]）。
     if (!layer.shared.present) return true;
     const std::size_t hidden = static_cast<std::size_t>(layer.hidden);
-    s.s_gate_inp.resize(hidden);
-    if (!gguf.read_at(layer.s_gate_inp->offset, reinterpret_cast<std::uint8_t*>(s.s_gate_inp.data()),
+    const bool shexp_bf16 = layer.shared.gate_inp_type == 30;
+    s.s_gate_inp.resize(shexp_bf16 ? hidden : 0);
+    s.s_gate_inp_f32.assign(shexp_bf16 ? 0 : hidden, 0.0f);
+    std::uint8_t* shexp_dst = shexp_bf16 ? reinterpret_cast<std::uint8_t*>(s.s_gate_inp.data())
+                                         : reinterpret_cast<std::uint8_t*>(s.s_gate_inp_f32.data());
+    if (!gguf.read_at(layer.s_gate_inp->offset, shexp_dst,
                       hidden * 2)) {
         err = "读共享专家的标量门失败";
         return false;
@@ -219,7 +223,9 @@ bool add_shared_expert(const artifact::GgufFile& gguf, const MoeLayer& layer, co
     }
     ExpertWeights sw{s.s_gate.data(), s.s_up.data(), s.s_down.data()};
     s.shared_out.assign(hidden, 0.0f);
-    if (!shared_expert_ffn(layer.shared, sw, s.s_gate_inp.data(), x, s.shared_out.data(), s.s_ffn,
+    const void* shexp_w = shexp_bf16 ? static_cast<const void*>(s.s_gate_inp.data())
+                                     : static_cast<const void*>(s.s_gate_inp_f32.data());
+    if (!shared_expert_ffn(layer.shared, sw, shexp_w, x, s.shared_out.data(), s.s_ffn,
                            err)) {
         return false;
     }

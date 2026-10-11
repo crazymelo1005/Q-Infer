@@ -67,7 +67,8 @@ struct MoeScratch {
     std::vector<float> weights;
     std::vector<int> order;  // 归并顺序：ids 的按专家 id 升序排列（engine §16）
     // 共享专家：标量门的 bf16 权重、三矩阵的字节区、以及它自己的中间缓冲。
-    std::vector<std::uint16_t> s_gate_inp;
+    std::vector<std::uint16_t> s_gate_inp;      // 共享专家的标量门（声明为 BF16 时）
+    std::vector<float> s_gate_inp_f32;         // 同上（声明为 F32 时，ADR-010）
     std::vector<std::uint8_t> s_gate, s_up, s_down;
     FfnScratch s_ffn;
     std::vector<float> shared_out;

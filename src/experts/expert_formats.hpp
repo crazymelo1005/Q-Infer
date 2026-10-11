@@ -90,7 +90,8 @@ struct SharedSpec {
     MatrixSpec gate;
     MatrixSpec up;
     MatrixSpec down;
-    bool gate_inp = false;  // ffn_gate_inp_shexp.weight 存在、1 维、维度 = hidden、且是 bf16
+    bool gate_inp = false;  // ffn_gate_inp_shexp.weight 存在、1 维、维度 = hidden、且是 bf16 或 f32
+    std::uint32_t gate_inp_type = 0;  // 标量门的档随张力声明走（ADR-010）
     bool usable() const { return present && gate.usable() && up.usable() && down.usable() && gate_inp; }
 };
 

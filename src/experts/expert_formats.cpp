@@ -129,7 +129,9 @@ SharedSpec read_shared_spec(const artifact::GgufFile& gguf, int layer,
     const artifact::GgufTensorInfo* t = gguf.find(ginp);
     if (t == nullptr) {
         problems.push_back({layer, ginp, "张力不存在（该层有共享专家）"});
-    } else if (t->dims.size() != 1 || format_from_type_code(t->type) != Format::kBf16) {
+    } else if (t->dims.size() != 1 ||
+               (format_from_type_code(t->type) != Format::kBf16 &&
+                format_from_type_code(t->type) != Format::kF32)) {
         problems.push_back({layer, ginp, "标量门不是 1 维 bf16（维度数 " +
                                              std::to_string(t->dims.size()) + "，类型码 " +
                                              std::to_string(t->type) + "）"});
@@ -139,6 +141,7 @@ SharedSpec read_shared_spec(const artifact::GgufFile& gguf, int layer,
                                              " 不一致"});
     } else {
         s.gate_inp = true;
+        s.gate_inp_type = t->type;
     }
     return s;
 }

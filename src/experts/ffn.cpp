@@ -143,14 +143,14 @@ float shared_scalar_gate_f32(const float* w_f32, const float* x, std::uint64_t n
 }
 
 bool shared_expert_ffn(const SharedSpec& spec, const ExpertWeights& w,
-                       const std::uint16_t* gate_inp_bf16, const float* x, float* out,
+                       const void* gate_inp, const float* x, float* out,
                        FfnScratch& scratch, std::string& err) {
     if (!spec.present) {
         err = "这一层没有共享专家";
         return false;
     }
-    if (!spec.gate_inp || gate_inp_bf16 == nullptr) {
-        err = "共享专家的标量门缺失或不是 1 维 bf16";
+    if (!spec.gate_inp || gate_inp == nullptr) {
+        err = "共享专家的标量门缺失（或不是 1 维 bf16 / f32）";
         return false;
     }
     // 三矩阵复用 expert_ffn：它已经按 gate/up 的档各自量化激活、在 gate 上做 SwiGLU、并把中间量
@@ -165,7 +165,12 @@ bool shared_expert_ffn(const SharedSpec& spec, const ExpertWeights& w,
         return false;
     }
     if (!expert_ffn(view, w, x, scratch, out, err)) return false;
-    const float g = shared_scalar_gate(gate_inp_bf16, x, spec.gate.cols);
+    // 档随张力声明走（ADR-010）：bf16 那条「两个操作数都舍 bf16」，f32 那条 F32×F32。
+    const float g = spec.gate_inp_type == 30
+                        ? shared_scalar_gate(static_cast<const std::uint16_t*>(gate_inp), x,
+                                             spec.gate.cols)
+                        : shared_scalar_gate_f32(static_cast<const float*>(gate_inp), x,
+                                                 spec.gate.cols);
     const std::size_t hidden = static_cast<std::size_t>(spec.down.rows);
     for (std::size_t i = 0; i < hidden; ++i) out[i] *= g;
     return true;
