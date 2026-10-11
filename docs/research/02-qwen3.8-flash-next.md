@@ -270,6 +270,38 @@ vLLM recipe 要点（[已确认]）：
 
 ---
 
+## 9. MTP 草稿层的两种 pack 与逐张力对照
+
+MTP 头在 HF 上不是一个单独文件：官方 checkpoint（`Qwen/Qwen3.8-Flash-Next`，BF16、131 分片、360 GB）把它作为 31 个 `mtp.*` 张力散在 28 个分片里，社区量化档（GSQ-RCO IQ2_XS）里根本没有这一层，参考引擎用 HTTP range 单独取出来（附 31 个 SHA256，[S-62]）。本地有该层的两种可互相替代的 pack，本仓库两种都要读：
+
+| | 引擎那份 | 社区那份 |
+|---|---|---|
+| 文件 | `strata-data/mtp/mtp-q2_0.gguf`（889 MB；另有引擎运行形态 `rt/{dense.bin,dense.txt,draft_vocab.bin,experts.bin}`） | `mtp-Qwen3.8-Flash-Next-Q8_0.gguf`（4.14 GB） |
+| 张力数 | 31 | 35 |
+| 命名 | checkpoint 原始名 `mtp.*` | llama.cpp 式 `blk.48.*`（挂成第 49 层） |
+| 专家档 | Q2_0 | Q8_0 |
+| 共享的 embedding 与头 | 不含（运行时 bind 主模型那三件） | 自包含 `token_embd` / `output` / `output_hc_*` |
+
+逐张力对照（canonical 角色 → 两份文件里的名字与形状）：
+
+| 角色 | 引擎那份（`mtp.*`） | 社区那份（`blk.48.*`） |
+|---|---|---|
+| 入口两支的归一 gamma | `pre_fc_norm_embedding.weight` [2560] 与 `pre_fc_norm_hidden.weight` [10240]，都 F32 | `nextn.enorm.weight` 与 `nextn.hnorm.weight`，都 F32 |
+| 入口两支的投影 | `fc_embedding.weight` 与 `fc_hidden.weight` 各 [2560×2560] BF16 | 融合成 `nextn.eh_proj.weight` [5120×2560]（5120 = 2560+2560，沿输入轴叠） |
+| 收尾 mixer 的 gamma | `hyper_connection_mixer.hc_norm.weight` [10240] F32 | `nextn.shared_head_norm.weight` [10240] F32 |
+| 收尾 mixer 的 down/up | `hyper_connection_mixer.input_mix_weight_{down,up}.weight` [10240×320] / [320×10240] BF16 | 同左（收尾这一处没有 block_inject） |
+| 注意力超连接 | `layers.0.attn_hyper_connection.{hc_norm F32, input_mix_weight_down, input_mix_weight_up, block_inject_weight [10240×4]}` | `hc_attn_{norm,down,up,inject}` |
+| MLP 超连接 | `layers.0.mlp_hyper_connection.{hc_norm, input_mix_weight_down, input_mix_weight_up, block_inject_weight}` | `hc_ffn_{norm,down,up,inject}` |
+| 注意力四个投影 | `layers.0.self_attn.{q_proj [2560×12288], k_proj [2560×512], v_proj [2560×512], o_proj [6144×2560]}` BF16 | `attn_{q,k,v,output}.weight`（形状相同） |
+| q/k 逐头归一 | `self_attn.{q,k}_norm.weight` [256] F32 | `attn_{q,k}_norm.weight` [256] F32 |
+| 索引器 | `indexer.index_qk_proj.weight` [2560×640] BF16（q 的 512 与 k 的 128 融合）+ `indexer.{q,k}_layernorm.weight` [128] F32 | 拆开：`indexer.{q_proj [2560×512], k_proj [2560×128]}` BF16 + `indexer.{q,k}_norm.weight` [128] F32 |
+| 路由 | `mlp.gate.weight` [2560×512] BF16 | `ffn_gate_inp.weight` [2560×512] F32 |
+| 路由专家 | `mlp.experts.gate_up_proj` [2560×1280×512] 与 `mlp.experts.down_proj` [640×2560×512]，都 Q2_0（gate/up 融合） | 拆开：`ffn_{gate,up}_exps` [2560×640×512] 与 `ffn_down_exps` [640×2560×512]，都 Q8_0 |
+| 共享专家 | `mlp.shared_expert.{gate,up,down}_proj.weight` BF16 | `ffn_{gate,up,down}_shexp.weight` |
+| 共享专家的标量门 | `mlp.shared_expert_gate.weight` [2560×1] BF16 | `ffn_gate_inp_shexp.weight` [2560] F32 |
+
+三处结论：① 名字要有一张两方言的映射表，且 gate/up 与索引器的 q/k 在一份里融合、在另一份里拆开，映射必须处理拆合；② 同一个角色在两份里的精度可以不同（路由就是 BF16 对 F32），故必须逐张力读它自己声明的档，不能按角色写死；③ 引擎那份不含共享的 embedding 与头，故加载器要有「共享头来源」这一项——自包含的用 pack 里的，否则 bind 主模型那三件。
+
 ## 来源
 
 | 编号 | 用于章节 | 内容 |
@@ -285,5 +317,6 @@ vLLM recipe 要点（[已确认]）：
 | S-34 | §3.2 | 参考引擎的 n-gram 哈希与 PLE 行读取实现（`src/kernels/ngram.cpp`、`src/kernels/ple_oracle_vectors.inc`） |
 | S-36 | §1、§2 | 实际部署模型的逐张量量化档分布（路由专家逐层换档；全表无 IQ2_XS） |
 | S-38 | §1、§2 | 同款模型另一档（IQ3_XXS）的逐张量量化档分布与专家字节合计 |
+| S-62 | §9 | MTP 草稿层：两种 pack 的逐张力对照、配对约定与上游接受率 |
 
 等级、复核状态与 URL 见 [references.md](references.md)。
