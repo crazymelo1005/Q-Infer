@@ -48,6 +48,7 @@ add_library(qinfer_dense
   src/dense/qsa_qk_prep.cpp
   src/dense/qsa_layer.cpp
   src/dense/layer_map.cpp
+  src/dense/model_head.cpp
 )
 target_include_directories(qinfer_dense PUBLIC src)
 target_link_libraries(qinfer_dense PUBLIC qinfer_kernels qinfer_artifact qinfer_experts)
@@ -190,6 +191,9 @@ target_link_libraries(test_layer_dispatch PRIVATE qinfer_experts)
 add_executable(test_bf16_gemv tests/test_bf16_gemv.cpp)
 target_link_libraries(test_bf16_gemv PRIVATE qinfer_kernels)
 
+add_executable(test_model_head tests/test_model_head.cpp)
+target_link_libraries(test_model_head PRIVATE qinfer_dense qinfer_artifact)
+
 add_executable(test_layer_map tests/test_layer_map.cpp)
 target_link_libraries(test_layer_map PRIVATE qinfer_dense qinfer_artifact)
 
@@ -279,5 +283,6 @@ add_test(NAME kv_page_cache COMMAND test_kv_page_cache)
 add_test(NAME qsa_qk_prep COMMAND test_qsa_qk_prep)
 add_test(NAME qsa_layer COMMAND test_qsa_layer)
 add_test(NAME layer_map COMMAND test_layer_map)
+add_test(NAME model_head COMMAND test_model_head)
 add_test(NAME bf16_gemv COMMAND test_bf16_gemv)
 add_test(NAME step_record COMMAND test_step_record)
