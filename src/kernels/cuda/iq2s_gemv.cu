@@ -19,9 +19,17 @@ namespace {
 __constant__ std::uint64_t c_iq2s_grid[1024];
 __constant__ std::uint8_t c_sign_bit[8];
 
+// 常量内存是**逐设备**的：同一张表在卡 0 传过，卡 1 那边仍是空的。故这里按设备记账，换卡就重传
+// （表只有 8 KiB，一次重传可忽略）。上一版用一个 process 级的 bool 记账，于是卡 1 上的内核读空表、
+// 算出来全是垃圾——「每张卡各算一次」那条用例把它抓住了。
 bool ensure_tables(std::string& err) {
-    static bool inited = false;
-    if (inited) return true;
+    int dev = -1;
+    if (cudaGetDevice(&dev) != cudaSuccess) {
+        err = "取当前设备失败";
+        return false;
+    }
+    static int done_dev = -1;
+    if (done_dev == dev) return true;
     cudaError_t st =
         cudaMemcpyToSymbol(c_iq2s_grid, detail::kIq2sGrid, sizeof(detail::kIq2sGrid));
     if (st != cudaSuccess) {
@@ -33,7 +41,7 @@ bool ensure_tables(std::string& err) {
         err = std::string("常量表（符号位）上传失败：") + cudaGetErrorString(st);
         return false;
     }
-    inited = true;
+    done_dev = dev;
     return true;
 }
 
