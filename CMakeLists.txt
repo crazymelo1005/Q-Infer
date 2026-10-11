@@ -341,6 +341,7 @@ if(QINFER_ENABLE_CUDA)
   add_library(qinfer_kernels_cuda
     src/kernels/cuda/q2_0_gemv.cu
     src/kernels/cuda/iq2s_gemv.cu
+    src/kernels/cuda/iq_gemv.cu
   )
   target_include_directories(qinfer_kernels_cuda PUBLIC src)
   target_link_libraries(qinfer_kernels_cuda PUBLIC qinfer_kernels CUDA::cudart)
@@ -352,4 +353,8 @@ if(QINFER_ENABLE_CUDA)
   add_executable(test_iq2s_cuda tests/test_iq2s_cuda.cpp)
   target_link_libraries(test_iq2s_cuda PRIVATE qinfer_kernels_cuda)
   add_test(NAME iq2s_cuda COMMAND test_iq2s_cuda)
+
+  add_executable(test_iq_gemv_cuda tests/test_iq_gemv_cuda.cpp)
+  target_link_libraries(test_iq_gemv_cuda PRIVATE qinfer_kernels_cuda)
+  add_test(NAME iq_gemv_cuda COMMAND test_iq_gemv_cuda)
 endif()
