@@ -1,5 +1,7 @@
 #include "experts/ffn.hpp"
 
+#include "scheduling/thread_pool.hpp"
+
 #include "kernels/bf16.hpp"
 #include "kernels/iq1m.hpp"
 #include "kernels/iq2s.hpp"
@@ -42,11 +44,13 @@ bool quantize_input(const MatrixSpec& m, const float* x, FfnScratch& s, std::str
     return false;
 }
 
-bool run_gemv(const MatrixSpec& m, const std::uint8_t* w, FfnScratch& s, float* out,
-              std::string& err) {
-    const int rows = static_cast<int>(m.rows);
-    const int blocks = static_cast<int>(m.row_blocks());
-    switch (m.format) {
+namespace {
+
+// 某个档的那一次调用：只看「从 w 这块字节、out 这块输出的第 0 行起算 rows 行」，故按行切块时把 w
+// 与 out 各偏移 r0 行即可——每一行算的东西完全没变（这是逐位一致的前提）。
+bool gemv_rows(Format f, const std::uint8_t* w, int rows, int blocks, const FfnScratch& s,
+               float* out, std::string& err) {
+    switch (f) {
         case Format::kIq2S:
             kernels::iq2s_gemv_q8k(w, rows, blocks, s.act_k.data(), out);
             return true;
@@ -81,9 +85,52 @@ bool run_gemv(const MatrixSpec& m, const std::uint8_t* w, FfnScratch& s, float* 
             kernels::q8_0_gemv_q8_0(w, rows, blocks, s.act_32.data(), out);
             return true;
         default:
-            err = std::string("格式 ") + format_name(m.format) + " 尚无内核，不能参与组装";
+            err = std::string("格式 ") + format_name(f) + " 尚无内核，不能参与组装";
             return false;
     }
+}
+
+// 有没有可分派的档。先判一次，是为了让并行那侧永远不会去写 err（那里多个线程同时写一个 string
+// 就是数据竞争）。
+bool dispatchable(Format f) {
+    switch (f) {
+        case Format::kIq2S:
+        case Format::kIq2Xs:
+        case Format::kIq2Xxs:
+        case Format::kIq1M:
+        case Format::kQ6K:
+        case Format::kIq3S:
+        case Format::kIq4Xs:
+        case Format::kIq3Xxs:
+        case Format::kQ2_0:
+        case Format::kIq4Nl:
+        case Format::kQ8_0:
+            return true;
+        default:
+            return false;
+    }
+}
+
+}  // namespace
+
+bool run_gemv(const MatrixSpec& m, const std::uint8_t* w, FfnScratch& s, float* out,
+              std::string& err) {
+    const int rows = static_cast<int>(m.rows);
+    const int blocks = static_cast<int>(m.row_blocks());
+    if (!dispatchable(m.format)) {
+        err = std::string("格式 ") + format_name(m.format) + " 尚无内核，不能参与组装";
+        return false;
+    }
+    // 按行并行：只切行、不切归约维，故与单线程逐位相同（engine §16 那条口径）。池子默认关。
+    scheduling::ThreadPool* p = scheduling::pool();
+    if (p == nullptr || rows <= 1) return gemv_rows(m.format, w, rows, blocks, s, out, err);
+    const std::uint64_t row_bytes = m.row_bytes();
+    p->run_rows(static_cast<std::uint64_t>(rows), /*grain=*/8,
+                [&](std::uint64_t b, std::uint64_t e) {
+                    gemv_rows(m.format, w + b * row_bytes, static_cast<int>(e - b), blocks, s,
+                              out + b, err);
+                });
+    return true;
 }
 
 float silu(float x) { return x / (1.0f + std::exp(-x)); }

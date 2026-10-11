@@ -20,6 +20,7 @@ target_include_directories(qinfer_storage PUBLIC src)
 add_library(qinfer_scheduling
   src/scheduling/budget_arbiter.cpp
   src/scheduling/step_budget.cpp
+  src/scheduling/thread_pool.cpp
 )
 target_include_directories(qinfer_scheduling PUBLIC src)
 
@@ -193,6 +194,9 @@ target_link_libraries(test_bus_share PRIVATE qinfer_scheduling)
 add_executable(test_expert_worker tests/test_expert_worker.cpp)
 target_link_libraries(test_expert_worker PRIVATE qinfer_experts)
 
+add_executable(test_thread_pool tests/test_thread_pool.cpp)
+target_link_libraries(test_thread_pool PRIVATE qinfer_experts)
+
 add_executable(test_compute_group tests/test_compute_group.cpp)
 target_link_libraries(test_compute_group PRIVATE qinfer_experts)
 
@@ -297,6 +301,7 @@ add_test(NAME router COMMAND test_router)
 add_test(NAME moe_layer COMMAND test_moe_layer)
 add_test(NAME bus_share COMMAND test_bus_share)
 add_test(NAME expert_worker COMMAND test_expert_worker)
+add_test(NAME thread_pool COMMAND test_thread_pool)
 add_test(NAME compute_group COMMAND test_compute_group)
 add_test(NAME layer_dispatch COMMAND test_layer_dispatch)
 add_test(NAME gated_residual COMMAND test_gated_residual)
