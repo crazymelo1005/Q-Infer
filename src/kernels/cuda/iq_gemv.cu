@@ -206,10 +206,15 @@ bool copy_in(DevBuf& dst, const void* src, std::size_t bytes, const char* what, 
     return true;
 }
 
-// 纯启动：三个指针都当作设备指针用，不分配、不拷贝。
+// 纯启动：三个指针都当作设备指针用，不分配、不拷贝。**常量表在这里保证就位**——只放在自包含入口
+// 的检查里是不够的：`_ddd` 那条（设备指针、常驻路径实际走的那条）不经过它，于是内核会读未初始化的
+// 常量内存（全零），算出来的点积看着像样、其实是垃圾。2026-10-12 就是这么栽的：IQ2_S 那块把
+// ensure_tables 放在 launch 里、IQ2_XXS/IQ1_M 这块放在 check_args 里，结果整模型从第一个
+// IQ2_XXS 层起全错，而两块内核各自的单测都是过（它们走的是自包含入口）。
 bool launch_iq_kernel(const void* d_w, int n_rows, int n_blocks, const void* d_y, void* d_out,
                       void (*kernel)(const std::uint8_t*, int, int, const std::uint8_t*, float*),
                       std::string& err) {
+    if (!ensure_tables(err)) return false;
     const int threads = 128;
     const int blocks = (n_rows + threads - 1) / threads;
     kernel<<<blocks, threads>>>(static_cast<const std::uint8_t*>(d_w), n_rows, n_blocks,
