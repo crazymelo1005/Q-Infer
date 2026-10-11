@@ -302,6 +302,8 @@ MTP 头在 HF 上不是一个单独文件：官方 checkpoint（`Qwen/Qwen3.8-Fl
 
 三处结论：① 名字要有一张两方言的映射表，且 gate/up 与索引器的 q/k 在一份里融合、在另一份里拆开，映射必须处理拆合；② 同一个角色在两份里的精度可以不同（路由就是 BF16 对 F32），故必须逐张力读它自己声明的档，不能按角色写死；③ 引擎那份不含共享的 embedding 与头，故加载器要有「共享头来源」这一项——自包含的用 pack 里的，否则 bind 主模型那三件。
 
+这一层前向的上游权威在环境2 本机上就有：`~/projects/ref_repos/vllm` 是 **v0.31.0**，实现落在 `vllm/models/qwen4_exp/nvidia/mtp.py`（与 `amd/mtp.py`），配套 `common/hyperconnection.py`、`nvidia/indexer_qsa.py`、`nvidia/qsa.py`、`nvidia/ple_layer.py`。**注意版本差**：参考引擎的 `mtp.hpp` 自述转写自 vLLM **0.30.0** 的 `qwen4_exp`，而本机这份是 **0.31.0**——两边对同一层若有改动，需以本机这份为准并回头核对引擎那份是否同步（同 `spec 4`/`spec 6` 那类不一致，登记时不要混用）。社区那份 `blk.48.*` 的 `nextn.eh_proj`/`enorm`/`hnorm` 命名即出自这条上游线（llama.cpp 侧同样有 `src/models/qwen4exp.cpp` 与 `conversion/qwen4exp.py`，在 `strata-run/third_party/llama.cpp/` 下）。
+
 ## 来源
 
 | 编号 | 用于章节 | 内容 |
