@@ -346,6 +346,7 @@ Strata 的攻击点正是「每层都在等搬运」这个 IO 循环。
 2. 因此 §3 表中「全部 24,576 个专家 pinned 锁页常驻」这条 [官方] 表述对该实例的实际部署不成立：它没有做到不可换出。
 3. `VmLck` 与 `VmPin` 均为 0，但这不能单独证明未使用页锁定内存（CUDA 的 page-locked 分配不走 mlock 记账），只作辅助信号；决定性证据是上面的 `Shmem` 与 swap 计数。
 4. 含义：「热专家进 pinned 区以避免换页抖动」是对上游做法的改变，不是复述上游；其代价是 pinned 页不可换出，会加剧内存不足时的整体压力——与上游把 `--vram-reserve-mib` 从 770 压到 0 会触发系统回退属同一类取舍。
+5. 这个实例开的是引擎自己的常驻模式 `--resident-experts`（低内存 PC 的常驻模式，由它的 `setup` 选；在选项表里等价于 `--mmap-experts --resident-cpu-experts`，再加「驱动允许时把这份拷贝页锁定、否则锁在工作集里」与 4 GiB 的 RAM 余量）。语义是：显存专家缓存装不下的那些专家从 `experts.bin` 一次性拷进 RAM，使 decode 与 prompt 的每一步都不再读文件；纯 mmap 模式则通过 OS 页缓存读，而小内存机器上页缓存会被交还给 SSD。拷贝的字节与放置和 mmap 模式相同，故两者的答案一致，差的只是放置与 IO——上表那约 35 GiB 的常驻区正来自这条。出处：引擎源码 `src/program/generate.cpp` 的选项表与常驻 RAM 模式注解、`include/strata/core/expert_source.hpp` 的模式说明（2026-10-11 取得）。
 
 ### 10.2 机器画像（engine §10 的标定产物）
 
