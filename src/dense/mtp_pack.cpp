@@ -249,7 +249,7 @@ bool build_mtp_pack(const artifact::GgufFile& gguf, std::uint64_t n_embd, std::u
         {MtpRole::kSUp, {2, n_embd, 0, 0, Fuse::kNone}},
         {MtpRole::kSDown, {2, 0, 0, 0, Fuse::kNone}},
         {MtpRole::kSGateInp,
-         {engine ? 2u : 1u, n_embd, engine ? std::uint64_t{1} : std::uint64_t{0}, n_embd,
+         {engine ? 2 : 1, n_embd, engine ? std::uint64_t{1} : std::uint64_t{0}, n_embd,
           Fuse::kNone}},
     };
     const auto is_entry = [](MtpRole r) {
