@@ -42,6 +42,7 @@ add_library(qinfer_dense
   src/dense/qsa_select.cpp
   src/dense/qsa_attend.cpp
   src/dense/rope.cpp
+  src/dense/qsa_index.cpp
 )
 target_include_directories(qinfer_dense PUBLIC src)
 target_link_libraries(qinfer_dense PUBLIC qinfer_kernels qinfer_artifact qinfer_experts)
@@ -181,6 +182,9 @@ target_link_libraries(test_expert_worker PRIVATE qinfer_experts)
 add_executable(test_layer_dispatch tests/test_layer_dispatch.cpp)
 target_link_libraries(test_layer_dispatch PRIVATE qinfer_experts)
 
+add_executable(test_qsa_index tests/test_qsa_index.cpp)
+target_link_libraries(test_qsa_index PRIVATE qinfer_dense)
+
 add_executable(test_rope tests/test_rope.cpp)
 target_link_libraries(test_rope PRIVATE qinfer_dense)
 
@@ -242,4 +246,5 @@ add_test(NAME gdn_layer COMMAND test_gdn_layer)
 add_test(NAME qsa_select COMMAND test_qsa_select)
 add_test(NAME qsa_attend COMMAND test_qsa_attend)
 add_test(NAME rope COMMAND test_rope)
+add_test(NAME qsa_index COMMAND test_qsa_index)
 add_test(NAME step_record COMMAND test_step_record)
