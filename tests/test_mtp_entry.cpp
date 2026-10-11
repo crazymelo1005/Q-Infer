@@ -252,9 +252,66 @@ void test_both_dialects_agree() {
     CHECK(d_whole > 0.05);
 }
 
+// 真权重手工入口：对一份真 MTP pack 跑一遍入口（真几何 N=2560 / hc=4），打印两侧的量级概况。
+// 输入是合成的（embedding 行与残差栈），故这一片只核「真字节 + 真几何跑得动、有限、量级合理」；
+// 整层的数值核验随层体那片做。
+int manual_model_entry(const char* model) {
+    artifact::GgufFile g;
+    std::string err;
+    if (!g.open(model, err)) {
+        std::printf("打不开：%s（%s）\n", model, err.c_str());
+        return 1;
+    }
+    MtpPack p;
+    if (!build_mtp_pack(g, 2560, 4, 320, 256, 64, 128, 4, 10, p, err, /*entry_only=*/true)) {
+        std::printf("建入口失败：%s\n", err.c_str());
+        return 1;
+    }
+    std::printf("方言：%s；自包含共享头：%s\n",
+                p.dialect == MtpDialect::kEngineNames ? "引擎那份（mtp.*）" : "社区那份（blk.48.*）",
+                p.self_contained_head ? "是" : "否");
+    for (MtpRole r : {MtpRole::kPreNormEmbedding, MtpRole::kPreNormHidden, MtpRole::kFcEmbed,
+                      MtpRole::kFcHidden}) {
+        const MtpSlice& s = p.at(r);
+        std::printf("  %-22s %s 档 %3u cols %5llu rows %5llu\n", to_string(r),
+                    s.present() ? "有" : "无", s.present() ? s.type : 0u,
+                    (unsigned long long) s.cols, (unsigned long long) s.rows);
+    }
+    std::vector<float> tok(2560), R(2560 * 4);
+    for (std::size_t i = 0; i < tok.size(); ++i) tok[i] = 0.02f * (float) ((int) (i % 13) - 6);
+    for (std::size_t j = 0; j < R.size(); ++j) {
+        R[j] = ((j < 2560) ? 0.02f : 0.2f) * (float) ((int) (j % 11) - 5);
+    }
+    std::vector<float> out(2560 * 4, 0.0f);
+    MtpEntryScratch s;
+    if (!mtp_entry(g, p, tok.data(), R.data(), s, out.data(), err)) {
+        std::printf("跑入口失败：%s\n", err.c_str());
+        return 1;
+    }
+    double men = 0.0, mhn = 0.0, mout = 0.0, mo0 = 0.0, mo1 = 0.0;
+    bool finite = true;
+    for (float v : s.en) men += std::fabs((double) v);
+    for (float v : s.hn) mhn += std::fabs((double) v);
+    for (std::size_t j = 0; j < out.size(); ++j) {
+        if (!std::isfinite(out[j])) finite = false;
+        mout += std::fabs((double) out[j]);
+        if (j < 2560) {
+            mo0 += std::fabs((double) out[j]);
+        } else {
+            mo1 += std::fabs((double) out[j]);
+        }
+    }
+    std::printf("  |en| %.6g、|hn| %.6g、|R| %.6g（流 0 %.6g / 流 1 %.6g）、有限：%s\n", men, mhn,
+                mout, mo0, mo1, finite ? "是" : "否");
+    return finite ? 0 : 1;
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc >= 3 && std::string(argv[1]) == "--model") {
+        return manual_model_entry(argv[2]);
+    }
     test_both_dialects_agree();
     std::puts("mtp_entry: 两方言（引擎 fc_embed+fc_hidden 与社区 eh_proj）给出同一个 R，"
               "且与整栈归一 + en 广播 + 逐流 fc_hidden 的独立双精度参考一致；三处错读法可观测");
