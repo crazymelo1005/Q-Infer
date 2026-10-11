@@ -16,8 +16,11 @@ namespace qinfer::experts {
 
 // 一层的一批未命中专家。out 为 n × hidden、专家主序（第 e 个专家的结果在 out + e*hidden）。
 struct ExpertJob {
-    const LayerSpec* spec = nullptr;         // 该层三矩阵的档与块几何
+    const LayerSpec* spec = nullptr;         // 该层三矩阵的档与块几何（层号也在里面）
     const ExpertWeights* experts = nullptr;  // n 个专家的三矩阵字节区
+    // n 个专家各自的 id，与 experts 同序（interfaces §8.1 那张表里的「专家 id 列表」）。
+    // 归并顺序用的是它；设备侧的工人还用它认「这个专家的权重是不是已经常驻了」。
+    const int* ids = nullptr;
     int n = 0;                               // 专家数
     const float* x = nullptr;                // 激活（长度 hidden，已按档由 worker 内部量化）
     std::uint64_t hidden = 0;

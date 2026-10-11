@@ -244,6 +244,96 @@ void test_bad_inputs_fail_reply() {
     CHECK(!err.empty());
 }
 
+void test_worker_computes_a_job_and_stays_resident() {
+    const LayerSpec spec = make_spec();
+    const std::vector<ExpertBytes> experts{make_expert(7), make_expert(8)};
+    const std::vector<float> x = make_x();
+    const std::vector<int> ids{5, 4};  // 刻意与下标不同序：设备侧按 id 认常驻，不看位置
+
+    std::vector<ExpertWeights> views{experts[0].view(), experts[1].view()};
+    std::vector<float> host(experts.size() * kHidden, 0.0f);
+    for (std::size_t e = 0; e < experts.size(); ++e) {
+        FfnScratch sc;
+        std::string err;
+        must(expert_ffn(spec, experts[e].view(), x.data(), sc, host.data() + e * kHidden, err), err,
+             "主机参考");
+    }
+
+    CudaExpertWorker worker(0, /*slots_per_layer=*/4);
+    CHECK(worker.available());
+    ExpertJob job;
+    job.spec = &spec;
+    job.experts = views.data();
+    job.ids = ids.data();
+    job.n = 2;
+    job.x = x.data();
+    job.hidden = kHidden;
+    std::vector<float> got(experts.size() * kHidden, 0.0f);
+    job.out = got.data();
+
+    std::string err;
+    must(worker.submit(job, err), err, "submit");
+    CHECK(worker.wait(err));
+    const std::uint64_t after = worker.uploaded_bytes();
+    CHECK(after == worker.resident_bytes());
+    must(worker.submit(job, err), err, "第二次 submit（两个专家都已在常驻区）");
+    CHECK(worker.uploaded_bytes() == after);
+    CHECK(worker.stats().jobs == 2 && worker.stats().experts == 4 && worker.stats().failed == 0);
+
+    int same = 0;
+    for (std::size_t i = 0; i < got.size(); ++i) {
+        if (std::bit_cast<std::uint32_t>(got[i]) == std::bit_cast<std::uint32_t>(host[i])) ++same;
+    }
+    std::printf("  工人算出来的一批：位相同 %d/%zu\n", same, got.size());
+    CHECK(same == static_cast<int>(got.size()));
+}
+
+void test_select_group_prefers_the_cuda_group() {
+    const LayerSpec spec = make_spec();
+    CudaExpertWorker worker(0, 4);
+    IgpuExpertWorker igpu(/*device_usable=*/false);
+    qinfer::scheduling::BusShareLimiter off(0);
+    CpuExpertWorker cpu;
+    std::vector<ComputeGroup> groups{igpu_group(igpu, off), cuda_group(worker), cpu_group(cpu)};
+
+    ExpertJob job;
+    job.spec = &spec;
+    job.n = 2;
+    job.hidden = kHidden;
+    std::string why;
+    const GroupPick pick = select_group(groups, job, why);
+    CHECK(pick.group != nullptr);
+    CHECK(pick.group->kind == GroupKind::kCuda);
+}
+
+void test_unsupported_role_is_refused_by_the_worker() {
+    // down 换成 IQ2_S：角色不对（它当 down 时的激活搭档是 Q8_K，设备侧只做了 Q8_0 的 h 量化器）。
+    // 组的档掩码会放它进来（IQ2_S 确实是设备侧有内核的档），真正挡住它的是工人的 init——
+    // 这正是 §8.5 那条「改派给兜底组」的触发路径。
+    LayerSpec bad = make_spec();
+    bad.down.format = Format::kIq2S;
+    bad.down.cols = kFfn;
+    const std::vector<ExpertBytes> experts{make_expert(9)};
+    std::vector<ExpertWeights> views{experts[0].view()};
+    const std::vector<int> ids{1};
+    const std::vector<float> x = make_x();
+    std::vector<float> out(kHidden, 0.0f);
+
+    CudaExpertWorker worker(0, 2);
+    ExpertJob job;
+    job.spec = &bad;
+    job.experts = views.data();
+    job.ids = ids.data();
+    job.n = 1;
+    job.x = x.data();
+    job.hidden = kHidden;
+    job.out = out.data();
+    std::string err;
+    CHECK(!worker.submit(job, err));
+    CHECK(!err.empty());
+    CHECK(worker.stats().failed == 1);
+}
+
 }  // namespace
 
 int main() {
@@ -251,6 +341,9 @@ int main() {
     test_same_slot_twice_gives_that_slot();
     test_unsupported_layers_fail_loudly();
     test_bad_inputs_fail_reply();
-    std::puts("expert_ffn_cuda: 设备侧一层专家前馈（权重常驻）与主机 expert_ffn 一致");
+    test_worker_computes_a_job_and_stays_resident();
+    test_select_group_prefers_the_cuda_group();
+    test_unsupported_role_is_refused_by_the_worker();
+    std::puts("expert_ffn_cuda: 设备侧一层前馈（权重常驻）、工人与 CUDA 组都成立");
     return 0;
 }

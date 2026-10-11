@@ -93,6 +93,7 @@ bool dispatch_layer_batch(const MoeLayer& layer, ExpertSource& src,
     ExpertJob job;
     job.spec = &layer.spec;
     job.experts = s.weights.data();
+    job.ids = ids;  // 与 experts 同序：设备侧的工人靠它认常驻，归并靠 order
     job.n = n;
     job.x = x;
     job.hidden = layer.hidden;

@@ -362,6 +362,7 @@ if(QINFER_ENABLE_CUDA)
   # 故不能塞进只依赖 kernels 的那个库里。
   add_library(qinfer_experts_cuda
     src/experts/cuda/expert_ffn_cuda.cu
+    src/experts/cuda/cuda_worker.cu
   )
   target_include_directories(qinfer_experts_cuda PUBLIC src)
   target_link_libraries(qinfer_experts_cuda PUBLIC qinfer_kernels_cuda qinfer_experts)
