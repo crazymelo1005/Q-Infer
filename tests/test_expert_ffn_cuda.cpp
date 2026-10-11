@@ -544,7 +544,7 @@ int manual_model_entry(const char* model, int layer) {
 
 // 整模型一步：不交出去（逐层主机路径）与交出去（48 层逐层交给 CUDA 组）两条路的 logits 该逐位
 // 一致。这条是「设备侧那批真的进了整模型一步」的判据，且要求没有一次重派（否则有层没被接住）。
-int manual_step_entry(const char* model, int layers, bool fleet) {
+int manual_step_entry(const char* model, int layers, bool fleet, int tokens) {
     qinfer::artifact::GgufFile g;
     std::string err;
     if (!g.open(model, err)) {
@@ -588,12 +588,19 @@ int manual_step_entry(const char* model, int layers, bool fleet) {
         std::printf("预备 scratch 失败：%s\n", err.c_str());
         return 1;
     }
-    const auto t_host0 = std::chrono::steady_clock::now();
-    if (!qinfer::dense::run_step_model(g, m, x.data(), s_ref, err)) {
-        std::printf("主机路径跑不动：%s\n", err.c_str());
-        return 1;
+    // 连跑若干步、逐步计时：设备侧第 0 步要把权重搬上去，只有后面的步才反映稳态。
+    std::vector<double> host_ms;
+    std::vector<std::vector<float>> host_logits;
+    for (int t = 0; t < tokens; ++t) {
+        const auto a = std::chrono::steady_clock::now();
+        if (!qinfer::dense::run_step_model(g, m, x.data(), s_ref, err)) {
+            std::printf("主机路径跑不动（第 %d 步）：%s\n", t, err.c_str());
+            return 1;
+        }
+        const auto b = std::chrono::steady_clock::now();
+        host_ms.push_back(std::chrono::duration<double, std::milli>(b - a).count());
+        host_logits.push_back(s_ref.head.logits);
     }
-    const auto t_host1 = std::chrono::steady_clock::now();
 
     CpuExpertWorker cpu;
     std::vector<ComputeGroup> one_group;
@@ -640,16 +647,34 @@ int manual_step_entry(const char* model, int layers, bool fleet) {
         std::printf("预备 scratch（设备路径）失败：%s\n", err.c_str());
         return 1;
     }
-    const auto t_dev0 = std::chrono::steady_clock::now();
-    if (!qinfer::dense::run_step_model(g, m2, x.data(), s_dev, err)) {
-        std::printf("设备路径跑不动：%s\n", err.c_str());
-        return 1;
+    std::vector<double> dev_ms;
+    std::vector<std::vector<float>> dev_logits;
+    for (int t = 0; t < tokens; ++t) {
+        const auto a = std::chrono::steady_clock::now();
+        if (!qinfer::dense::run_step_model(g, m2, x.data(), s_dev, err)) {
+            std::printf("设备路径跑不动（第 %d 步）：%s\n", t, err.c_str());
+            return 1;
+        }
+        const auto b = std::chrono::steady_clock::now();
+        dev_ms.push_back(std::chrono::duration<double, std::milli>(b - a).count());
+        dev_logits.push_back(s_dev.head.logits);
     }
-    const auto t_dev1 = std::chrono::steady_clock::now();
-    const double host_s = std::chrono::duration<double>(t_host1 - t_host0).count();
-    const double dev_s = std::chrono::duration<double>(t_dev1 - t_dev0).count();
-    std::printf("  用时：主机 %.3f s、设备 %.3f s（设备/主机 %.2f×；设备侧含首次分配与逐层上传）\n",
-                host_s, dev_s, dev_s / host_s);
+    std::printf("  逐步用时（同一份 x，共 %d 步；第 0 步含设备侧首次分配与逐层上传）\n", tokens);
+    for (int t = 0; t < tokens; ++t) {
+        int same = 0;
+        for (std::size_t i = 0; i < host_logits[static_cast<std::size_t>(t)].size() &&
+                                i < dev_logits[static_cast<std::size_t>(t)].size();
+             ++i) {
+            if (std::bit_cast<std::uint32_t>(host_logits[static_cast<std::size_t>(t)][i]) ==
+                std::bit_cast<std::uint32_t>(dev_logits[static_cast<std::size_t>(t)][i])) {
+                ++same;
+            }
+        }
+        std::printf("   步 %d：主机 %.0f ms、设备 %.0f ms（%.2f×），logits 位相同 %d/%zu\n", t,
+                    host_ms[static_cast<std::size_t>(t)], dev_ms[static_cast<std::size_t>(t)],
+                    dev_ms[static_cast<std::size_t>(t)] / host_ms[static_cast<std::size_t>(t)],
+                    same, host_logits[static_cast<std::size_t>(t)].size());
+    }
 
     // 判据：设备路径按 ADR-009/§8.6 是**分布级**的（每层的 h 量化在舍入边界上可能与主机差一个
     // 量化步，48 层把这点差放大成处处不同），故这里量出相对差并要求它小，同时把位相同的个数报出来
@@ -720,6 +745,7 @@ int main(int argc, char** argv) {
     if (argc >= 3 && std::string(argv[1]) == "--model") {
         int layer = 0;
         int layers = 48;
+        int tokens = 3;
         bool step = false;
         bool fleet = false;
         for (int i = 2; i < argc; ++i) {
@@ -728,6 +754,8 @@ int main(int argc, char** argv) {
                 layer = std::atoi(argv[++i]);
             } else if (a == "--layers" && i + 1 < argc) {
                 layers = std::atoi(argv[++i]);
+            } else if (a == "--tokens" && i + 1 < argc) {
+                tokens = std::atoi(argv[++i]);
             } else if (a == "--step") {
                 step = true;
             } else if (a == "--fleet") {
@@ -739,7 +767,7 @@ int main(int argc, char** argv) {
                 return 2;
             }
         }
-        if (step) return manual_step_entry(argv[2], layers, fleet);
+        if (step) return manual_step_entry(argv[2], layers, fleet, tokens);
         return manual_model_entry(argv[2], layer);
     }
     for (const GuFormat& gu : kGuFormats) test_device_matches_host(gu);
