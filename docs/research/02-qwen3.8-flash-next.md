@@ -306,6 +306,14 @@ MTP 头在 HF 上不是一个单独文件：官方 checkpoint（`Qwen/Qwen3.8-Fl
 
 **入口两方言的等价性已由上游证实**（`vllm/models/qwen4_exp/nvidia/mtp.py` v0.31.0，2026-10-11 读取）：l.190-191 的注释明写「`residual_linear_shared` fusion: fc_embedding projects the token embedding, **fc_hidden (shared across HC branches)** projects the ...」——fc_hidden 是**跨 hc 条流共用**的一张矩阵；l.294-296 是 embedding 支（`pre_fc_norm_embedding` → `fc_embedding` → [T, H]）；l.304-307 是残差支（`pre_fc_norm_hidden(hidden_states.flatten(-2))` 先把 hc 维压平、**整栈 HC·N 一次归一**，再 `.view(...)` 变回逐流后调 `fc_hidden`）。与引擎那份的 `mtp.cpp` l.488-497 逐句对应。故社区那份把两张矩阵融进 `eh_proj`（输入轴 5120 = 2560 + 2560）后，**逐流**应用它就等价于「engine 的 `fc_embedding@e` 广播 + `fc_hidden@h_c`」——两种 pack 在数学上同一件事，只是融合让「共享的 e 那半」也跟着按流算了一遍（结果相同）。社区那份的 `enorm`/`hnorm`/`eh_proj` 命名出自 llama.cpp 的转换脚本，vLLM 本体仍叫 `pre_fc_norm_*`/`fc_*`。
 
+**入口已在两份真 pack 上跑通**（`test_mtp_entry --model`，真几何 N=2560 / hc=4 / hc_dim=10240）：引擎那份读到 `γ_embed [2560] F32 / γ_hidden [10240] F32 / fc_embedding [2560×2560] BF16 / fc_hidden [2560×2560] BF16`（**fc_hidden 的输入是单条流的 2560，不是整栈**，在真文件上再次确认），社区那份 `enorm/hnorm F32` + `eh_proj [5120×2560] Q8_0` + `fc_hidden 缺席`。两侧输出都有限。入口的**数值级**核验要等层体（单跑入口没有可对照的量）。
+
+**层体开工前要先解决的三处**（都是「复用 `block_layer` 的门控残差/注意力/MoE」时会撞上的，逐条来自真文件的差异，不是推的）：
+
+1. **判型的扫描范围**：`scan_layers` 要求 0..n-1 每层都能判型，而 MTP pack 里只有 `blk.48.*` 一层 → 需要一个「只建这一层」的入口，不能走全模型那条。
+2. **路由的档不一定是 BF16**：主模型部署那份的 `ffn_gate_inp` 是 **BF16**，而社区 MTP pack 的 `ffn_gate_inp` 是 **F32**（5242880 B = 2560×512×4）。现有 `build_moe_layer` 硬要求路由是 BF16，故要么支持两种档（按声明读），要么明确记下「这一种 pack 的路由读不了」。这里还牵出一个口径问题：引擎自己的路由契约是「bf16 权重 + 激活也按 bf16 舍入」（[S-44]），而 F32 路由的自然读法是 F32×F32 —— **两种读法不是一回事，要用哪一种得先定**。
+3. **融合张力要吃「切片」而不是「整张」**：引擎那份把 gate/up 融成 `gate_up_proj`、把索引器 q/k 融成 `index_qk_proj`，而现有 MoE / QSA 的构建器只按名字取整张张力 → 构建器要能接受 `MtpSlice` 那种「每专家块内的行区间 + 块总行数」的描述（`mtp_pack` 已经把它算好了）。
+
 ## 来源
 
 | 编号 | 用于章节 | 内容 |
