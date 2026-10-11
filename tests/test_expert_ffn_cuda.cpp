@@ -286,6 +286,31 @@ void test_worker_computes_a_job_and_stays_resident() {
     }
     std::printf("  工人算出来的一批：位相同 %d/%zu\n", same, got.size());
     CHECK(same == static_cast<int>(got.size()));
+
+    // 第三个：换一个没见过的专家 id——必须真的把它搬上来。这条钉的是「按 id 认常驻，不是按位置」：
+    // 若按位置认，id 6 落在第 0 个位置，工人会以为 0 号槽就是它而不搬，于是算出 5 号专家的结果。
+    const ExpertBytes extra = make_expert(11);
+    const ExpertWeights extra_view = extra.view();
+    const std::vector<int> ids3{6};
+    std::vector<float> got3(kHidden, 0.0f);
+    ExpertJob job3;
+    job3.spec = &spec;
+    job3.experts = &extra_view;
+    job3.ids = ids3.data();
+    job3.n = 1;
+    job3.x = x.data();
+    job3.hidden = kHidden;
+    job3.out = got3.data();
+    must(worker.submit(job3, err), err, "第三个专家（新 id）");
+    CHECK(worker.uploaded_bytes() > after);
+
+    FfnScratch sc3;
+    std::vector<float> want3(kHidden, 0.0f);
+    must(expert_ffn(spec, extra_view, x.data(), sc3, want3.data(), err), err, "主机参考（第三个）");
+    for (int i = 0; i < kHidden; ++i) {
+        CHECK(std::bit_cast<std::uint32_t>(got3[static_cast<std::size_t>(i)]) ==
+              std::bit_cast<std::uint32_t>(want3[static_cast<std::size_t>(i)]));
+    }
 }
 
 void test_select_group_prefers_the_cuda_group() {
