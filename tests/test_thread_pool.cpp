@@ -75,6 +75,13 @@ void test_gemv_bitwise_same_as_single_thread() {
     for (std::size_t i = 0; i < n_blk; ++i) {
         std::memcpy(w.data() + i * 18, src.data() + (i % (src.size() / 18)) * 18, 18);
     }
+    // 破掉一个巧合：tile 出来的块序列有周期（每 32 行重复），而块大小常是行数的整数倍——于是
+    // 「切块时忘了按行偏移」会算出**一模一样**的值，变异就活下来了。给每行的尺度字节再抖一下，
+    // 行与行就不再有那种周期性等价。
+    for (int r = 0; r < kRows; ++r) {
+        const std::size_t at = static_cast<std::size_t>(r) * kBlocksPerRow * 18 + 1;
+        w[at] = static_cast<std::uint8_t>(w[at] ^ static_cast<std::uint8_t>((r % 7) + 1));
+    }
     std::vector<float> x(kCols);
     for (int i = 0; i < kCols; ++i) {
         x[static_cast<std::size_t>(i)] = static_cast<float>((i % 29) - 14) * 0.0625f;

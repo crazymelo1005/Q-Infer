@@ -791,8 +791,12 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
         std::printf("  有重派：说明有层没被设备侧接住\n");
         return 1;
     }
-    if (rs.routed != static_cast<std::uint64_t>(cfg.n_layers)) {
-        std::printf("  交出的层数不对：%llu\n", (unsigned long long) rs.routed);
+    // 每步每层一批：批数应该是 层数 × 步数。
+    const std::uint64_t want_routed =
+        static_cast<std::uint64_t>(cfg.n_layers) * static_cast<std::uint64_t>(tokens);
+    if (rs.routed != want_routed) {
+        std::printf("  交出的批数不对：%llu（应为 %llu）\n", (unsigned long long) rs.routed,
+                    (unsigned long long) want_routed);
         return 1;
     }
     return 0;
