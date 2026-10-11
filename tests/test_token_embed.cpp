@@ -216,9 +216,59 @@ void test_greedy_argmax() {
     CHECK(greedy_argmax(nullptr, 0) == 0);  // 不越界
 }
 
+// 真模型手工入口：读真 `token_embd.weight`（[2560 × 248320] 的 IQ4_XS）几行，打印概况。
+int manual_model_entry(const char* model) {
+    artifact::GgufFile g;
+    std::string err;
+    if (!g.open(model, err)) {
+        std::printf("打不开模型：%s（%s）\n", model, err.c_str());
+        return 1;
+    }
+    TokenEmbed e;
+    if (!build_token_embed(g, 2560, e, err)) {
+        std::printf("建 token embedding 失败：%s\n", err.c_str());
+        return 1;
+    }
+    std::printf("token_embd：词表 %llu、行宽 %llu、行块数 %llu、类型码 %u\n",
+                (unsigned long long) e.vocab, (unsigned long long) e.n_embd,
+                (unsigned long long) e.row_blocks, e.t->type);
+    const std::uint64_t rows[3] = {0, 1, e.vocab - 1};
+    double prev_mag = 0.0;
+    bool finite = true, differ = false;
+    std::vector<float> prev;
+    for (std::uint64_t r : rows) {
+        std::vector<float> v(2560, 0.0f);
+        if (!read_token_embedding(g, e, r, v.data(), err)) {
+            std::printf("读第 %llu 行失败：%s\n", (unsigned long long) r, err.c_str());
+            return 1;
+        }
+        double mag = 0.0;
+        for (float x : v) {
+            if (!std::isfinite(x)) finite = false;
+            mag += std::fabs((double) x);
+        }
+        std::printf("  行 %llu：前 4 值 %.6g %.6g %.6g %.6g；|行| 合计 %.6g\n",
+                    (unsigned long long) r, (double) v[0], (double) v[1], (double) v[2],
+                    (double) v[3], mag);
+        if (!prev.empty()) {
+            for (std::size_t i = 0; i < v.size(); ++i) {
+                if (v[i] != prev[i]) differ = true;
+            }
+        }
+        prev = v;
+        prev_mag = mag;
+    }
+    (void) prev_mag;
+    std::printf("  有限：%s；相邻两行不同：%s\n", finite ? "是" : "否", differ ? "是" : "否");
+    return (finite && differ) ? 0 : 1;
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc >= 3 && std::string(argv[1]) == "--model") {
+        return manual_model_entry(argv[2]);
+    }
     test_rows_match_reference();
     test_failures();
     test_greedy_argmax();
