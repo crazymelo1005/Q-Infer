@@ -44,6 +44,7 @@ add_library(qinfer_dense
   src/dense/rope.cpp
   src/dense/qsa_index.cpp
   src/dense/qsa_indexer.cpp
+  src/dense/kv_page_cache.cpp
 )
 target_include_directories(qinfer_dense PUBLIC src)
 target_link_libraries(qinfer_dense PUBLIC qinfer_kernels qinfer_artifact qinfer_experts)
@@ -183,6 +184,9 @@ target_link_libraries(test_expert_worker PRIVATE qinfer_experts)
 add_executable(test_layer_dispatch tests/test_layer_dispatch.cpp)
 target_link_libraries(test_layer_dispatch PRIVATE qinfer_experts)
 
+add_executable(test_kv_page_cache tests/test_kv_page_cache.cpp)
+target_link_libraries(test_kv_page_cache PRIVATE qinfer_dense)
+
 add_executable(test_norm tests/test_norm.cpp)
 target_link_libraries(test_norm PRIVATE qinfer_dense)
 
@@ -256,4 +260,5 @@ add_test(NAME rope COMMAND test_rope)
 add_test(NAME qsa_index COMMAND test_qsa_index)
 add_test(NAME qsa_indexer COMMAND test_qsa_indexer)
 add_test(NAME norm COMMAND test_norm)
+add_test(NAME kv_page_cache COMMAND test_kv_page_cache)
 add_test(NAME step_record COMMAND test_step_record)
