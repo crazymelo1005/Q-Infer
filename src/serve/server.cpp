@@ -683,6 +683,11 @@ void Serve::handle_count_tokens(const httplib::Request& req, httplib::Response& 
 void Serve::record_request(const std::shared_ptr<Job>& job, int http_status, bool disconnected) {
     (void) http_status; (void) disconnected;
     if (!job) return;
+    // 未达完成态（done_at 缺省）不入账：worker 的编码失败分支不写 done_at 就 sched_.done()，
+    // 客户端断开的 499 路径里 cancel() 与 worker 的 done_at 写入之间也无 happens-before 边，
+    // 两种情况都会留下全零 done_at。未完成的请求不是「最近一次完成的请求」，
+    // 整体跳过，避免缺省 time_point 化成约 -1.7e9 s 的假读数污染 /v1/status 的 last_timings。
+    if (job->done_at == std::chrono::steady_clock::time_point{}) return;
     const auto enq = job->enqueued_at;   // 缺省构造的 time_point（若从未入队）→ 全零
     const double wall = std::chrono::duration<double>(job->done_at - enq).count();
     LastTimings lt;
