@@ -197,8 +197,9 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
         RerouteStats local_stats;
         RerouteStats& rs = offload->stats != nullptr ? *offload->stats : local_stats;
         const clock::time_point t_off0 = clk();
+        DispatchPhases dp;
         if (!dispatch_layer_batch(layer, *offload->source, *offload->candidates, s.ids.data(),
-                                  s.weights.data(), k, x, out, *offload->scratch, rs, err)) {
+                                  s.weights.data(), k, x, out, *offload->scratch, rs, err, &dp)) {
             return false;
         }
         expert_ms += ms_between(t_off0, clk());  // 交出去的那批（含批量分派与汇合）
@@ -209,6 +210,9 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
             phases->route_ms += route_ms;
             phases->expert_ms += expert_ms;
             phases->shared_ms += ms_between(t_sh0, clk());
+            phases->off_fetch_ms += dp.fetch_ms;
+            phases->off_worker_ms += dp.worker_ms;
+            phases->off_merge_ms += dp.merge_ms;
         }
         return sh_ok;
     }

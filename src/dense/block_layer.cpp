@@ -247,6 +247,9 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
         phases->moe_route_ms += mp.route_ms;
         phases->moe_expert_ms += mp.expert_ms;
         phases->moe_shared_ms += mp.shared_ms;
+        phases->moe_off_fetch_ms += mp.off_fetch_ms;
+        phases->moe_off_worker_ms += mp.off_worker_ms;
+        phases->moe_off_merge_ms += mp.off_merge_ms;
     }
     return ok;
 }

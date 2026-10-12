@@ -32,15 +32,15 @@ void ExpertSource::init_common(const std::string& tensor_prefix, const LayerSpec
 
 ExpertSource::ExpertSource(const artifact::GgufFile& gguf, const std::string& tensor_prefix,
                            const LayerSpec& spec, const storage::EvictionPolicy& policy,
-                           std::size_t slots, int ways, std::uint64_t byte_budget)
-    : gguf_(gguf), cache_(slots, ways, policy), budget_(byte_budget) {
+                           std::size_t slots, int ways, std::uint64_t byte_budget, bool from_mapping)
+    : gguf_(gguf), cache_(slots, ways, policy), budget_(byte_budget), from_mapping_(from_mapping) {
     init_common(tensor_prefix, spec);
 }
 
 ExpertSource::ExpertSource(const artifact::GgufFile& gguf, const std::string& tensor_prefix,
                            const LayerSpec& spec, storage::PolicyKind kind, std::size_t slots,
-                           int ways, std::uint64_t byte_budget)
-    : gguf_(gguf), cache_(slots, ways, kind), budget_(byte_budget) {
+                           int ways, std::uint64_t byte_budget, bool from_mapping)
+    : gguf_(gguf), cache_(slots, ways, kind), budget_(byte_budget), from_mapping_(from_mapping) {
     init_common(tensor_prefix, spec);
 }
 
@@ -86,6 +86,21 @@ void ExpertSource::observe_token(const std::uint32_t* experts, int n) {
 
 bool ExpertSource::get(std::uint64_t expert, ExpertBytes& out, std::string& err) {
     err.clear();
+    if (from_mapping_) {
+        // 直接映射：三张矩阵各指一段映射，既不拷贝也不登记页表（pin/unpin 因此是空操作）。
+        const std::uint8_t* gp = gguf_.view_at(gate_->offset + expert * gate_bytes_, gate_bytes_);
+        const std::uint8_t* up = gguf_.view_at(up_->offset + expert * up_bytes_, up_bytes_);
+        const std::uint8_t* dp = gguf_.view_at(down_->offset + expert * down_bytes_, down_bytes_);
+        if (gp == nullptr || up == nullptr || dp == nullptr) {
+            err = "专家 " + std::to_string(expert) + " 的矩阵映射不到";
+            return false;
+        }
+        out.gate = gp;
+        out.up = up;
+        out.down = dp;
+        out.resident = true;  // 本次使用期间有效
+        return true;
+    }
     const storage::ExpertKey key{layer_, static_cast<std::uint32_t>(expert)};
 
     // 预算用尽就地走临时缓冲：不再准入（缓存装不下该退化，不能让正确性受影响）。
@@ -153,6 +168,7 @@ bool ExpertSource::get(std::uint64_t expert, ExpertBytes& out, std::string& err)
 }
 
 bool ExpertSource::pin(std::uint64_t expert, std::string& err) {
+    if (from_mapping_) return true;  // 映射来的字节没有可换出的副本，无需保护
     const storage::BlockId id = id_of(expert);
     if (page_.query(id) == nullptr) {
         err = "pin 一个不在常驻区的专家";
@@ -162,6 +178,7 @@ bool ExpertSource::pin(std::uint64_t expert, std::string& err) {
 }
 
 bool ExpertSource::unpin(std::uint64_t expert, std::string& err) {
+    if (from_mapping_) return true;
     const storage::BlockId id = id_of(expert);
     if (!page_.release(id)) {
         err = "unpin 一个引用计数已为 0 的专家";

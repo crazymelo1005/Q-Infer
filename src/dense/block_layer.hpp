@@ -86,6 +86,10 @@ struct LayerPhases {
     double moe_route_ms = 0.0;
     double moe_expert_ms = 0.0;
     double moe_shared_ms = 0.0;
+    // 交出去那条路时 expert_ms 的三段（取数 / 工人 / 归并）；主机逐专家那条路为 0。
+    double moe_off_fetch_ms = 0.0;
+    double moe_off_worker_ms = 0.0;
+    double moe_off_merge_ms = 0.0;
     double gr_write_ms = 0.0;
 };
 

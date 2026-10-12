@@ -37,20 +37,26 @@ struct ExpertBytes {
 class ExpertSource {
 public:
     // slots / ways / policy 交给专家缓存；byte_budget 是本条路径自己的硬上限（0 表示不限）。
+    // `from_mapping` = 不走缓存，直接把 GGUF 映射里那一段指出来（`GgufFile::view_at`）：字节既不拷进
+    // 本对象的缓冲、也不登记页表，`get` 仍是「本次使用期间有效」（故 `resident` 记为真、`pin`/`unpin`
+    // 成了空操作）。为什么要有这条：交出去的那一批必须先有字节才能 H2D，而「读进缓冲再 H2D」比
+    // 「直接从映射 H2D」多着一遍整批字节的拷贝（实测每步约 107 ms，见 engine §6）。
     ExpertSource(const artifact::GgufFile& gguf, const std::string& tensor_prefix,
                  const LayerSpec& spec, const storage::EvictionPolicy& policy,
-                 std::size_t slots, int ways, std::uint64_t byte_budget);
+                 std::size_t slots, int ways, std::uint64_t byte_budget,
+                 bool from_mapping = false);
 
     // 同上，但策略由缓存自己持有（只给内置种类）——给不想管策略生命周期的调用方用。
     ExpertSource(const artifact::GgufFile& gguf, const std::string& tensor_prefix,
                  const LayerSpec& spec, storage::PolicyKind kind, std::size_t slots, int ways,
-                 std::uint64_t byte_budget);
+                 std::uint64_t byte_budget, bool from_mapping = false);
 
     // 这一步要读的专家（同一 token 内一起激活，喂给共现图）。步号每调用一次 +1，供 LRU 用。
     void begin_token();
     void observe_token(const std::uint32_t* experts, int n);
 
     // 取一个专家的三矩阵。返回假只可能是读表失败或专家越界——缓存装不下不会让它失败。
+    // 直接映射模式下 `out.resident` 为真（「本次使用期间有效」，不必另存一份）。
     bool get(std::uint64_t expert, ExpertBytes& out, std::string& err);
 
     // 引用计数：被 pin 的专家在 unpin 之前不会被换出。
@@ -90,6 +96,7 @@ private:
     std::uint64_t transient_reads_ = 0;
     std::uint64_t blocked_ = 0;
     std::int64_t step_ = 0;
+    bool from_mapping_ = false;  // 见构造函数的说明：字节直接指进 GGUF 映射，不进缓存也不拷
 };
 
 }  // namespace qinfer::experts

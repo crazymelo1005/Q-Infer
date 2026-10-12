@@ -39,6 +39,17 @@ struct LayerDispatchScratch {
     std::vector<float> batch_out;                  // n × hidden，工人写这里
 };
 
+// 一批的分段耗时（只作观测，给了才计时）。三段互斥且穷尽，把「交出去」这一件事拆成：
+//   fetch  从字节来源取齐本批的字节（常驻的按住引用计数、非常驻的拷进批内缓冲）
+//   worker 选中组的 submit + 汇合点 wait（设备侧的内核与同步都在这里面）
+//   merge  按专家 id 升序并入 out
+// 拆它的理由：设备侧整步比主机池子慢一倍多，而「设备慢」与「取数/归并慢」的修法完全不同。
+struct DispatchPhases {
+    double fetch_ms = 0.0;
+    double worker_ms = 0.0;
+    double merge_ms = 0.0;
+};
+
 // ids / route_weight 各 n 项，顺序任意（重复的 id 由调用方保证不出现——路由取前 k 保证互异）。
 // out 长 hidden：本函数只往里累加，初值由调用方负责（路由侧按权重、共享侧另加）。
 // 候选里的非兜底组比兜底组（CPU）先试（interfaces §8.1）；选中的组失败时改派兜底组
@@ -46,6 +57,7 @@ struct LayerDispatchScratch {
 bool dispatch_layer_batch(const MoeLayer& layer, ExpertSource& src,
                           const std::vector<ComputeGroup>& candidates, const int* ids,
                           const float* route_weight, int n, const float* x, float* out,
-                          LayerDispatchScratch& s, RerouteStats& rs, std::string& err);
+                          LayerDispatchScratch& s, RerouteStats& rs, std::string& err,
+                          DispatchPhases* phases = nullptr);
 
 }  // namespace qinfer::experts

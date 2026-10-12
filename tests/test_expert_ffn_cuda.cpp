@@ -731,6 +731,10 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
                         "inject %.0f ms\n",
                         threads, ph.gr_split.norm_ms, ph.gr_split.lo_ms, ph.gr_split.mixed_ms,
                         ph.gr_split.inject_ms);
+            if (ph.moe_off_worker_ms > 0.5) {
+                std::printf("  交出去那批的三段：取数 %.0f / 工人（设备内核+同步）%.0f / 归并 %.0f ms\n",
+                            ph.moe_off_fetch_ms, ph.moe_off_worker_ms, ph.moe_off_merge_ms);
+            }
             std::printf("  注意力的五段（%d 线程）：投影 %.0f / 前段 %.0f / 递推 %.0f / 收尾 %.0f / "
                         "KV %.0f / 索引器 %.0f / attend+门 %.0f ms\n",
                         threads, ph.attn.proj_ms, ph.attn.prep_ms, ph.attn.rec_ms, ph.attn.close_ms,
@@ -780,9 +784,12 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
     sources.reserve(static_cast<std::size_t>(cfg.n_layers));
     offloads.reserve(static_cast<std::size_t>(cfg.n_layers));
     for (int l = 0; l < cfg.n_layers; ++l) {
+        // 设备那条路的字节来源用**直接映射**模式：这批必须先有字节才能 H2D，「读进缓冲再 H2D」比
+        // 「直接从映射 H2D」多着一遍整批字节的拷贝（实测每步约 107 ms，见 engine §6）。缓存那条路
+        // 仍有自己的用例（tests/test_moe_layer），这里量的是设备侧。
         sources.emplace_back(g, "blk." + std::to_string(l) + ".ffn_", m.blocks[l].moe.spec,
                              qinfer::storage::PolicyKind::kFifo, /*slots=*/16, /*ways=*/4,
-                             /*budget=*/0);
+                             /*budget=*/0, /*from_mapping=*/true);
     }
     LayerDispatchScratch ds;
     RerouteStats rs{};
@@ -819,6 +826,12 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
         dev_logits.push_back(s_dev.head.logits);
     }
     qinfer::scheduling::set_pool_threads(0);
+    {
+        // 交出去那条路的分段（只在设备那条 scratch 上有值）。
+        const qinfer::dense::LayerPhases dp = qinfer::dense::sum_phases(s_dev.phases);
+        std::printf("  设备那条（交出去）的三段：取数 %.0f / 工人（设备内核+同步）%.0f / 归并 %.0f ms\n",
+                    dp.moe_off_fetch_ms, dp.moe_off_worker_ms, dp.moe_off_merge_ms);
+    }
     std::printf("  逐步用时（同一份 x，共 %d 步；第 0 步含设备侧首次分配与逐层上传%s）\n", tokens,
                 threads > 1 ? "；与主机多线程同口径，稠密都开池子" : "");
     for (int t = 0; t < tokens; ++t) {

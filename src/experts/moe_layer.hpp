@@ -109,6 +109,11 @@ struct MoePhases {
     double route_ms = 0.0;
     double expert_ms = 0.0;
     double shared_ms = 0.0;
+    // 交出去那条路时，expert_ms 再分三段（见 experts/layer_dispatch.hpp 的 DispatchPhases）：
+    // 取数 / 工人（设备侧内核与同步都在里面）/ 归并。走主机逐专家那条路时这三项为 0。
+    double off_fetch_ms = 0.0;
+    double off_worker_ms = 0.0;
+    double off_merge_ms = 0.0;
 };
 
 // 跑一层：读路由矩阵 → 路由出 top-k → 逐个读该专家的三矩阵并前馈 → 按权重累加 → 有共享专家则再加。

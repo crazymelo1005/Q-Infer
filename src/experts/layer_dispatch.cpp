@@ -1,5 +1,7 @@
 #include "experts/layer_dispatch.hpp"
 
+#include <chrono>
+
 #include <algorithm>
 #include <cstring>
 #include <numeric>
@@ -27,7 +29,14 @@ bool unpin_all(ExpertSource& src, std::vector<std::uint64_t>& pinned, std::strin
 bool dispatch_layer_batch(const MoeLayer& layer, ExpertSource& src,
                           const std::vector<ComputeGroup>& candidates, const int* ids,
                           const float* route_weight, int n, const float* x, float* out,
-                          LayerDispatchScratch& s, RerouteStats& rs, std::string& err) {
+                          LayerDispatchScratch& s, RerouteStats& rs, std::string& err,
+                     DispatchPhases* phases) {
+    const auto clk = [] { return std::chrono::steady_clock::now(); };
+    const auto msx = [](std::chrono::steady_clock::time_point a,
+                        std::chrono::steady_clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    const std::chrono::steady_clock::time_point p_fetch0 = clk();
     err.clear();
     if (ids == nullptr || route_weight == nullptr || x == nullptr || out == nullptr) {
         err = "批量分派的指针不完整";
@@ -99,6 +108,7 @@ bool dispatch_layer_batch(const MoeLayer& layer, ExpertSource& src,
     job.hidden = layer.hidden;
     job.out = s.batch_out.data();
 
+    if (phases != nullptr) phases->fetch_ms += msx(p_fetch0, clk());
     // 兜底组先找出来：选中别的组而它失败时，这一批改派给它（interfaces §8.5）。
     const ComputeGroup* fallback = nullptr;
     for (const ComputeGroup& g : candidates) {
@@ -124,7 +134,9 @@ bool dispatch_layer_batch(const MoeLayer& layer, ExpertSource& src,
     }
 
     const std::uint64_t rerouted_before = rs.rerouted;
+    const std::chrono::steady_clock::time_point p_work0 = clk();
     const bool ran = run_job_with_fallback(*pick.group->worker, *fallback->worker, job, rs, err);
+    if (phases != nullptr) phases->worker_ms += msx(p_work0, clk());
     // 这一批真由选中的组做完，才留着选组时记进本步份额的那笔字节；改派与被拒都说明搬运没发生。
     const bool moved = ran && rs.rerouted == rerouted_before;
     bool released = true;
@@ -145,6 +157,7 @@ bool dispatch_layer_batch(const MoeLayer& layer, ExpertSource& src,
     }
 
     // 4. 按同一顺序并入（专家的权重各归各的，求和顺序与 order 一致）。
+    const std::chrono::steady_clock::time_point p_merge0 = clk();
     for (int t = 0; t < n; ++t) {
         const std::size_t j = static_cast<std::size_t>(s.order[static_cast<std::size_t>(t)]);
         const float w = route_weight[j];
@@ -153,6 +166,7 @@ bool dispatch_layer_batch(const MoeLayer& layer, ExpertSource& src,
     }
 
     std::string uerr;
+    if (phases != nullptr) phases->merge_ms += msx(p_merge0, clk());
     if (!unpin_all(src, s.pinned, uerr)) {
         err = uerr;
         return false;
