@@ -279,6 +279,31 @@ curl -s -H "$H" "http://$HOST:$PORT/v1/status" > "$R"
 [ "$(jget "$R" "d['machine']['at'] > 0")" = True ] \
   && ok "/v1/status machine.at" || bad "/v1/status machine：$(head -c 200 "$R")"
 
+# 13. /metrics：全键类型、10 系列、历史有数据、totals/conversation_cache/time 形状。
+curl -s -H "$H" "http://$HOST:$PORT/metrics" > "$R"
+[ "$(jget "$R" "d['engine']['model']")" ] && [ "$(jget "$R" "d['live']['state']")" ] \
+  && [ "$(jget "$R" "len(d['history'])")" = 10 ] \
+  && [ "$(jget "$R" "len(d['history']['cpu']) >= 1")" = True ] \
+  && [ "$(jget "$R" "d['requests_kept']")" = 100 ] \
+  && [ "$(jget "$R" "d['totals']['reused']")" = 0 ] \
+  && [ "$(jget "$R" "d['conversation_cache']['enabled']")" = False ] \
+  && [ "$(jget "$R" "d['time'] > 0")" = True ] \
+  && ok "/metrics 全键" || bad "/metrics：$(head -c 300 "$R")"
+
+# 14. /api/requests：列表（retention=100、最新在前）与 ?id= 详情；缺 id → 404 错误体。
+curl -s -H "$H" "http://$HOST:$PORT/api/requests" > "$R"
+[ "$(jget "$R" "d['retention']")" = 100 ] && [ "$(jget "$R" "len(d['requests']) >= 1")" = True ] \
+  && [ "$(jget "$R" "d['requests'][0]['wallclock_s'] >= 0")" = True ] \
+  && ok "/api/requests 列表" || bad "/api/requests：$(head -c 300 "$R")"
+RID=$(jget "$R" "d['requests'][0]['id']" | tr -d '"')
+curl -s -H "$H" "http://$HOST:$PORT/api/requests?id=$RID" > "$R"
+[ "$(jget "$R" "d['id']")" = "$RID" ] && [ "$(jget "$R" "d['wallclock_s'] >= 0")" = True ] \
+  && [ "$(jget "$R" "d['queue_s'] >= 0")" = True ] \
+  && ok "/api/requests?id= 详情" || bad "/api/requests?id=：$(head -c 300 "$R")"
+curl -s -H "$H" "http://$HOST:$PORT/api/requests?id=deadbeef0000" > "$R"
+[ "$(jget "$R" "d['error']['message']")" ] \
+  && ok "/api/requests?id= 404 错误体" || bad "/api/requests 缺失 id 错误体：$(head -c 300 "$R")"
+
 stop
 
 # ---- 503：--reject-after 1 → 第 1 个请求正常，之后一律队列满 ----

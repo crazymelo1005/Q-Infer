@@ -75,6 +75,47 @@ void send_json(httplib::Response& res, int status, const Json& body) {
     res.set_content(json_dump(body), "application/json; charset=utf-8");
 }
 
+// ---- 记录序列化（列表视图不带大字段，详情全带；Strata request_records 同款）----
+Json record_summary_json(const RequestRecord& r) {
+    Json o = Json::objv();
+    o.set("id", Json::strv(r.id));
+    o.set("path", Json::strv(r.path));
+    o.set("model", Json::strv(r.model));
+    o.set("created", Json::numv(r.created));
+    o.set("state", Json::strv(r.state));
+    o.set("stream", Json::boolv(r.stream));
+    o.set("response_format", r.response_format.empty()
+                                 ? Json::nullv() : Json::strv(r.response_format));
+    o.set("queue_s", Json::numv(r.queue_s));
+    o.set("first_token_s", r.first_token_s > 0 ? Json::numv(r.first_token_s) : Json::nullv());
+    o.set("wallclock_s", Json::numv(r.wallclock_s));
+    o.set("decode_tok_s", Json::numv(r.decode_tok_s));
+    o.set("prompt_tokens", Json::numv(static_cast<double>(r.prompt_tokens)));
+    o.set("output_tokens", Json::numv(static_cast<double>(r.output_tokens)));
+    return o;
+}
+
+Json record_detail_json(const RequestRecord& r) {
+    Json o = record_summary_json(r);
+    o.set("input", Json::strv(r.input));
+    o.set("input_truncated", Json::boolv(r.input_truncated));
+    o.set("output", Json::strv(r.output));
+    o.set("output_truncated", Json::boolv(r.output_truncated));
+    o.set("reasoning", Json::strv(r.reasoning));
+    o.set("reasoning_truncated", Json::boolv(r.reasoning_truncated));
+    return o;
+}
+
+// 历史系列（log. 每点：值或 null）。
+Json series_json(const std::vector<std::optional<double>>& s) {
+    Json a = Json::arrv();
+    for (const auto& v : s) a.push(v ? Json::numv(*v) : Json::nullv());
+    return a;
+}
+
+// 一位小数（Strata 的 round(x, 1)），仅展示用。
+double round1(double v) { return std::round(v * 10.0) / 10.0; }
+
 bool anthropic_path(const std::string& p) {
     return p == "/v1/messages" || p == "/v1/messages/count_tokens";
 }
@@ -187,6 +228,7 @@ void Serve::worker_main() {
                 job->finish = "error";
                 job->error = "分词失败：" + err;
                 job->events->stop_with_error(job->error);
+                job->done_at = std::chrono::steady_clock::now();   // T14：编码失败也要收尾成记录（与其他错误路径同构）
                 sched_.done(job);
                 continue;
             }
@@ -301,6 +343,7 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
         record_request(nullptr, 503, false);
         return;
     }
+    job->raw_body = req.body;   // T14：原始请求体进 Records（流式请求也要带）
     // T10：流式分派——include_usage 宽松收（裁定①）：stream_options 存在且为对象、其下
     // include_usage 为布尔真才算真；其余一律 false，不额外 400。
     if (stream) {
@@ -551,6 +594,7 @@ void Serve::handle_completions(const httplib::Request& req, httplib::Response& r
         record_request(nullptr, 503, false);   // 裁定⑧：503 记录与 chat 侧对齐
         return;
     }
+    job->raw_body = req.body;   // T14：原始请求体进 Records
     std::string text, drain_err;
     if (!drain_nonstream(job, text, drain_err)) {
         if (!job->events->cancelled()) send_json(res, 500, openai_err(drain_err, "server_error", nullptr));
@@ -630,6 +674,7 @@ void Serve::handle_messages(const httplib::Request& req, httplib::Response& res)
         record_request(nullptr, 503, false);   // 裁定⑧：503 记录与 chat/completions 侧对齐
         return;
     }
+    job->raw_body = req.body;   // T14：原始请求体进 Records（流式请求也要带）
     if (stream) { serve_anthropic_sse(job, res); return; }
     std::string text, drain_err;
     if (!drain_nonstream(job, text, drain_err)) {
@@ -693,7 +738,7 @@ void Serve::handle_count_tokens(const httplib::Request& req, httplib::Response& 
 }
 
 void Serve::record_request(const std::shared_ptr<Job>& job, int http_status, bool disconnected) {
-    (void) http_status; (void) disconnected;
+    (void) http_status;
     if (!job) return;
     // 未达完成态（done_at 缺省）不入账：worker 的编码失败分支不写 done_at 就 sched_.done()，
     // 客户端断开的 499 路径里 cancel() 与 worker 的 done_at 写入之间也无 happens-before 边，
@@ -716,6 +761,15 @@ void Serve::record_request(const std::shared_ptr<Job>& job, int http_status, boo
     {
         std::lock_guard<std::mutex> lk(last_mu_);
         last_ = lt;
+        totals_.prompt_tokens += job->n_prompt;
+        totals_.completion_tokens += job->n_gen;
+        // 计时口径：prefill ≈ first_at- leased_at，decode ≈ done_at - first_at。
+        const auto ms = [](std::chrono::steady_clock::duration d) {
+            return std::chrono::duration<double, std::milli>(d).count();
+        };
+        if (job->first_at != std::chrono::steady_clock::time_point{})
+            totals_.prompt_ms += ms(job->first_at - job->leased_at);
+        if (job->done_at > job->first_at) totals_.decode_ms += ms(job->done_at - job->first_at);
         // T13：tok_s_mean 的全程累计（生成 token ÷ 解码耗时；与 telemetry_extra 同锁，采样线程前一次
         // 读数与本次累加之间有 happens-before 边）。编码失败/断开路径已在上面的早退拦掉。
         if (job->n_gen > 0 && job->done_at > job->leased_at &&
@@ -728,6 +782,37 @@ void Serve::record_request(const std::shared_ptr<Job>& job, int http_status, boo
                     std::chrono::duration_cast<std::chrono::microseconds>(job->done_at - start).count());
             }
         }
+    }
+    // ---- T14：Records 环（同一 job 只建一条；断开/错误都收尾成 error 态）----
+    if (job->record_id.empty()) {
+        RequestBegin b;
+        b.path = job->path;
+        b.model = job->model;
+        b.input = job->raw_body;
+        b.stream = job->stream;
+        Json raw;   // response_format 从原始请求体取（解析失败也不碍事，落空串）
+        std::string jerr;
+        if (json_parse(job->raw_body, raw, jerr) && raw.is_obj()) {
+            const Json* rf = raw.find("response_format");
+            if (rf != nullptr && rf->is_obj()) {
+                const Json* ty = rf->find("type");
+                if (ty != nullptr && ty->is_str()) b.response_format = ty->str;
+            }
+        }
+        b.created = static_cast<double>(std::time(nullptr)) - wall;   // ≈ 请求开始
+        job->record_id = records_.begin(b);
+    }
+    if (!job->record_id.empty()) {
+        RequestFinish f;
+        f.text = job->text;
+        f.error = disconnected ? "disconnected" : job->error;
+        f.queue_s = lt.queue_s;
+        f.first_token_s = lt.first_token_s;
+        f.wallclock_s = wall;
+        f.decode_tok_s = job->tok_s;
+        f.prompt_tokens = job->n_prompt;
+        f.output_tokens = job->n_gen;
+        records_.finish(job->record_id, f);
     }
 }
 
@@ -964,6 +1049,137 @@ void Serve::register_routes() {
             list.push(std::move(s));
         }
         send_json(res, 200, list);
+    });
+    svr.Get("/metrics", [this](const httplib::Request&, httplib::Response& res) {
+        const auto now = std::time(nullptr);
+        const std::uint64_t ctx = cfg_.facade.max_context;
+        const bool busy = sched_.any_busy();
+        Json r = Json::objv();
+        Json eng = Json::objv();
+        eng.set("model", Json::strv(eng_->model_name()));
+        eng.set("max_context", Json::numv(static_cast<double>(ctx)));
+        eng.set("images", Json::boolv(false));
+        r.set("engine", std::move(eng));
+        Json live = Json::objv();
+        live.set("state", Json::strv(busy ? "generating" : "idle"));
+        live.set("queued", Json::numv(static_cast<double>(sched_.queued())));
+        live.set("phase", Json::nullv());          // v0 无阶段跟踪
+        live.set("prompt_tokens", Json::nullv());  // v0 不做进行中请求的逐项视图
+        live.set("prompt_read", Json::nullv());
+        live.set("prompt_total", Json::nullv());
+        live.set("generated", Json::nullv());
+        live.set("max_tokens", Json::nullv());
+        live.set("elapsed_s", Json::nullv());
+        {
+            std::lock_guard<std::mutex> lk(last_mu_);
+            if (last_.have) {
+                live.set("tok_s", Json::numv(round1(last_.decode_tok_s)));
+            } else {
+                live.set("tok_s", Json::nullv());
+            }
+            if (last_.have && last_.first_token_s > 0.001) {
+                live.set("prefill_tok_s_mean", Json::numv(round1(
+                    static_cast<double>(last_.prompt_tokens) / last_.first_token_s)));
+            } else {
+                live.set("prefill_tok_s_mean", Json::nullv());
+            }
+            if (gen_us_ > 0) {
+                live.set("tok_s_mean", Json::numv(round1(
+                    1e6 * static_cast<double>(gen_done_) / static_cast<double>(gen_us_))));
+            } else {
+                live.set("tok_s_mean", Json::nullv());
+            }
+        }
+        live.set("tok_s_window_s", Json::nullv());   // v0 无滑动窗口（M2 补）
+        const auto views = sched_.slots_view();
+        live.set("parallel", Json::numv(static_cast<double>(cfg_.slots)));
+        int running = 0;
+        Json slots = Json::arrv();
+        for (const SlotView& v : views) {
+            if (v.busy) ++running;
+            Json s = Json::objv();
+            s.set("id", Json::numv(static_cast<double>(v.index)));
+            s.set("n_ctx", Json::numv(static_cast<double>(ctx)));
+            s.set("is_processing", Json::boolv(v.busy));
+            s.set("n_prompt_tokens", Json::numv(0.0));
+            slots.push(std::move(s));
+        }
+        live.set("running", Json::numv(static_cast<double>(running)));
+        live.set("slots", std::move(slots));
+        live.set("waiting", Json::numv(static_cast<double>(sched_.queued())));
+        r.set("live", std::move(live));
+        const auto list = records_.list();   // 最新在前
+        Json reqs = Json::arrv();
+        for (std::size_t i = 0; i < list.size() && i < 12; ++i) reqs.push(record_summary_json(list[i]));
+        r.set("requests", std::move(reqs));
+        Json cc = Json::objv();
+        cc.set("enabled", Json::boolv(false));   // 索引器统计 M2 接（spec §6）
+        r.set("conversation_cache", std::move(cc));
+        r.set("requests_kept", Json::numv(static_cast<double>(Records::kCap)));
+        Json total = Json::objv();
+        {
+            std::lock_guard<std::mutex> lk(last_mu_);
+            total.set("prompt_tokens", Json::numv(static_cast<double>(totals_.prompt_tokens)));
+            total.set("reused", Json::numv(0.0));
+            total.set("completion_tokens", Json::numv(static_cast<double>(totals_.completion_tokens)));
+            total.set("prompt_ms", Json::numv(totals_.prompt_ms));
+            total.set("decode_ms", Json::numv(totals_.decode_ms));
+        }
+        r.set("totals", std::move(total));
+        const auto ts = tel_ ? tel_->snapshot() : TelemetrySnapshot{};
+        Json hw = Json::objv();
+        for (const auto& [k, v] : ts.now) hw.set(k, v ? Json::numv(*v) : Json::nullv());
+        if (ts.gpus.size() > 1) {   // Strata：仅多卡时带 gpus[]
+            Json gpu_list = Json::arrv();
+            for (const GpuReading& gr : ts.gpus) {
+                Json g = Json::objv();
+                g.set("index", Json::numv(static_cast<double>(gr.index)));
+                g.set("name", gr.name.empty() ? Json::nullv() : Json::strv(gr.name));
+                g.set("util", gr.util ? Json::numv(*gr.util) : Json::nullv());
+                g.set("mem_used", gr.mem_used ? Json::numv(*gr.mem_used) : Json::nullv());
+                g.set("mem_total", gr.mem_total ? Json::numv(*gr.mem_total) : Json::nullv());
+                g.set("temp", gr.temp ? Json::numv(*gr.temp) : Json::nullv());
+                g.set("power", gr.power ? Json::numv(*gr.power) : Json::nullv());
+                gpu_list.push(std::move(g));
+            }
+            hw.set("gpus", std::move(gpu_list));
+        }
+        r.set("hardware", std::move(hw));
+        Json hs = Json::objv();
+        hs.set("gpu_name", Json::strv(ts.stat.gpu_name));
+        hs.set("gpu_count", Json::numv(static_cast<double>(ts.stat.gpu_count)));
+        hs.set("gpu_note", Json::nullv());   // v0 恒空（见 telemetry.hpp 注释）
+        hs.set("cpu_name", Json::strv(ts.stat.cpu_name));
+        hs.set("cores", Json::numv(static_cast<double>(ts.stat.cores)));
+        hs.set("threads", Json::numv(static_cast<double>(ts.stat.threads)));
+        r.set("hardware_static", std::move(hs));
+        Json hist = Json::objv();
+        for (const auto& [k, vec] : ts.history) hist.set(k, series_json(vec));
+        r.set("history", std::move(hist));
+        r.set("time", Json::numv(static_cast<double>(now)));
+        send_json(res, 200, r);
+    });
+    svr.Get("/api/requests", [this](const httplib::Request& req, httplib::Response& res) {
+        const std::string id = req.get_param_value("id");
+        if (!id.empty()) {
+            RequestRecord rec;
+            if (!records_.detail(id, rec)) {
+                send_json(res, 404, openai_err("request no longer retained", "invalid_request_error", nullptr));
+                return;
+            }
+            send_json(res, 200, record_detail_json(rec));
+            return;
+        }
+        const auto list = records_.list();
+        Json arr = Json::arrv();
+        for (const RequestRecord& r : list) arr.push(record_summary_json(r));
+        Json out = Json::objv();
+        out.set("requests", std::move(arr));
+        out.set("retention", Json::numv(static_cast<double>(Records::kCap)));
+        out.set("persistent", Json::boolv(false));
+        out.set("loaded", Json::boolv(true));   // 引擎启动即装载（v0 无热装载）
+        out.set("auto_load", Json::boolv(false));
+        send_json(res, 200, out);
     });
     // 静态页（T15/T16 落地文件；此刻 404 也正常——T9 只验 API 面）。
     svr.Get("/", [this](const httplib::Request&, httplib::Response& res) {

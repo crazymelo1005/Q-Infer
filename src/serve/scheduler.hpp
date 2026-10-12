@@ -69,6 +69,8 @@ struct Job {
     std::chrono::steady_clock::time_point enqueued_at, leased_at, first_at, done_at;
     std::shared_ptr<EventBuffer> events = std::make_shared<EventBuffer>(4096);
     bool stream = false;
+    std::string raw_body;    // 原始请求体（HTTP 线程在 launch 后填；入记录的 input）
+    std::string record_id;   // 记录环键（空 = 未建；record_request 幂等用）
 };
 
 struct SlotView {

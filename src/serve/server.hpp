@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "serve/facade.hpp"
+#include "serve/records.hpp"
 #include "serve/scheduler.hpp"
 #include "serve/telemetry.hpp"
 
@@ -64,7 +65,7 @@ private:
     void serve_anthropic_sse(const std::shared_ptr<Job>& job, httplib::Response& res);
     std::shared_ptr<Job> launch(const std::string& path, std::string prompt,
                                 const GenOptions& opts, bool stream);
-    void record_request(const std::shared_ptr<Job>& job, int http_status, bool disconnected);   // T12：填 last_timings；T14：追加 Records 环
+    void record_request(const std::shared_ptr<Job>& job, int http_status, bool disconnected);   // T12：填 last_timings 计时；T13：gen 累计；T14：Records 环
     TelemetryExtra telemetry_extra() const;   // T13：遥测每采样读一份的引擎侧指标（随 record_request 的累计）
 
     ServeConfig cfg_;
@@ -91,6 +92,15 @@ private:
     // tok_s_mean 的累计口径：最近一次请求的解码速度是 v0 的 tok_s，全程均值另记这两项。
     std::uint64_t gen_done_ = 0;   // 累计生成的 token 数（成功请求才累加）
     std::uint64_t gen_us_ = 0;     // 累计解码耗时（µs）
+    // 请求记录环（/metrics 的 requests/totals 与 /api/requests 的数据源，T14 起 record_request 填）。
+    Records records_;
+    // /metrics 的 totals 累计（与 last_ 同临界区更新——record_request 是 HTTP 线程调用的唯一写入者；
+    // /metrics 读时也持 last_mu_，无竞态）。
+    struct Totals {
+        std::uint64_t prompt_tokens = 0, completion_tokens = 0;
+        double prompt_ms = 0.0, decode_ms = 0.0;
+    };
+    Totals totals_;
 };
 
 // main.cpp 用：命令行解析（自写的键值扫描，零依赖）。
