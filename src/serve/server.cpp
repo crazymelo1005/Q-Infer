@@ -735,14 +735,17 @@ void Serve::handle_count_tokens(const httplib::Request& req, httplib::Response& 
         return;
     }
     std::vector<std::int32_t> ids;
+    bool enc_ok;
     {
         // 与 worker_main 同一把 engine_mu_：encode 写各 worker 共享的 piece_cache_，
         // 脱离锁与并发请求是数据竞争（见 server.hpp 头注释）；chat_template() 是只读访问不需锁。
+        // 锁只罩引擎可变访问：失败路径的 500 响应移到锁外，慢读客户端写响应不得持锁冻结全槽。
         std::lock_guard<std::mutex> lock(engine_mu_);
-        if (!eng_->tokenizer().encode(prompt, /*parse_special=*/true, ids, rerr)) {
-            send_json(res, 500, anthropic_err("server_error", "分词失败：" + rerr));
-            return;
-        }
+        enc_ok = eng_->tokenizer().encode(prompt, /*parse_special=*/true, ids, rerr);
+    }
+    if (!enc_ok) {
+        send_json(res, 500, anthropic_err("server_error", "分词失败：" + rerr));
+        return;
     }
     Json r = Json::objv();
     r.set("input_tokens", Json::numv(static_cast<double>(ids.size())));
