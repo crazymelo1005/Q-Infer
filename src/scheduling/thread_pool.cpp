@@ -10,6 +10,14 @@
 
 namespace qinfer::scheduling {
 
+namespace {
+// 自旋窗口（微秒）：工作线程每次等作业前读它。放在原子变量里而不是编译期常量，是为了能用同一份
+// 二进制扫出拐点（见 measure/thread_pool_bench.cpp 第 5、6 节与 engine §6）。默认 2000 是环境2 上
+// 扫出来的拐点：一步里提交之间的串行工作（取一份专家字节约 65 µs、一层取齐约 2 ms）都落在窗口内，
+// 再放大（4000 / 8000）不给增益，只会让真闲下来时白烧 CPU。
+std::atomic<std::uint64_t> g_spin_us{2000};
+}  // namespace
+
 // 一次只跑一个作业的池：没有任务队列，因为调用点很密、每次的活很小，队列的延迟比它省下的更多。
 // 作业放在固定字段里，工作线程靠 epoch 变化醒过来，然后自己不停认领下一块，直到块被认领完。
 //
@@ -19,9 +27,6 @@ namespace qinfer::scheduling {
 // 被唤醒」那部分被算进了 GEMV 的窗口里。故工作线程先**有界自旋**一小段再去睡：间隔落在自旋窗口
 // 内的提交就不用付挂起/唤醒的钱。
 struct ThreadPool::Impl {
-    // 自旋窗口取「提交之间的典型间隔」的量级：太长会在真闲下来时白烧 CPU，太短又回到挂起。
-    static constexpr std::uint64_t kSpinUs = 200;
-
     std::mutex m;
     std::condition_variable cv_job;
     std::condition_variable cv_idle;
@@ -50,8 +55,9 @@ struct ThreadPool::Impl {
             std::uint64_t total = 0, step = 1;
             {
                 // 有界自旋：提交若落在窗口内，这里就看见了，不进内核。
+                const std::uint64_t spin_us = g_spin_us.load(std::memory_order_relaxed);
                 const auto deadline =
-                    std::chrono::steady_clock::now() + std::chrono::microseconds(kSpinUs);
+                    std::chrono::steady_clock::now() + std::chrono::microseconds(spin_us);
                 while (epoch.load(std::memory_order_acquire) == seen &&
                        std::chrono::steady_clock::now() < deadline) {
                     std::this_thread::yield();
@@ -153,6 +159,9 @@ std::unique_ptr<ThreadPool>& pool_slot() {
 }
 int g_threads = 0;
 }  // namespace
+
+void set_pool_spin_us(std::uint64_t us) { g_spin_us.store(us, std::memory_order_relaxed); }
+std::uint64_t pool_spin_us() { return g_spin_us.load(std::memory_order_relaxed); }
 
 void set_pool_threads(int n) {
     g_threads = n;

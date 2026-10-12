@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <thread>
@@ -353,5 +354,18 @@ int main(int argc, char** argv) {
         std::printf("   间隔 %6.0f us：十次 %.3f ms（%.1f GMAC/s；净算术 %.3f ms）\n", gap, ms,
                     gmac / (ms / 1e3), ms - 10.0 * gap / 1000.0);
     }
+
+    // 6) 自旋窗口扫：间隔固定 200 µs（真实路径的量级），窗口从 0 扫到 1 ms。
+    //    窗口就是「多长的间隔不必付挂起/唤醒的钱」，这条曲线决定窗口该取多少。
+    std::printf("\n6) 自旋窗口扫（%d 线程、间隔固定 200 us）：\n", tmax);
+    const double gmac6 = 10.0 * 640.0 * 2560.0 / 1e9;
+    for (const std::uint64_t w : {0ull, 50ull, 100ull, 200ull, 500ull, 1000ull}) {
+        qinfer::scheduling::set_pool_spin_us(w);
+        const double ms =
+            ten_calls_with_gap(tmax, 10, 640, 2560, qinfer::experts::Format::kIq2S, 20, 200.0);
+        std::printf("   窗口 %5llu us：十次 %.3f ms（%.1f GMAC/s；净算术 %.3f ms）\n",
+                    (unsigned long long) w, ms, gmac6 / (ms / 1e3), ms - 10.0 * 200.0 / 1000.0);
+    }
+    qinfer::scheduling::set_pool_spin_us(200);
     return 0;
 }

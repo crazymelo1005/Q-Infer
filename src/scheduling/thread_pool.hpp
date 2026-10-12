@@ -43,4 +43,11 @@ private:
 void set_pool_threads(int n);
 ThreadPool* pool();
 
+// 工作线程的自旋窗口（微秒，默认 2000）。它决定「多长的提交间隔不必付挂起/唤醒的钱」：窗口太小就又
+// 回到每次提交约 200 µs 的唤醒开销，太大则真闲下来时白烧 CPU。默认值与环境2 上的拐点一致（窗口
+// 200 → 2000 µs 时 MoE 那一段的「算」从 266 降到 173 ms，4000 / 8000 不再降）；它是**随工作负载而变
+// 的调参**（一步里提交之间的串行工作有多长，见 measure/thread_pool_bench.cpp 第 5、6 节）。
+void set_pool_spin_us(std::uint64_t us);
+std::uint64_t pool_spin_us();
+
 }  // namespace qinfer::scheduling
