@@ -206,6 +206,29 @@ int main() {
         CHECK(roundtrip(Json::strv(ctl)));
         std::printf("序列化往返：对象/数组/转义/数字多形态结构相等\n");
     }
+    // 嵌套上限：128 层容器仍有效（边界不误伤），129 层起拒绝——防恶意请求体击穿 HTTP 线程栈。
+    {
+        Json j;
+        std::string err;
+        const std::string deep_arr = std::string(128, '[') + std::string(128, ']');
+        CHECK(json_parse(deep_arr, j, err));
+        err.clear();
+        const std::string too_deep_arr = std::string(200, '[') + std::string(200, ']');
+        CHECK(!json_parse(too_deep_arr, j, err));
+        CHECK(!err.empty() && err.find("嵌套过深") != std::string::npos);
+        err.clear();
+        std::string deep_obj;
+        for (int i = 0; i < 128; ++i) deep_obj += "{\"a\":";
+        deep_obj += "0" + std::string(128, '}');
+        CHECK(json_parse(deep_obj, j, err));
+        err.clear();
+        std::string too_deep_obj;
+        for (int i = 0; i < 200; ++i) too_deep_obj += "{\"a\":";
+        too_deep_obj += "0" + std::string(200, '}');
+        CHECK(!json_parse(too_deep_obj, j, err));
+        CHECK(!err.empty() && err.find("嵌套过深") != std::string::npos);
+        std::printf("嵌套上限：128 层数组/对象有效，200 层的数组/对象拒绝（嵌套过深）\n");
+    }
     std::puts("json: 通过");
     return 0;
 }

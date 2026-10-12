@@ -227,8 +227,10 @@ void Serve::worker_main() {
             if (!eng_->tokenizer().encode(job->prompt, /*parse_special=*/true, ids, err)) {
                 job->finish = "error";
                 job->error = "分词失败：" + err;
+                // 先落完成时刻再停流：HTTP 侧读到 done_at 时必然已就绪（与其他错误路径同构），
+                // 否则 HTTP 线程可能赶在 done_at 之前调 record_request、被其守卫整条跳过。
+                job->done_at = std::chrono::steady_clock::now();
                 job->events->stop_with_error(job->error);
-                job->done_at = std::chrono::steady_clock::now();   // T14：编码失败也要收尾成记录（与其他错误路径同构）
                 sched_.done(job);
                 continue;
             }
@@ -238,6 +240,8 @@ void Serve::worker_main() {
                                 [&](const std::string& piece) -> bool {
                                     if (job->first_at == std::chrono::steady_clock::time_point{})
                                         job->first_at = std::chrono::steady_clock::now();
+                                    // 停滞（未断开）的 SSE 客户端可让 worker 阻塞在 push 上并持有 engine_mu_，
+                                    // 冻结全部槽位——M2 调优项（锁粒度/超时），M1 记录不住。
                                     return job->events->push(JobEvent{EventKind::kToken, piece, {}, {}});
                                 },
                                 res, err);
@@ -340,7 +344,7 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
     if (!job) {
         res.status = 503;
         res.set_content(std::string(kQueueFullBody), "application/json; charset=utf-8");
-        record_request(nullptr, 503, false);
+        // 503 未入队：无计时数据，不入记录环（环只收已接受请求）。
         return;
     }
     job->raw_body = req.body;   // T14：原始请求体进 Records（流式请求也要带）
@@ -459,8 +463,9 @@ void Serve::serve_sse(const std::shared_ptr<Job>& job, bool include_usage, httpl
         inner.set("param", Json::nullv());
         Json er = Json::objv();
         er.set("error", std::move(inner));
-        record_request(job, 500, false);
+        // 先写帧后记账：断连时 write 假已在 w 内记 499，先记账会叠成重复/错账。
         if (!w("data: " + json_dump(er) + "\n\n")) return false;
+        record_request(job, 500, false);
         return false;
     };
     res.set_chunked_content_provider("text/event-stream", provider);
@@ -584,20 +589,22 @@ void Serve::handle_completions(const httplib::Request& req, httplib::Response& r
     // 裁定④：completions 同样从 body 读 stream:true → 400。
     const Json* sv = body.find("stream");
     if (sv != nullptr && sv->kind == Json::kBool && sv->b) {
-        send_json(res, 400, openai_err("stream:true 尚未支持（SSE 在 T10 落地）", "invalid_request_error", "stream"));
+        send_json(res, 400, openai_err("completions 暂不支持 stream:true（chat/messages 域已支持）", "invalid_request_error", "stream"));
         return;
     }
     std::shared_ptr<Job> job = launch(req.path, prompt, opts, false);
     if (!job) {
         res.status = 503;
         res.set_content(std::string(kQueueFullBody), "application/json; charset=utf-8");
-        record_request(nullptr, 503, false);   // 裁定⑧：503 记录与 chat 侧对齐
+        // 503 未入队：无计时数据，不入记录环（环只收已接受请求）。
         return;
     }
     job->raw_body = req.body;   // T14：原始请求体进 Records
     std::string text, drain_err;
     if (!drain_nonstream(job, text, drain_err)) {
-        if (!job->events->cancelled()) send_json(res, 500, openai_err(drain_err, "server_error", nullptr));
+        const int st = job->events->cancelled() ? 499 : 500;
+        if (st == 500) send_json(res, 500, openai_err(drain_err, "server_error", nullptr));
+        record_request(job, st, job->events->cancelled());   // 记账与 chat/messages 域同款：每个退出路径恰好一次
         return;
     }
     Json r = Json::objv();
@@ -671,7 +678,7 @@ void Serve::handle_messages(const httplib::Request& req, httplib::Response& res)
     std::shared_ptr<Job> job = launch(req.path, prompt, opts, stream);
     if (!job) {
         send_json(res, 503, anthropic_err("overloaded_error", "queue full"));
-        record_request(nullptr, 503, false);   // 裁定⑧：503 记录与 chat/completions 侧对齐
+        // 503 未入队：无计时数据，不入记录环（环只收已接受请求）。
         return;
     }
     job->raw_body = req.body;   // T14：原始请求体进 Records（流式请求也要带）
@@ -728,9 +735,14 @@ void Serve::handle_count_tokens(const httplib::Request& req, httplib::Response& 
         return;
     }
     std::vector<std::int32_t> ids;
-    if (!eng_->tokenizer().encode(prompt, /*parse_special=*/true, ids, rerr)) {
-        send_json(res, 500, anthropic_err("server_error", "分词失败：" + rerr));
-        return;
+    {
+        // 与 worker_main 同一把 engine_mu_：encode 写各 worker 共享的 piece_cache_，
+        // 脱离锁与并发请求是数据竞争（见 server.hpp 头注释）；chat_template() 是只读访问不需锁。
+        std::lock_guard<std::mutex> lock(engine_mu_);
+        if (!eng_->tokenizer().encode(prompt, /*parse_special=*/true, ids, rerr)) {
+            send_json(res, 500, anthropic_err("server_error", "分词失败：" + rerr));
+            return;
+        }
     }
     Json r = Json::objv();
     r.set("input_tokens", Json::numv(static_cast<double>(ids.size())));

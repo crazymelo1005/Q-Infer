@@ -44,10 +44,15 @@ int hex_digit(char c) {
     return -1;
 }
 
+// 容器嵌套深度上限：128 层约几十 KB 栈，任意默认栈都安全；更深（129 层起）拒绝，
+// 防恶意请求体用超深嵌套击穿 HTTP 线程栈。
+static constexpr int kMaxDepth = 128;
+
 struct Parser {
     const std::string& s;
     std::size_t pos = 0;
     std::string& err;
+    int depth = 0;   // 当前容器嵌套深度（parse_value 进出 {/[ 时增减）
 
     bool fail(const char* msg) {
         err = "第 " + std::to_string(pos + 1) + " 字符处：" + msg;
@@ -240,9 +245,21 @@ bool Parser::parse_value(Json& out) {
     if (pos >= s.size()) return fail("意外结束");
     switch (s[pos]) {
         case '{':
-            return parse_object(out);
+            if (depth >= kMaxDepth) return fail("嵌套过深：容器层级超过 128");
+            ++depth;
+            {
+                const bool ok = parse_object(out);
+                --depth;   // 成功/失败路径都递减；失败后 Parser 即被丢弃
+                return ok;
+            }
         case '[':
-            return parse_array(out);
+            if (depth >= kMaxDepth) return fail("嵌套过深：容器层级超过 128");
+            ++depth;
+            {
+                const bool ok = parse_array(out);
+                --depth;   // 成功/失败路径都递减；失败后 Parser 即被丢弃
+                return ok;
+            }
         case '"':
             return parse_string(out);
         case 't':

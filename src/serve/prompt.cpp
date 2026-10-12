@@ -1285,10 +1285,12 @@ bool run(const std::vector<Op>& ops, std::size_t from, std::size_t to, Env& env,
                         err = pos_str + "set 目标不是 namespace：" + op.a + "." + op.b;
                         return false;
                     }
+                    bool found = false;
                     for (auto& kv : *obj->dict) {
-                        if (kv.first == op.b) { kv.second = v; break; }
+                        if (kv.first == op.b) { kv.second = v; found = true; break; }
                     }
-                    obj->dict->emplace_back(op.b, std::move(v));
+                    // 仅未找到时追加：已存在属性是原位写回，不产生重复键（重复键令 |length 与内存失真）。
+                    if (!found) obj->dict->emplace_back(op.b, std::move(v));
                 } else {
                     env.scopes.back()[op.a] = std::move(v);
                 }

@@ -314,6 +314,14 @@ int main() {
         CHECK(!err.empty());
         std::printf("向量 6：未知过滤器执行报错（%s）\n", err.c_str());
     }
+    // set 对已存在属性写回：命中键原位更新、不追加重复键 → |length 恒 1（修复前 2|2）。
+    {
+        std::string out, err;
+        CHECK(render_chat("{% set ns = namespace(x=1) %}{% set ns.x = 2 %}{{ ns | length }}|{{ ns.x }}",
+                          {{"user", "a"}}, false, out, err));
+        CHECK(out == "1|2");
+        std::printf("set 已存在属性：写回不追加重复键（|length 恒 1）\n");
+    }
     std::puts("prompt: 通过");
     return 0;
 }

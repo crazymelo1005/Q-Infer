@@ -330,6 +330,48 @@ curl -s "http://$HOST:$PORT/web/monitor.js" > "$R"
 grep -q 'QinferRequests.loadDetail' "$R" \
   && ok "/web/monitor.js（检查页复用渲染层）" || bad "/web/monitor.js：$(head -c 200 "$R")"
 
+# 16a. chat 编码失败记账：中文 content 必触发词表外分词失败 → 500，且记录环最新一条
+#      state=error、path=/v1/chat/completions（验证编码失败路径也完成收尾记账）。
+code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
+  -X POST "http://$HOST:$PORT/v1/chat/completions" \
+  -d '{"messages":[{"role":"user","content":"中文"}],"max_tokens":8,"temperature":0}')
+[ "$code" = 500 ] && [ "$(jget "$R" "d['error']['type']")" = server_error ] \
+  || bad "16a chat 编码失败应 500：状态 $code，体 $(head -c 200 "$R")"
+curl -s -H "$H" "http://$HOST:$PORT/api/requests" > "$R"
+if [ "$(jget "$R" "d['requests'][0]['state']")" = error ] \
+   && [ "$(jget "$R" "d['requests'][0]['path']")" = /v1/chat/completions ]; then
+  ok "16a chat 编码失败记账（最新记录 state=error、path=chat）"
+else
+  bad "16a chat 编码失败记账：最新一条 state=$(jget "$R" "d['requests'][0]['state']") path=$(jget "$R" "d['requests'][0]['path']")"
+fi
+
+# 16b. completions 错误记账：中文 prompt → 500，且最新一条 state=error、path=/v1/completions。
+code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
+  -X POST "http://$HOST:$PORT/v1/completions" -d '{"prompt":"中文","max_tokens":8,"temperature":0}')
+[ "$code" = 500 ] && [ "$(jget "$R" "d['error']['type']")" = server_error ] \
+  || bad "16b completions 编码失败应 500：状态 $code，体 $(head -c 200 "$R")"
+curl -s -H "$H" "http://$HOST:$PORT/api/requests" > "$R"
+if [ "$(jget "$R" "d['requests'][0]['state']")" = error ] \
+   && [ "$(jget "$R" "d['requests'][0]['path']")" = /v1/completions ]; then
+  ok "16b completions 错误记账（最新记录 state=error、path=completions）"
+else
+  bad "16b completions 错误记账：最新一条 state=$(jget "$R" "d['requests'][0]['state']") path=$(jget "$R" "d['requests'][0]['path']")"
+fi
+
+# 17. 断开释放：起流式请求，0.5 秒掐掉 curl；随后 /slots 应全部回到空闲（≤10 秒轮询）。
+curl -s -N -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/v1/chat/completions" \
+  -d '{"messages":[{"role":"user","content":"c"}],"max_tokens":2048,"temperature":0,"stream":true}' >/dev/null &
+CK=$!
+sleep 0.5
+kill -9 "$CK" 2>/dev/null
+idle=0
+for _ in $(seq 1 40); do
+  curl -s -H "$H" "http://$HOST:$PORT/slots" > "$R"
+  [ "$(jget "$R" "all(not x['is_processing'] for x in d)")" = True ] && { idle=1; break; }
+  sleep 0.25
+done
+[ "$idle" = 1 ] && ok "断开后槽位释放" || bad "断开后槽位未释放：$(head -c 200 "$R")"
+
 stop
 
 # ---- 503：--reject-after 1 → 第 1 个请求正常，之后一律队列满 ----
