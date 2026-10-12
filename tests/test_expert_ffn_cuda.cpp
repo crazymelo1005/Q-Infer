@@ -721,6 +721,8 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
     }
     std::vector<double> dev_ms;
     std::vector<std::vector<float>> dev_logits;
+    // 与主机多线程那条同口径：稠密部分也开池子，这样两边差的只是「谁算这批专家」。
+    if (threads > 1) qinfer::scheduling::set_pool_threads(threads);
     for (int t = 0; t < tokens; ++t) {
         const auto a = std::chrono::steady_clock::now();
         if (!qinfer::dense::run_step_model(g, m2, x.data(), s_dev, err)) {
@@ -731,7 +733,9 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
         dev_ms.push_back(std::chrono::duration<double, std::milli>(b - a).count());
         dev_logits.push_back(s_dev.head.logits);
     }
-    std::printf("  逐步用时（同一份 x，共 %d 步；第 0 步含设备侧首次分配与逐层上传）\n", tokens);
+    qinfer::scheduling::set_pool_threads(0);
+    std::printf("  逐步用时（同一份 x，共 %d 步；第 0 步含设备侧首次分配与逐层上传%s）\n", tokens,
+                threads > 1 ? "；与主机多线程同口径，稠密都开池子" : "");
     for (int t = 0; t < tokens; ++t) {
         int same = 0;
         for (std::size_t i = 0; i < host_logits[static_cast<std::size_t>(t)].size() &&
