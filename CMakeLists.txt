@@ -48,6 +48,7 @@ add_library(qinfer_dense
   src/dense/qsa_index.cpp
   src/dense/qsa_indexer.cpp
   src/dense/kv_page_cache.cpp
+  src/dense/kv_store.cpp
   src/dense/qsa_qk_prep.cpp
   src/dense/qsa_layer.cpp
   src/dense/layer_map.cpp

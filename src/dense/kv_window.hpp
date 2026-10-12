@@ -18,7 +18,9 @@
 #include <string>
 #include <vector>
 
+#include "dense/kv_page_cache.hpp"
 #include "dense/qsa_layer.hpp"
+#include "dense/kv_store.hpp"
 
 namespace qinfer::dense {
 
@@ -28,6 +30,12 @@ struct KvWindow {
 
     // 统计（每次 decode 步之间可读、可清零）：命中、未命中、驱逐、被拒。
     std::uint64_t hits = 0, misses = 0, evictions = 0, refusals = 0;
+
+    // 权威副本（可选）：给了就在**准入时**把该 block 的字节从副本拷进新槽位（引擎 `kv_stream_resolve`
+    // 的第 3 步）。不给就只是记账——主机侧那点「字节本来就都在内存里」的旧行为，与加之前逐位一致。
+    KvHostStore* store = nullptr;
+    // 槽位所在（`attach_kv_window` 挂上）。准入时往这里拷；没挂槽位却挂了副本会明确报错。
+    KvPageCache* pool = nullptr;
 
     struct Entry {
         std::uint64_t logical = 0;
@@ -53,8 +61,10 @@ struct KvWindow {
 
     // 确保逻辑页常驻：已在则记命中并刷新使用序；不在则准入（必要时驱逐一个未钉住的页）并把物理页号
     // 写进 physical（同时写进挂上的逻辑页表）。窗口满且全部被钉住时记一次被拒并返回假（err 说明原因），
-    // 表不动。驱逐会把被驱逐页在表里写成 -1。
-    bool ensure(std::uint64_t logical, std::uint64_t& physical, std::string& err);
+    // 表不动。驱逐会把被驱逐页在表里写成 -1。挂了权威副本时，**准入**这一步还要把该 block 的字节从副本
+    // 拷进新槽位（`admitted` 为真即这次是准入）——驱逐不回写，因为副本才是权威的那一份。
+    bool ensure(std::uint64_t logical, std::uint64_t& physical, std::string& err,
+                bool* admitted = nullptr);
 
     // 钉住/松开一个**已常驻**的页（本次使用期间不许被驱逐）。未常驻或计数下溢都返回假。
     bool pin(std::uint64_t logical, std::string& err);
@@ -65,6 +75,10 @@ struct KvWindow {
 
 // 给一层 QSA 挂上常驻窗口：把它的逻辑页表整表标成「不在显存」，再由窗口按需搬入。
 // 必须同时清表——否则表里预填的恒等映射会让窗口形同虚设（这是本接口最常见的错接线）。
-void attach_kv_window(QsaScratch& s, KvWindow& w);
+//
+// `logical_blocks` 是逻辑页表的长度（会话上下文能到多少 cell / page_size），**不是槽位数**——引擎那边
+// 这两者也是分开的（`page_table` 是 (n_blocks,)、`slot_block` 是 (n_slots,)）。给 0 表示按权威副本来
+// （它就是这个会话的逻辑容量），没有副本时退回池的大小（恒等映射那种用法）。
+void attach_kv_window(QsaScratch& s, KvWindow& w, std::uint64_t logical_blocks = 0);
 
 }  // namespace qinfer::dense

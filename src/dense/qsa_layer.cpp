@@ -288,6 +288,13 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
         if (!touch_page(s, append_page, err) || !s.window->pin(append_page, err)) return false;
         append_pinned = true;
     }
+    // 权威副本先写（引擎的口径：写永远写主机副本，槽位只在该页常驻时顺带写）——故驱逐不必回写，
+    // 且「准入时从副本拷进来」拿到的就是这一份（含本 cell）。
+    if (s.store != nullptr &&
+        !s.store->write_cell(s.pos, KvCell{s.k_f16.data(), s.v_f16.data()}, err)) {
+        err = "写 KV 权威副本失败：" + err;
+        return false;
+    }
     if (!kv_append(s.kv, s.pos, KvCell{s.k_f16.data(), s.v_f16.data()}, err)) return false;
 
     // 4. 索引器：q 走 bf16 投影 + 归一 + rope；键走 bf16 投影后**原样**交给池化。

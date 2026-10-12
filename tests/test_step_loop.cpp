@@ -10,6 +10,8 @@
 //      都前进了）；新 scratch 从头跑则与第一次逐位一致；
 //   4. 接错必须报错：层数与文件不符、缺输出头、没预备 scratch 就跑。
 // 真权重在 --model 入口跑（环境2）。
+#include "dense/kv_store.hpp"
+#include "dense/kv_window.hpp"
 #include "dense/spec_decode.hpp"
 #include "dense/step_loop.hpp"
 
@@ -704,7 +706,12 @@ void test_cache_and_budget() {
 // 真模型手工入口：整模型跑几个 token，打印判型摘要与 logits 概况。
 // 给了 `ple_table`（分片2，装着 `per_layer_token_embd.weight`）就再跑一条配上 PLE 的：那条按
 // **真 token 序列**走 `run_token_step`（表行由当前 token 与前两个决定），并与不配那条比相对偏离。
-int manual_model_entry(const char* model, int tokens, const char* ple_table) {
+// 给了 `kv_slots > 0` 就再跑一条**KV 换出/换入**的：每个 QSA 层挂一个小窗口 + 一份权威副本，与
+// 「不挂（恒等、全常驻）」那条比逐位一致。`idx_top_k` 默认取真模型的值（2048），小值只用于让选择变
+// 稀疏——真模型要到 2,051 个 cell 以上选择才稀疏，那在主机参考路径上跑不到，故这一段用小的值把
+// 「驱逐」这条路在几十个 token 内打开（两条路用同一份配置，比较仍是同口径的）。
+int manual_model_entry(const char* model, int tokens, const char* ple_table, int kv_slots,
+                       std::uint64_t idx_top_k) {
     artifact::GgufFile g;
     std::string err;
     if (!g.open(model, err)) {
@@ -858,6 +865,90 @@ int manual_model_entry(const char* model, int tokens, const char* ple_table) {
     }
     const double rel = rel_diff(s2.head.logits, sp.head.logits);
     std::printf("  PLE 开/关（同一条 token 序列）：logits 相对偏离 %.3g；PLE 的逐层同一步进\n", rel);
+    if (kv_slots <= 0) return (finite && finite_ple && rel > 1e-3) ? 0 : 1;
+
+    // ---- KV 换出/换入那一条：每个 QSA 层一个小窗口 + 一份权威副本 ----
+    {
+        StepConfig cfg_kv = cfg;
+        cfg_kv.idx_top_k = idx_top_k;
+        StepModel mk;
+        if (!build_step_model(g, cfg_kv, mk, err)) {
+            std::printf("建模型（含 KV 窗口）失败：%s\n", err.c_str());
+            return 1;
+        }
+        TokenEmbed tek;
+        if (!build_token_embed(g, 2560, tek, err)) {
+            std::printf("读 token embedding（KV 那条）失败：%s\n", err.c_str());
+            return 1;
+        }
+        const std::uint64_t blocks = static_cast<std::uint64_t>(tokens) / 4 + 2;  // 逻辑页数（够用即可）
+        const std::uint64_t pages_needed = blocks;
+        std::vector<KvWindow> wins(mk.map.size());
+        std::vector<KvHostStore> stores(mk.map.size());
+        StepScratch sw;
+        if (!prepare_step_scratch(mk, pages_needed, 0, sw, err)) {
+            std::printf("预备 scratch（KV 那条）失败：%s\n", err.c_str());
+            return 1;
+        }
+        int attached = 0;
+        for (std::size_t l = 0; l < mk.map.size(); ++l) {
+            if (mk.map[l].kind != LayerKind::kQsa) continue;
+            QsaScratch& q = sw.blocks[l].qsa;
+            q.kv.n_pages = static_cast<std::uint64_t>(kv_slots);  // 槽位只给这么多
+            q.kv.reset();
+            stores[l].init(q.kv.page_size, q.kv.n_head_kv, q.kv.head_dim, blocks);
+            wins[l].page_bytes = 2 * q.kv.n_head_kv * q.kv.page_size * q.kv.head_dim * 2;
+            wins[l].quota_bytes = static_cast<std::uint64_t>(kv_slots) * wins[l].page_bytes;
+            wins[l].store = &stores[l];
+            attach_kv_window(q, wins[l], blocks);
+            ++attached;
+        }
+        std::uint64_t ev = 0, moved = 0;
+        for (std::size_t l = 0; l < mk.map.size(); ++l) {
+            if (mk.map[l].kind != LayerKind::kQsa) continue;
+            ev += wins[l].evictions;
+            moved += stores[l].bytes_moved;
+        }
+        for (int t = 0; t < tokens; ++t) {
+            const std::uint64_t tok = static_cast<std::uint64_t>(1 + (t % 7));
+            if (!run_token_step(g, mk, tek, tok, sw, err)) {
+                std::printf("（KV 窗口）第 %d 个 token 跑不动：%s\n", t, err.c_str());
+                return 1;
+            }
+        }
+        std::uint64_t ev2 = 0, moved2 = 0;
+        for (std::size_t l = 0; l < mk.map.size(); ++l) {
+            if (mk.map[l].kind != LayerKind::kQsa) continue;
+            ev2 += wins[l].evictions;
+            moved2 += stores[l].bytes_moved;
+        }
+        // 不挂窗口那条：同一份配置（含同一个 idx_top_k）、同一条 token 序列。
+        StepScratch s_plain;
+        if (!prepare_step_scratch(mk, pages_needed, 0, s_plain, err)) return 1;
+        for (int t = 0; t < tokens; ++t) {
+            const std::uint64_t tok = static_cast<std::uint64_t>(1 + (t % 7));
+            if (!run_token_step(g, mk, tek, tok, s_plain, err)) {
+                std::printf("（无窗口）第 %d 个 token 跑不动：%s\n", t, err.c_str());
+                return 1;
+            }
+        }
+        int same = 0;
+        for (std::size_t i = 0; i < s_plain.head.logits.size() && i < sw.head.logits.size(); ++i) {
+            if (std::bit_cast<std::uint32_t>(s_plain.head.logits[i]) ==
+                std::bit_cast<std::uint32_t>(sw.head.logits[i])) {
+                ++same;
+            }
+        }
+        std::printf("  KV 窗口：%d 个 QSA 层各挂 %d 槽位（逻辑 %llu 页）→ 驱逐 %llu 次、搬入 %llu 字节；"
+                    "与不挂窗口逐位相同 %d/%zu\n",
+                    attached, kv_slots, (unsigned long long) blocks, (unsigned long long) ev2,
+                    (unsigned long long) moved2, same, s_plain.head.logits.size());
+        (void) ev;
+        (void) moved;
+        CHECK(same == static_cast<int>(s_plain.head.logits.size()));
+        CHECK(ev2 > 0);
+        CHECK(moved2 > 0);
+    }
     return (finite && finite_ple && rel > 1e-3) ? 0 : 1;
 }
 
@@ -1123,6 +1214,8 @@ void test_ple_step() {
 int main(int argc, char** argv) {
     if (argc >= 3 && std::string(argv[1]) == "--model") {
         int tokens = 1;
+        int kv_slots = 0;
+        std::uint64_t idx_top_k = 2048;
         const char* ple_table = nullptr;
         for (int i = 2; i < argc; ++i) {
             const std::string a = argv[i];
@@ -1130,12 +1223,16 @@ int main(int argc, char** argv) {
                 tokens = std::atoi(argv[++i]);
             } else if (a == "--ple" && i + 1 < argc) {
                 ple_table = argv[++i];
+            } else if (a == "--kv-slots" && i + 1 < argc) {
+                kv_slots = std::atoi(argv[++i]);
+            } else if (a == "--idx-top-k" && i + 1 < argc) {
+                idx_top_k = static_cast<std::uint64_t>(std::atoi(argv[++i]));
             } else if (a != argv[2]) {
                 std::printf("不认识的参数：%s\n", a.c_str());
                 return 2;
             }
         }
-        return manual_model_entry(argv[2], tokens, ple_table);
+        return manual_model_entry(argv[2], tokens, ple_table, kv_slots, idx_top_k);
     }
     test_build_and_run();
     test_order_and_layers_matter();

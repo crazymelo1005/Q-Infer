@@ -26,6 +26,7 @@
 namespace qinfer::dense {
 
 struct KvWindow;  // 常驻窗口（见 dense/kv_window.hpp）：非空时由它管逻辑页的搬入
+struct KvHostStore;  // KV 的权威副本（见 dense/kv_store.hpp）：非空时每个新 cell 都要写它一份
 
 struct QsaLayer {
     int layer = -1;
@@ -70,6 +71,9 @@ struct QsaScratch {
     // 常驻窗口（可空）。非空时本层不再假定「表里预填了恒等映射」：写入与聚集前后会经窗口把需要的
     // 逻辑页搬入、并在本次使用期间钉住（刚写入的那一页也在其中）。见 dense/kv_window.hpp。
     KvWindow* window = nullptr;
+    // KV 的权威副本（可空，与窗口一起由 attach_kv_window 挂上）。非空时**每个新 cell 都要写它一份**
+    // （写槽位那条只在该页常驻时才写），于是槽位被驱逐再准入时能从副本把字节拿回来。见 dense/kv_store.hpp。
+    KvHostStore* store = nullptr;
     QsaIndexerState idx_state;
     std::vector<float> cos_tab, sin_tab;
     std::vector<float> q_norm_w, k_norm_w, idx_q_norm_w, idx_k_norm_w;
