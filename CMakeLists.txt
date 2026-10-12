@@ -43,6 +43,9 @@ add_library(qinfer_serve
 )
 target_include_directories(qinfer_serve PUBLIC src)
 target_link_libraries(qinfer_serve PUBLIC qinfer_text qinfer_dense qinfer_ple qinfer_storage qinfer_kernels)
+# third_party/httplib/httplib.h = cpp-httplib v0.18.6（整份入库，SHA-256 见提交说明）。
+# 「裁剪」落实为不定义 CPPHTTPLIB_OPENSSL_SUPPORT 与 CPPHTTPLIB_ZLIB_SUPPORT；线程池由入口按槽位配置。
+target_include_directories(qinfer_serve PUBLIC third_party/httplib)
 
 add_library(qinfer_ple
   src/ple/row_path.cpp
