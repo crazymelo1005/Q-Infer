@@ -228,13 +228,7 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
     if (!stop_param(body, opts.stop)) { send_json(res, 400, openai_err("stop 必须是字符串或字符串数组", "invalid_request_error", "stop")); return; }
     SamplerParams sp; sp.temperature = opts.temperature; sp.top_p = opts.top_p;
     if (!sp.valid()) { send_json(res, 400, openai_err("temperature 非负、top_p 在 (0,1]", "invalid_request_error", nullptr)); return; }
-    // 裁定④：stream:true 从 body 读并真 400（SSE 在 T10 落地）；stream 参数保留给 T10 的流式分支。
-    const Json* sv = body.find("stream");
-    if (sv != nullptr && sv->kind == Json::kBool && sv->b) {
-        send_json(res, 400, openai_err("stream:true 尚未支持（SSE 在 T10 落地）", "invalid_request_error", "stream"));
-        return;
-    }
-
+    // T10：stream 由路由层从 body 读入并传入；此处不再读 body，只按参数分派（SSE 走 serve_sse）。
     std::string prompt;
     std::string rerr;
     if (!render_chat(eng_->chat_template(), conv, /*add_generation_prompt=*/true, prompt, rerr)) {
@@ -247,6 +241,18 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
         res.status = 503;
         res.set_content(std::string(kQueueFullBody), "application/json; charset=utf-8");
         record_request(nullptr, 503, false);
+        return;
+    }
+    // T10：流式分派——include_usage 宽松收（裁定①）：stream_options 存在且为对象、其下
+    // include_usage 为布尔真才算真；其余一律 false，不额外 400。
+    if (stream) {
+        bool include_usage = false;
+        const Json* so = body.find("stream_options");
+        if (so != nullptr && so->is_obj()) {
+            const Json* iu = so->find("include_usage");
+            if (iu != nullptr && iu->kind == Json::kBool) include_usage = iu->b;
+        }
+        serve_sse(job, include_usage, res);
         return;
     }
     std::string text, drain_err;
@@ -281,6 +287,82 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
     r.set("usage", std::move(usage));
     send_json(res, 200, r);
     record_request(job, 200, false);
+}
+
+// OpenAI 兼容 SSE。provider 由 httplib 在 handler 返回后反复调用；每次调用恰好消费一个
+// 事件并写一帧（多帧合并写进同一次 sink.write）。连接断开（write 假）→ cancel → 返回假收尾。
+void Serve::serve_sse(const std::shared_ptr<Job>& job, bool include_usage, httplib::Response& res) {
+    const std::string id = "chatcmpl-" + std::to_string(job->id);
+    const double created = static_cast<double>(std::time(nullptr));
+    const std::string model = eng_->model_name();
+    const auto first = std::make_shared<bool>(true);
+    auto provider = [this, job, include_usage, id, created, model, first](
+                        size_t, httplib::DataSink& sink) -> bool {
+        JobEvent e;
+        const bool got = job->events->pop(e);
+        if (!got) { record_request(job, 499, job->events->cancelled()); return false; }
+        const auto w = [&](const std::string& s) {
+            // 实仓 DataSink::write 是 std::function<bool(const char*, size_t)>（两参调用，见 httplib.h:538）。
+            if (!sink.write(s.data(), s.size())) { job->events->cancel(); record_request(job, 499, true); return false; }
+            return true;
+        };
+        Json chunk = Json::objv();
+        chunk.set("id", Json::strv(id));
+        chunk.set("object", Json::strv("chat.completion.chunk"));
+        chunk.set("created", Json::numv(created));
+        chunk.set("model", Json::strv(model));
+        Json choice = Json::objv();
+        Json delta = Json::objv();
+        if (e.kind == EventKind::kToken) {
+            Json c = Json::arrv();
+            choice.set("index", Json::numv(0.0));
+            if (*first) { delta.set("role", Json::strv("assistant")); *first = false; }
+            if (!e.text.empty()) delta.set("content", Json::strv(e.text));
+            choice.set("delta", std::move(delta));
+            choice.set("finish_reason", Json::nullv());
+            c.push(std::move(choice));
+            chunk.set("choices", std::move(c));
+            return w("data: " + json_dump(chunk) + "\n\n");
+        }
+        // 收尾帧：finish_reason；需 usage 时先补一条 usage 帧，再 [DONE]。
+        Json c = Json::arrv();
+        if (e.kind == EventKind::kDone) {
+            choice.set("index", Json::numv(0.0));
+            choice.set("delta", Json::objv());
+            choice.set("finish_reason", Json::strv(e.finish.empty() ? "stop" : e.finish));
+            c.push(std::move(choice));
+            chunk.set("choices", std::move(c));
+            if (!w("data: " + json_dump(chunk) + "\n\n")) return false;
+            if (include_usage) {
+                Json u = Json::objv();
+                u.set("prompt_tokens", Json::numv(static_cast<double>(job->n_prompt)));
+                u.set("completion_tokens", Json::numv(static_cast<double>(job->n_gen)));
+                u.set("total_tokens", Json::numv(static_cast<double>(job->n_prompt + job->n_gen)));
+                Json uc = Json::objv();
+                uc.set("id", Json::strv(id));
+                uc.set("object", Json::strv("chat.completion.chunk"));
+                uc.set("created", Json::numv(created));
+                uc.set("model", Json::strv(model));
+                uc.set("choices", Json::arrv());
+                uc.set("usage", std::move(u));
+                if (!w("data: " + json_dump(uc) + "\n\n")) return false;
+            }
+            if (!w("data: [DONE]\n\n")) return false;
+            record_request(job, 200, false);
+            return false;
+        }
+        // kError（事件流里以 error 帧出现，一致性让客户端能读到原因）。
+        Json inner = Json::objv();
+        inner.set("message", Json::strv(e.err.empty() ? "生成失败" : e.err));
+        inner.set("type", Json::strv("server_error"));
+        inner.set("param", Json::nullv());
+        Json er = Json::objv();
+        er.set("error", std::move(inner));
+        record_request(job, 500, false);
+        if (!w("data: " + json_dump(er) + "\n\n")) return false;
+        return false;
+    };
+    res.set_chunked_content_provider("text/event-stream", provider);
 }
 
 void Serve::handle_completions(const httplib::Request& req, httplib::Response& res) {
@@ -416,8 +498,17 @@ void Serve::register_routes() {
         r.set("data", std::move(data));
         send_json(res, 200, r);
     });
-    svr.Post("/v1/chat/completions",
-             [this](const httplib::Request& req, httplib::Response& res) { handle_chat(req, res, false); });
+    // T10：stream 判定移到路由层（请求体非法/非对象 → 视作非流式）；handle_chat 的 stream 即最终真值。
+    svr.Post("/v1/chat/completions", [this](const httplib::Request& req, httplib::Response& res) {
+        Json body;
+        std::string jerr;
+        bool stream = false;
+        if (json_parse(req.body, body, jerr) && body.is_obj()) {
+            const Json* s = body.find("stream");
+            if (s != nullptr && s->kind == Json::kBool) stream = s->b;
+        }
+        handle_chat(req, res, stream);
+    });
     svr.Post("/v1/completions",
              [this](const httplib::Request& req, httplib::Response& res) { handle_completions(req, res); });
     // 静态页（T15/T16 落地文件；此刻 404 也正常——T9 只验 API 面）。

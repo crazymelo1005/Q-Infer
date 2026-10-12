@@ -123,6 +123,50 @@ else
   bad "并发 8 后有失败（服务存活检查与 8 份响应逐一核过）"
 fi
 
+# 7. SSE：先非流式取参考文本，再流式取同款请求，逐 delta 拼出来必须与参考逐字节相同。
+# 提示词只用夹具词表内字母 c（词表外字符会触发 encode 失败 → 500）；贪心 + seed 5 下输出确定。
+# 参考侧用 sys.stdout.write 取精确 content——print 会多吃一个换行，与流式拼文（无尾换行）cmp 必败。
+curl -s -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/v1/chat/completions" \
+  -d '{"messages":[{"role":"user","content":"c"}],"max_tokens":24,"temperature":0,"seed":5}' \
+  | python3 -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["choices"][0]["message"]["content"])' >/tmp/qinfer_ref.txt
+
+HDRS="$R.hdrs"; BODY="$R.body"
+curl -sN -D "$HDRS" -o "$BODY" -H "$H" -H 'Content-Type: application/json' \
+  -X POST "http://$HOST:$PORT/v1/chat/completions" \
+  -d '{"messages":[{"role":"user","content":"c"}],"max_tokens":24,"temperature":0,"seed":5,"stream":true}'
+# 帧序列检查：第一帧带 role、中间帧带 content、末帧带 finish_reason、收尾 [DONE]；逐 delta 拼文本。
+python3 - "$BODY" >/tmp/qinfer_sse.txt <<'PY'
+import json, sys
+raw = open(sys.argv[1]).read()
+frames = [l[6:] for l in raw.splitlines() if l.startswith("data: ") and l != "data: [DONE]"]
+assert frames, "没有任何数据帧"
+first = json.loads(frames[0])
+assert first["choices"][0]["delta"].get("role") == "assistant", "首帧缺 role"
+last = json.loads(frames[-1])
+assert last["choices"][0]["finish_reason"] in ("stop", "length"), "末帧缺 finish_reason"
+text = "".join(json.loads(f)["choices"][0]["delta"].get("content", "") for f in frames)
+sys.stdout.write(text)
+PY
+if grep -q "data: \[DONE\]" "$BODY" && grep -qi "text/event-stream" "$HDRS" \
+   && cmp -s /tmp/qinfer_ref.txt /tmp/qinfer_sse.txt; then
+  ok "SSE：事件流、[DONE]、流式拼文与非流式逐字节一致"
+else
+  bad "SSE：头部 $(grep -i event-stream "$HDRS" | head -1)，正文行数 $(wc -l < "$BODY")"
+fi
+rm -f "$HDRS" "$BODY"
+
+# 8. stream_options.include_usage：数据帧里带 usage，且 completion_tokens ≥ 1。
+curl -sN -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/v1/chat/completions" \
+  -d '{"messages":[{"role":"user","content":"d"}],"max_tokens":8,"temperature":0,"stream":true,"stream_options":{"include_usage":true}}' \
+  | python3 -c '
+import json, sys
+raw = sys.stdin.read()
+frames = [l[6:] for l in raw.splitlines() if l.startswith("data: ") and l != "data: [DONE]"]
+usage = [json.loads(f) for f in frames if json.loads(f).get("usage")]
+assert usage, "usage 帧缺失"
+assert usage[-1]["usage"]["completion_tokens"] >= 1
+print("usage-ok")' | grep -q usage-ok && ok "include_usage 末位 usage 帧" || bad "include_usage"
+
 stop
 
 # ---- 503：--reject-after 1 → 第 1 个请求正常，之后一律队列满 ----

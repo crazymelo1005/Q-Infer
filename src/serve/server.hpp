@@ -56,6 +56,7 @@ private:
     void worker_main();
     void handle_chat(const httplib::Request& req, httplib::Response& res, bool stream);
     void handle_completions(const httplib::Request& req, httplib::Response& res);
+    void serve_sse(const std::shared_ptr<Job>& job, bool include_usage, httplib::Response& res);
     std::shared_ptr<Job> launch(const std::string& path, std::string prompt,
                                 const GenOptions& opts, bool stream);
     void record_request(const std::shared_ptr<Job>& job, int http_status, bool disconnected);
