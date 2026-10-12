@@ -560,7 +560,8 @@ int manual_model_entry(const char* model, int layer) {
 
 // 整模型一步：不交出去（逐层主机路径）与交出去（48 层逐层交给 CUDA 组）两条路的 logits 该逐位
 // 一致。这条是「设备侧那批真的进了整模型一步」的判据，且要求没有一次重派（否则有层没被接住）。
-int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int threads) {
+int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int threads,
+                      int cache_slots) {
     qinfer::artifact::GgufFile g;
     std::string err;
     if (!g.open(model, err)) {
@@ -580,6 +581,10 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
     cfg.idx_dim = 128;
     cfg.idx_top_k = 2048;
     cfg.idx_block = 4;
+    // 主机路径的专家字节默认**按需直读**（cache_slots = 0）。开了槽位就改走 `storage/expert_cache`
+    // 那条读取路径——它对本步数值是透明的（缓存只决定字节从哪来），故开与不开 logits 逐位相同。
+    // 这个开关是用来把 MoE 那一段拆成「重复读文件」与「算」两半的。
+    cfg.cache_slots = static_cast<std::size_t>(cache_slots < 0 ? 0 : cache_slots);
     qinfer::dense::StepModel m;
     if (!qinfer::dense::build_step_model(g, cfg, m, err)) {
         std::printf("建整模型失败：%s\n", err.c_str());
@@ -616,6 +621,10 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
         const auto b = std::chrono::steady_clock::now();
         host_ms.push_back(std::chrono::duration<double, std::milli>(b - a).count());
         host_logits.push_back(s_ref.head.logits);
+    }
+    if (cache_slots > 0) {
+        std::printf("  主机路径专家缓存（%d 槽/层）：%s\n", cache_slots,
+                    qinfer::experts::format_step_record(s_ref.last_record).c_str());
     }
     {
         const qinfer::dense::LayerPhases ph = qinfer::dense::sum_phases(s_ref.phases);
@@ -864,6 +873,7 @@ int main(int argc, char** argv) {
         int layers = 48;
         int tokens = 3;
         int threads = 0;
+        int cache_slots = 0;
         bool step = false;
         bool fleet = false;
         for (int i = 2; i < argc; ++i) {
@@ -876,6 +886,8 @@ int main(int argc, char** argv) {
                 tokens = std::atoi(argv[++i]);
             } else if (a == "--threads" && i + 1 < argc) {
                 threads = std::atoi(argv[++i]);
+            } else if (a == "--cache-slots" && i + 1 < argc) {
+                cache_slots = std::atoi(argv[++i]);
             } else if (a == "--step") {
                 step = true;
             } else if (a == "--fleet") {
@@ -887,7 +899,7 @@ int main(int argc, char** argv) {
                 return 2;
             }
         }
-        if (step) return manual_step_entry(argv[2], layers, fleet, tokens, threads);
+        if (step) return manual_step_entry(argv[2], layers, fleet, tokens, threads, cache_slots);
         return manual_model_entry(argv[2], layer);
     }
     for (const GuFormat& gu : kGuFormats) test_device_matches_host(gu);
