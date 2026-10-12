@@ -304,6 +304,17 @@ curl -s -H "$H" "http://$HOST:$PORT/api/requests?id=deadbeef0000" > "$R"
 [ "$(jget "$R" "d['error']['message']")" ] \
   && ok "/api/requests?id= 404 错误体" || bad "/api/requests 缺失 id 错误体：$(head -c 300 "$R")"
 
+# 15. 静态页：/ 是含 Chat 面板的三 tab 壳，tokens.css 含令牌与深色套，app.js 含 Chat 逻辑。
+curl -s "http://$HOST:$PORT/" > "$R"
+grep -q 'id="panel-chat"' "$R" && grep -q '/web/tokens.css' "$R" && grep -q '/web/app.js' "$R" \
+  && ok "/ 三 tab 壳（panel-chat/tokens.css/app.js）" || bad "/ 静态壳：$(head -c 200 "$R")"
+curl -s "http://$HOST:$PORT/web/tokens.css" > "$R"
+grep -q -- '--bg' "$R" && grep -q 'data-theme="dark"' "$R" \
+  && ok "/web/tokens.css（令牌 + 深色套）" || bad "/web/tokens.css：$(head -c 200 "$R")"
+curl -s "http://$HOST:$PORT/web/app.js" > "$R"
+grep -q 'pollMetrics' "$R" && grep -q 'panel-chat' "$R" \
+  && ok "/web/app.js（Chat 逻辑）" || bad "/web/app.js：$(head -c 200 "$R")"
+
 stop
 
 # ---- 503：--reject-after 1 → 第 1 个请求正常，之后一律队列满 ----

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Q-Infer</title>
+<link rel="stylesheet" href="/web/tokens.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">Q-Infer</span>
+    <span class="model" id="brand-model">&hellip;</span>
+  </div>
+  <nav class="tab-bar">
+    <button class="tab-btn active" data-tab="chat" type="button">Chat</button>
+    <button class="tab-btn" data-tab="monitor" type="button">Monitor</button>
+    <button class="tab-btn" data-tab="about" type="button">About</button>
+  </nav>
+  <div class="keybox">
+    <label for="api-key">API 密钥</label>
+    <input id="api-key" class="input key-input" type="password" autocomplete="off" placeholder="可选">
+    <button id="btn-key-toggle" class="btn ghost" type="button">显示</button>
+  </div>
+</header>
+<main>
+  <div id="banner" class="banner hidden"></div>
+
+  <section id="panel-chat" class="panel">
+    <div id="msg-list" class="msg-list">
+      <div class="note">向引擎提问吧。用右上角填入 API 密钥；采样器抽屉可调 temperature / top_p / seed。</div>
+    </div>
+    <div class="chat-foot">
+      <details class="drawer">
+        <summary>采样器</summary>
+        <div class="drawer-grid">
+          <div class="field">
+            <label for="s-temp">temperature</label>
+            <input id="s-temp" class="input" type="number" min="0" max="2" step="0.05" value="0.8">
+          </div>
+          <div class="field">
+            <label for="s-top-p">top_p</label>
+            <input id="s-top-p" class="input" type="number" min="0.05" max="1" step="0.05" value="0.95">
+          </div>
+          <div class="field">
+            <label for="s-seed">seed（-1 = 随机）</label>
+            <input id="s-seed" class="input" type="number" step="1" value="-1">
+          </div>
+        </div>
+      </details>
+      <div class="send-row">
+        <textarea id="chat-input" class="input chat-input" rows="2"
+                  placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+        <div class="send-col">
+          <button id="btn-send" class="btn primary" type="button">发送</button>
+          <button id="btn-stop" class="btn danger hidden" type="button">停止</button>
+          <button id="btn-new" class="btn ghost" type="button">新会话</button>
+        </div>
+      </div>
+      <div class="chat-status">
+        <span id="status-dot" class="status-dot"></span>
+        <span id="chat-state">连接中…</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="panel-monitor" class="panel hidden">
+    <div class="monitor-grid" id="cards">
+      <div class="card"><div class="card-title">模型状态</div><div class="card-value" id="card-state">&ndash;</div><div class="card-sub" id="card-state-sub"></div></div>
+      <div class="card"><div class="card-title">请求保留</div><div class="card-value" id="card-kept">&ndash;</div><div class="card-sub">条（/api/requests）</div></div>
+      <div class="card"><div class="card-title">最近 wall-clock</div><div class="card-value" id="card-wall">&ndash;</div><div class="card-sub" id="card-wall-sub"></div></div>
+      <div class="card"><div class="card-title">最近解码速度</div><div class="card-value" id="card-tok">&ndash;</div><div class="card-sub" id="card-tok-sub"></div></div>
+    </div>
+    <div class="req-layout">
+      <div class="req-list-pane">
+        <div class="req-toolbar">
+          <input id="req-search" class="input" type="search" placeholder="搜索路径 / 模型 / 状态">
+          <select id="req-filter" class="input" title="状态过滤">
+            <option value="">全部状态</option>
+            <option value="queued">queued</option>
+            <option value="processing">processing</option>
+            <option value="completed">completed</option>
+            <option value="error">error</option>
+          </select>
+        </div>
+        <div id="req-list" class="req-list"><div class="note">暂无请求记录</div></div>
+      </div>
+      <div id="req-detail" class="req-detail-pane"><div class="note">点左侧一条记录查看详情</div></div>
+    </div>
+  </section>
+
+  <section id="panel-about" class="panel hidden">
+    <div class="about-body">
+      <div class="card">
+        <div class="card-title">模型与引擎</div>
+        <table class="plain-table" id="about-engine"><tbody></tbody></table>
+      </div>
+      <div class="card">
+        <div class="card-title">能力（/props）</div>
+        <table class="plain-table" id="about-props"><tbody></tbody></table>
+      </div>
+      <div class="card">
+        <div class="card-title">本机硬件</div>
+        <table class="plain-table" id="about-hardware"><tbody></tbody></table>
+      </div>
+      <div class="card">
+        <div class="card-title">服务与协议</div>
+        <p class="dim">推理端点为 <span class="mono" id="about-ports"></span>。OpenAI 域走 <span class="mono">/v1/chat/completions</span>（含 SSE 流式）、<span class="mono">/v1/completions</span>、<span class="mono">/v1/models</span>；Anthropic 域走 <span class="mono">/v1/messages</span> 与 <span class="mono">/v1/messages/count_tokens</span>；监控走 <span class="mono">/metrics</span> 与 <span class="mono">/api/requests</span>。</p>
+      </div>
+    </div>
+  </section>
+</main>
+<script src="/web/app.js"></script>
+</body>
+</html>
