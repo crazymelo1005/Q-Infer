@@ -49,11 +49,11 @@ API / 调度层        OpenAI 兼容接口 · 批调度 · 前缀缓存 · 指�
 
 已完成：问题界定、竞品核查、架构设计、九条架构决策记录、门禁实测（13 条已测、G-11 得部分、G-14 部分未判定）、实施顺序序 0 的目标基线（单卡 decode 稳态 64.44、双卡 85.96 至 89.33 tok/s，见 [requirements §3](docs/requirements.md)）与序 1 的自动标定（机器画像，见 [research/01](docs/research/01-strata-engine.md) §10.2）。
 
-序 2 的主机侧骨架已成形，CI 里构建并跑 17 套测试：三层存储与页表、有界行缓存、PCIe 字节预算仲裁；表行一侧的索引哈希、IQ4_NL 反量化与整条读取路径（`ple/row_path`）；专家一侧的格式分派表、三矩阵前馈（IQ2_XS / IQ2_S / IQ2_XXS / Q2_0 / IQ4_NL 五档内核）、路由门控与一层 MoE 串联（`experts/`）。两条路径都已在真模型（环境2 上的两档分片）上跑通并对照过独立实现：表行 16 个头的 L1 与 Python oracle 全等、专家前馈与双精度参考一致、路由的专家 id 与引擎自身的主机参考全等。
+序 2 的主机侧骨架已成形，CI 里构建并跑 65 套测试：三层存储与页表、有界行缓存、PCIe 字节预算仲裁；表行一侧的索引哈希、IQ4_NL 反量化与整条读取路径（`ple/row_path`）；专家一侧的格式分派表、三矩阵前馈（IQ2_XS / IQ2_S / IQ2_XXS / Q2_0 / IQ4_NL 五档内核）、路由门控与一层 MoE 串联（`experts/`）；生成一侧的步循环与 KV 窗口；服务一侧的 HTTP 双域、遥测、请求记录与前端（`src/serve`）。两条路径都已在真模型（环境2 上的两档分片）上跑通并对照过独立实现：表行 16 个头的 L1 与 Python oracle 全等、专家前馈与双精度参考一致、路由的专家 id 与引擎自身的主机参考全等。服务层（序 7 的 M1 切片）对外提供 OpenAI 与 Anthropic 兼容的推理接口与监控页，见 `docs/design/adr/ADR-012-http-transport-and-serving-stack.md`。
 
 其中 G-04 不通过：记忆表行在去重后无顺序性、亦无近邻复用，故表行预取子系统已砍，退守按需读加有界行缓存（[ADR-007](docs/design/adr/ADR-007-ngram-table-on-demand-read.md)）。G-07 判定未命中专家路径为算力瓶颈，核显分担的前提满足。
 
-下一步：序 2 的验收标准是「单请求正确跑通」，还差稠密部分、KV 与注意力、顶层步循环；GPU 侧自序 3 起。此外还有未实现的专家档（部署那份的 IQ1_M 3 层、另一档的 IQ3_S / IQ3_XXS 等）、共享专家与专家缓存。门禁方面 G-14 仍未判定。代码版本标签 `v<主>.<次>.<修订>` 按 [CONTRIBUTING §6.2](CONTRIBUTING.md) 的约定留到「单请求跑通」之后，故尚无代码版本标签，也没有 Release（现有 15 个标签都是设计里程碑与实测快照）。
+下一步：序 2 的验收标准是「单请求正确跑通」。主机侧大半已闭环——门控残差、步循环、KV 窗口与换入换出、PLE、内存池配平（`docs/design/engine.md §17 序 2`）；尚缺设备侧那半（批式前向与 KV 的设备实现）与 MTP 真草稿头。服务层（序 7）的 M1 切片已随本仓库落地：OpenAI 与 Anthropic 兼容的 HTTP 推理域、遥测与三页前端 + 请求检查页（`docs/design/engine.md §12.1`）；Prometheus 完整对接与 /metrics 的 conversation_cache 实值排到 M2。此外还有未实现的专家档（部署那份的 IQ1_M 3 层、另一档的 IQ3_S / IQ3_XXS 等）、共享专家与专家缓存。门禁方面 G-14 仍未判定。代码版本标签 `v<主>.<次>.<修订>` 按 `CONTRIBUTING §6.2` 的约定留到「单请求跑通」之后，故尚无代码版本标签，也没有 Release（现有 15 个标签都是设计里程碑与实测快照）。
 
 门禁指必须先测量的假设，测量不通过即砍掉对应子系统并记录负结果，不得保留。清单与测量方法见 [design/gates.md](docs/design/gates.md)。
 
@@ -158,6 +158,6 @@ The premise is that the weights never fit in VRAM, so the engine is built around
 - Decision records: [`docs/design/adr/`](docs/design/adr/)
 - Research ledger and references: [`docs/research/`](docs/research/)
 
-The host-side engine skeleton is implemented under `src/` and is built and tested in CI (17 ctest suites), including a quantized-kernel set, the expert path (format dispatch, gated FFN, router, one MoE layer) and the n-gram table-row path; both have been run against the real model shards and cross-checked against independent implementations. The GPU side and a single-request end-to-end loop are not yet in place, so there is no code-version tag or Release yet.
+The host-side engine skeleton is implemented under `src/` and is built and tested in CI (65 ctest suites), including the quantized-kernel set, the expert path (format dispatch, gated FFN, router, one MoE layer), the n-gram table-row path, the step loop with KV windowing, and the serve layer (OpenAI/Anthropic HTTP endpoints, telemetry, request records, and the web frontend); the table-row and expert paths have been run against the real model shards and cross-checked against independent implementations. The GPU side (batched forward and device-side KV swap) is not yet in place, so there is no code-version tag or Release yet.
 
 License: Apache-2.0 — see [LICENSE](LICENSE).

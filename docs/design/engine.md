@@ -285,12 +285,24 @@ IQ2_XS 这一档的块反量化与「与 Q8_K 的定点点积」已实现：`src
 
 ## 12. 服务与调度
 
-- 提供 OpenAI 兼容的 HTTP 接口（第 17 节第 7 序；先跑起来这条线上的下一段）。
+- 提供 OpenAI 与 Anthropic 兼容的 HTTP 接口（第 17 节第 7 序；M1 切片已落地，实现说明见本节末尾）。
 - 分词器已落地（`src/text/tokenizer`，[S-65]）：那份 GGUF 把整份分词器放在元数据里（`tokenizer.ggml.*`），故 `artifact/gguf_table` 现在把键值段读进来（此前只跨过）——那是它的前提。口径逐条转录自引擎自带的那份实现（`tools/strata_tokenizer.py`，自述「实现之准」），三处陷阱各按结构钉住：字节 ↔ 可打印字符是 256 个码点的**置换**（故判据必须直接断言映射表，往返与 id 都照不出置换错）、预分词是 `[\p{L}\p{M}]` 而不是 `\p{L}`（少了 `\p{M}` 会把合并记号并进后面的标点）、特殊 token 里 type 4 永远匹配而 type 3 只在 parse_special 时。真权重上与它逐 token 对照 2889/2889 个 id 相同（31 个用例，含 emoji、组合记号、C0 控制、5000 字符长串与 2400 字符汉字段）。
 - 批调度目标是并发不超过 8，不追求服务端式吞吐。环境2 上批量转矩阵乘的收益有限。
 - 前缀缓存用基数树。多轮对话共享系统提示时，重复预填接近归零。
 - 会话亲和：会话到专家簇的画像，作为第 5 节的输入。
 - 多模态：视觉编码器约 1.4 GB，按需载入载出；图像特征缓存复用，避免多轮引用同一图像时重复计算。
+
+### 12.1 服务层 M1 实现说明（已落地）
+
+实现栈见 `adr/ADR-012-http-transport-and-serving-stack.md`，契约对拍对象是 Strata v0.1.43（`../research/01-strata-engine.md`）。本节记实现事实，改动先改它再改代码的约定照旧。
+
+- 传输：cpp-httplib v0.18.6 单头整份入库（不定义 OpenSSL / ZLIB 宏），线程池 2 × 槽位 + 2；协议解析、SSE、轮询自写。静态页由同一进程在 `/web` 与 `/api-monitor` 提供。
+- 协议域：OpenAI（`/v1/chat/completions` 流式与非流式、`/v1/completions`、`/v1/models`）与 Anthropic（`/v1/messages`、`/v1/messages/count_tokens`）同一份调度器与门面；两域同请求在默认参数下产出相同 token 序列。非法参数按两域各自的错误形状 400/401/503。
+- 生成循环挂在 `src/serve/facade` 的门面上：请求即全新会话（scratch、KV 窗口、PLE 历史都随调用装配，请求之间无共享状态）；采样器用标准库 `mt19937_64`（温度 0 即贪心、seed -1 随机 = 与需求一致的默认）。SSE 用 httplib chunked provider，连接断开即取消生成并释放槽位。
+- 调度：有界队列 + 槽位租约，满则 503；`--reject-after` 仅供集成测试制造确定 503。
+- 遥测：NVML `dlopen`（Windows `nvml.dll`）、AMD kfd 拓扑 + hwmon、CPU/RAM 走 `/proc` 差值法、磁盘读解析 `/proc/diskstats`；无任何可读源时字段为 `null`。10 个系列各 60 点历史，`/metrics` 顶层键对齐 Strata。
+- 请求记录环：保留 100 条、大字段 256 KiB 截断，`/api/requests` 列表剥大字段、`?id=` 给全量；`/metrics` 的 requests 取最近 12 条。前端四页（三 tab 单页 + `/api-monitor` 检查页）读这些端点，轮询 1 秒（/metrics）与 2 秒（/v1/status、/api/requests）。
+- 鉴权：可选 `--api-key`；`/web`、`/api-monitor`、`/`、`/health` 可达，页面自带 key 走 `Authorization: Bearer`。
 
 ## 13. 核显与 NPU
 
@@ -419,7 +431,7 @@ G-14 已经测得：四档 KV 的 decode 吞吐几乎相同（±2%），即该�
 | 4 | 专家缓存 | 第 5 节共现感知缓存 | 收益高但有天花板，先测再投 | G-09 |
 | 5 | 投机与 KV | 第 7、8 节，含索引器 KV 独立精度 | 上游已验证过该机制 | G-12 |
 | 6 | 记忆表读取 | 第 4 节的按需读与有界行缓存，含预填期路径 | G-04 已不通过，预取子系统砍掉；退守部分便宜且收益有实测支撑（行缓存命中率 0.28 至 0.58） | G-10（重叠窗口）、G-13（IO 次数放大） |
-| 7 | 服务层 | 第 12 节 | 不影响单请求指标 | 无 |
+| 7 | 服务层 | 第 12 节；M1 切片已落地：HTTP 双域、遥测、请求记录与四页前端（12.1） | 不影响单请求指标 | 无 |
 
 子系统来源标注，用于评估工作量：
 

@@ -35,6 +35,7 @@
 | [`design/adr/ADR-009`](design/adr/ADR-009-correctness-acceptance-criteria.md) | 正确性验收：逐位还是分布级 | 接受 |
 | [`design/adr/ADR-010`](design/adr/ADR-010-router-precision-declared-format.md) | 路由按张力声明的档读（bf16 那条契约只属引擎那份 pack） | 接受 |
 | [`design/adr/ADR-011`](design/adr/ADR-011-compute-group-abstraction.md) | 后端以计算组为单位（设备、队列、内存池、能力表） | 接受 |
+| `design/adr/ADR-012-http-transport-and-serving-stack.md` | HTTP 传输、单进程服务栈与监控形态 | 接受 |
 | [glossary.md](glossary.md) | 术语的唯一口径 | 完成 |
 | [hardware.md](hardware.md) | 两套测试环境的硬件规格 | 完成 |
 | [research/01-strata-engine.md](research/01-strata-engine.md) | 参考范本引擎的原理与边界 | 完成 |
@@ -72,3 +73,4 @@
 | 未实现的专家档与共享专家 | 部署那份的 IQ1_M 3 层、另一档的 IQ3_S / IQ3_XXS 等尚无内核；共享专家与专家缓存未接 |
 | 机器画像的并发分池一项 | QSA 侧已能算，GDN 侧按并发增长、需要 SSM 几何（未取到） |
 | 引擎接口的实现细节 | 随实现阶段确定 |
+| 服务层 M2：Prometheus 文本、前缀缓存接入 /metrics 的 conversation_cache | 用户确认监控形态为 Web 页面实时查看，Prometheus 完整对接推迟到 M2；conversation_cache 的实值要等索引器统计接上（`design/adr/ADR-012-http-transport-and-serving-stack.md`） |
