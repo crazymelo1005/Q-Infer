@@ -170,6 +170,10 @@ target_link_libraries(expert_cache_replay PRIVATE qinfer_storage)
 add_executable(gguf_tensors measure/gguf_tensors.cpp)
 target_link_libraries(gguf_tensors PRIVATE qinfer_artifact)
 
+# 线程池与主机内核的伸缩微基准（流式带宽 / 分派开销 / 真实 GEMV）：要独占机器才准，故不进 ctest。
+add_executable(thread_pool_bench measure/thread_pool_bench.cpp)
+target_link_libraries(thread_pool_bench PRIVATE qinfer_experts qinfer_scheduling)
+
 add_executable(test_ple_read_path tests/test_ple_read_path.cpp)
 target_link_libraries(test_ple_read_path PRIVATE qinfer_ple)
 
