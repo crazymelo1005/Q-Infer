@@ -254,6 +254,25 @@ else
   bad "Anthropic SSE：事件序或拼文解析失败"
 fi
 
+# 12. 状态族：/v1/status 与服务自述、/status 探针、/props 能力、/slots 槽位数。
+curl -s -H "$H" "http://$HOST:$PORT/v1/status" > "$R"
+[ "$(jget "$R" "d['service']")" = qinfer ] && [ "$(jget "$R" "d['loaded']")" = True ] \
+  && [ "$(jget "$R" "d['context']['native']")" -ge 1 ] \
+  && ok "/v1/status（service/loaded/context）" || bad "/v1/status：$(head -c 200 "$R")"
+
+curl -s -H "$H" "http://$HOST:$PORT/status" > "$R"
+[ "$(jget "$R" "d['busy']")" = False ] && [ "$(jget "$R" "d['queued']")" = 0 ] \
+  && ok "/status 探针（busy/queued）" || bad "/status：$(head -c 200 "$R")"
+
+curl -s -H "$H" "http://$HOST:$PORT/props" > "$R"
+[ "$(jget "$R" "d['total_slots']")" -ge 1 ] \
+  && [ "$(jget "$R" "d['chat_template']")" ] \
+  && ok "/props（total_slots/chat_template）" || bad "/props：$(head -c 200 "$R")"
+
+curl -s -H "$H" "http://$HOST:$PORT/slots" > "$R"
+[ "$(jget "$R" "len(d)")" -ge 1 ] && [ "$(jget "$R" "d[0]['is_processing']")" = False ] \
+  && ok "/slots 数组与空闲" || bad "/slots：$(head -c 200 "$R")"
+
 stop
 
 # ---- 503：--reject-after 1 → 第 1 个请求正常，之后一律队列满 ----

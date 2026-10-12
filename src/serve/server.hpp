@@ -10,6 +10,7 @@
 #pragma once
 
 #include <atomic>
+#include <ctime>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -62,7 +63,7 @@ private:
     void serve_anthropic_sse(const std::shared_ptr<Job>& job, httplib::Response& res);
     std::shared_ptr<Job> launch(const std::string& path, std::string prompt,
                                 const GenOptions& opts, bool stream);
-    void record_request(const std::shared_ptr<Job>& job, int http_status, bool disconnected);
+    void record_request(const std::shared_ptr<Job>& job, int http_status, bool disconnected);   // T12：填 last_timings；T14：追加 Records 环
 
     ServeConfig cfg_;
     std::shared_ptr<Engine> eng_;
@@ -72,6 +73,16 @@ private:
     std::atomic<std::uint64_t> req_id_{0};
     std::unique_ptr<httplib::Server> svr_;
     std::string web_index_, web_monitor_;   // 启动时读入的静态页
+    // 最近一次完成的请求的计时（/v1/status 的 last_timings 与 /metrics 的 live 共用）。
+    struct LastTimings {
+        bool have = false;
+        double queue_s = 0.0, first_token_s = 0.0, wallclock_s = 0.0, decode_tok_s = 0.0;
+        std::uint64_t prompt_tokens = 0, output_tokens = 0;
+        std::string finish;
+    };
+    std::mutex last_mu_;
+    LastTimings last_;
+    std::time_t started_;              // 服务启动时刻（/v1/status 的 uptime_s）
 };
 
 // main.cpp 用：命令行解析（自写的键值扫描，零依赖）。

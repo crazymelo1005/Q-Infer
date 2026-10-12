@@ -150,7 +150,8 @@ Serve::Serve(ServeConfig cfg, std::shared_ptr<Engine> eng)
     : cfg_(std::move(cfg)),
       eng_(std::move(eng)),
       sched_(cfg_.slots, cfg_.queue_capacity == 0 ? 2 * cfg_.slots : cfg_.queue_capacity),
-      svr_(std::make_unique<httplib::Server>()) {
+      svr_(std::make_unique<httplib::Server>()),
+      started_(std::time(nullptr)) {
     const std::filesystem::path base = std::filesystem::path(__FILE__).parent_path() / "web";
     web_index_ = read_file((base / "index.html").string());
     web_monitor_ = read_file((base / "monitor.html").string());
@@ -680,8 +681,25 @@ void Serve::handle_count_tokens(const httplib::Request& req, httplib::Response& 
 }
 
 void Serve::record_request(const std::shared_ptr<Job>& job, int http_status, bool disconnected) {
-    // T14 接 Records 环：本任务为空实现（请求记录 M1.4 才落地，路由形状已就绪）。
-    (void) job; (void) http_status; (void) disconnected;
+    (void) http_status; (void) disconnected;
+    if (!job) return;
+    const auto enq = job->enqueued_at;   // 缺省构造的 time_point（若从未入队）→ 全零
+    const double wall = std::chrono::duration<double>(job->done_at - enq).count();
+    LastTimings lt;
+    lt.have = true;
+    lt.queue_s = std::chrono::duration<double>(job->leased_at - enq).count();
+    lt.first_token_s = job->first_at != std::chrono::steady_clock::time_point{}
+                           ? std::chrono::duration<double>(job->first_at - enq).count() : 0.0;
+    if (lt.first_token_s > 0) lt.first_token_s = lt.first_token_s - lt.queue_s;
+    lt.wallclock_s = wall;
+    lt.decode_tok_s = job->tok_s;
+    lt.prompt_tokens = job->n_prompt;
+    lt.output_tokens = job->n_gen;
+    lt.finish = job->finish;
+    {
+        std::lock_guard<std::mutex> lk(last_mu_);
+        last_ = lt;
+    }
 }
 
 void Serve::register_routes() {
@@ -759,6 +777,122 @@ void Serve::register_routes() {
     // Anthropic 域：/v1/messages（含流式）+ count_tokens。401 域分流已在 pre-routing（anthropic_path）。
     svr.Post("/v1/messages", [this](const httplib::Request& req, httplib::Response& res) { handle_messages(req, res); });
     svr.Post("/v1/messages/count_tokens", [this](const httplib::Request& req, httplib::Response& res) { handle_count_tokens(req, res); });
+    // 状态与属性静态域（规格 §3；/metrics 与 /api/requests 留给 T14）：/v1/status 对外自述、
+    // /status 探针简版、/props 能力发现、/slots 上下文环。
+    svr.Get("/v1/status", [this](const httplib::Request&, httplib::Response& res) {
+        const auto now = std::time(nullptr);
+        const std::uint64_t ctx = cfg_.facade.max_context;
+        const bool busy = sched_.any_busy();
+        Json r = Json::objv();
+        r.set("service", Json::strv("qinfer"));
+        r.set("model", Json::strv(eng_->model_name()));
+        r.set("loaded", Json::boolv(true));
+        r.set("auto_load", Json::boolv(false));
+        Json so = Json::objv();
+        Json fmts = Json::arrv(); fmts.push(Json::strv("json_object"));
+        so.set("formats", std::move(fmts));
+        so.set("method", Json::strv("prompt_and_validate"));
+        so.set("constrained_decoding", Json::boolv(false));
+        so.set("stream_buffered", Json::boolv(true));
+        r.set("structured_output", std::move(so));
+        r.set("engine", Json::strv("qinfer-m1"));
+        r.set("started", Json::numv(static_cast<double>(started_)));
+        r.set("uptime_s", Json::numv(static_cast<double>(now - started_)));
+        r.set("cache_max_tokens", Json::numv(static_cast<double>(ctx)));
+        Json cx = Json::objv();
+        cx.set("native", Json::numv(static_cast<double>(ctx)));
+        cx.set("max_positions", Json::numv(static_cast<double>(ctx)));
+        r.set("context", std::move(cx));
+        Json cc = Json::objv();
+        cc.set("serving", Json::numv(static_cast<double>(cfg_.slots)));
+        cc.set("requested", Json::numv(static_cast<double>(cfg_.slots)));
+        r.set("concurrency", std::move(cc));
+        Json dl = Json::arrv();
+        dl.push(Json::strv("/v1/chat/completions"));
+        dl.push(Json::strv("/v1/messages"));
+        r.set("dialects", std::move(dl));
+        Json vis = Json::objv();
+        vis.set("enabled", Json::boolv(false));
+        vis.set("available", Json::boolv(false));
+        vis.set("error", Json::nullv());
+        r.set("vision", std::move(vis));
+        Json act = Json::objv();
+        act.set("requests", Json::numv(static_cast<double>(req_id_.load())));
+        act.set("in_flight", Json::numv((sched_.queued() + (busy ? 1 : 0))));
+        act.set("last_request_at", Json::nullv());
+        r.set("activity", std::move(act));
+        {
+            std::lock_guard<std::mutex> lk(last_mu_);
+            if (last_.have) {
+                Json lt = Json::objv();
+                lt.set("queue_s", Json::numv(last_.queue_s));
+                lt.set("first_token_s", Json::numv(last_.first_token_s));
+                lt.set("wallclock_s", Json::numv(last_.wallclock_s));
+                lt.set("decode_tok_s", Json::numv(last_.decode_tok_s));
+                lt.set("prompt_tokens", Json::numv(static_cast<double>(last_.prompt_tokens)));
+                lt.set("output_tokens", Json::numv(static_cast<double>(last_.output_tokens)));
+                r.set("last_timings", std::move(lt));
+            } else {
+                r.set("last_timings", Json::nullv());
+            }
+        }
+        r.set("vram", Json::objv());
+        Json mach = Json::objv();
+        mach.set("at", Json::numv(static_cast<double>(now)));
+        mach.set("gpu", Json::nullv());      // T13 接遥测后填
+        mach.set("ram", Json::nullv());
+        r.set("machine", std::move(mach));
+        send_json(res, 200, r);
+    });
+    svr.Get("/status", [this](const httplib::Request&, httplib::Response& res) {
+        const bool busy = sched_.any_busy();
+        Json r = Json::objv();
+        r.set("busy", Json::boolv(busy));
+        r.set("queued", Json::numv(static_cast<double>(sched_.queued())));
+        r.set("phase", busy ? Json::strv("generating") : Json::nullv());
+        r.set("slots", Json::numv(static_cast<double>(sched_.slots())));
+        send_json(res, 200, r);
+    });
+    svr.Get("/props", [this](const httplib::Request&, httplib::Response& res) {
+        Json dg = Json::objv();
+        dg.set("n_ctx", Json::numv(static_cast<double>(cfg_.facade.max_context)));
+        Json prm = Json::objv();
+        prm.set("temperature", Json::numv(0.8));
+        prm.set("top_p", Json::numv(0.95));
+        prm.set("seed", Json::numv(-1.0));
+        prm.set("n_predict", Json::numv(512.0));
+        dg.set("params", std::move(prm));
+        Json r = Json::objv();
+        r.set("default_generation_settings", std::move(dg));
+        r.set("total_slots", Json::numv(static_cast<double>(cfg_.slots)));
+        r.set("model_alias", Json::strv(eng_->model_name()));
+        r.set("chat_template", Json::strv(eng_->chat_template()));
+        Json caps = Json::objv();
+        caps.set("templater", Json::strv("lexer-subset"));
+        caps.set("rich_text", Json::boolv(false));
+        caps.set("date", Json::boolv(false));
+        r.set("chat_template_caps", std::move(caps));
+        Json mod = Json::objv();
+        mod.set("vision", Json::boolv(false));
+        r.set("modalities", std::move(mod));
+        r.set("models_autoload", Json::boolv(false));
+        r.set("is_sleeping", Json::boolv(false));
+        r.set("build_info", Json::strv("Q-Infer M1"));
+        send_json(res, 200, r);
+    });
+    svr.Get("/slots", [this](const httplib::Request&, httplib::Response& res) {
+        const auto views = sched_.slots_view();
+        Json list = Json::arrv();
+        for (const SlotView& v : views) {
+            Json s = Json::objv();
+            s.set("id", Json::numv(static_cast<double>(v.index)));
+            s.set("n_ctx", Json::numv(static_cast<double>(cfg_.facade.max_context)));
+            s.set("is_processing", Json::boolv(v.busy));
+            s.set("n_prompt_tokens", Json::numv(0.0));
+            list.push(std::move(s));
+        }
+        send_json(res, 200, list);
+    });
     // 静态页（T15/T16 落地文件；此刻 404 也正常——T9 只验 API 面）。
     svr.Get("/", [this](const httplib::Request&, httplib::Response& res) {
         res.set_content(web_index_, "text/html; charset=utf-8");
