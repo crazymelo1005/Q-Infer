@@ -224,16 +224,26 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
             w = ExpertWeights{eb.gate, eb.up, eb.down};
         } else {
             // 逐专家偏移：专家 e 的矩阵起点 = 张力起点 + e × (rows × row_bytes)。
-            if (!gguf.read_at(layer.gate->offset + e * layer.gate_expert_bytes, s.gate.data(),
-                              s.gate.size()) ||
-                !gguf.read_at(layer.up->offset + e * layer.up_expert_bytes, s.up.data(),
-                              s.up.size()) ||
-                !gguf.read_at(layer.down->offset + e * layer.down_expert_bytes, s.down.data(),
-                              s.down.size())) {
-                err = "读专家 " + std::to_string(e) + " 的矩阵失败";
-                return false;
+            // 优先**直接映射**（view_at）：专家矩阵是「读一次就用完」的大块，映射之后内核直接从页缓存
+            // 读，省掉拷进缓冲那一道（实测整步 851 MB 的取数因此只有 8 至 11 GB/s，见 engine §6）。
+            // 映射不到就退回原来的读法，两条路给出的字节完全一样（故数值逐位相同）。
+            const std::uint64_t g_off = layer.gate->offset + e * layer.gate_expert_bytes;
+            const std::uint64_t u_off = layer.up->offset + e * layer.up_expert_bytes;
+            const std::uint64_t d_off = layer.down->offset + e * layer.down_expert_bytes;
+            const std::uint8_t* gp = gguf.view_at(g_off, layer.gate_expert_bytes);
+            const std::uint8_t* up = gguf.view_at(u_off, layer.up_expert_bytes);
+            const std::uint8_t* dp = gguf.view_at(d_off, layer.down_expert_bytes);
+            if (gp != nullptr && up != nullptr && dp != nullptr) {
+                w = ExpertWeights{gp, up, dp};
+            } else {
+                if (!gguf.read_at(g_off, s.gate.data(), s.gate.size()) ||
+                    !gguf.read_at(u_off, s.up.data(), s.up.size()) ||
+                    !gguf.read_at(d_off, s.down.data(), s.down.size())) {
+                    err = "读专家 " + std::to_string(e) + " 的矩阵失败";
+                    return false;
+                }
+                w = ExpertWeights{s.gate.data(), s.up.data(), s.down.data()};
             }
-            w = ExpertWeights{s.gate.data(), s.up.data(), s.down.data()};
         }
         io_ms += ms_between(t_get0, clk());
         const clock::time_point t_ffn0 = clk();

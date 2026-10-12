@@ -48,8 +48,26 @@ public:
     // const：读操作不改对象的逻辑状态（只移动流位置，故流本身声明为 mutable）。
     bool read_at(std::uint64_t offset_in_data, std::uint8_t* out, std::size_t n) const;
 
+    // 把数据区内的 [offset, offset+n) 直接映射成一段只读内存，**不做拷贝**。返回 nullptr 表示这段
+    // 不可映射（越界、或这台机器上映射不起来），调用方要退回 `read_at`。
+    //
+    // 为什么要有它：专家矩阵是「读一次就用完」的大块（一个专家三张共约 1.5 MB、一步 480 张），
+    // `read_at` 那条路要先读进缓冲再让内核读缓冲——同一次数据摸两遍，实测整步 851 MB 的取数因此
+    // 只有 8 至 11 GB/s（同一台机的流式读是 58 GB/s，engine §6）。映射之后内核直接从页缓存读，
+    // 拷贝与按块的 syscall 一起省掉。
+    //
+    // 平台：用 mmap，故 POSIX（本仓库的目标只有环境1 的 WSL 与环境2 的原生 Linux）。映射不到就返回
+    // nullptr，调用方有退路，所以这条不是硬依赖。
+    const std::uint8_t* view_at(std::uint64_t offset_in_data, std::uint64_t n) const;
+
 private:
+    // 首次调用 view_at 时才映射整个文件（约 40 GB 的虚拟地址，物理页仍按需来自页缓存）。
+    bool ensure_mapped() const;
+
     mutable std::ifstream file_;
+    mutable const std::uint8_t* map_ = nullptr;   // 整个文件
+    mutable std::uint64_t map_len_ = 0;
+    mutable bool map_tried_ = false;
     std::vector<GgufTensorInfo> tensors_;
     std::uint64_t data_start_ = 0;
     std::uint64_t file_size_ = 0;

@@ -1,5 +1,9 @@
 #include "artifact/gguf_table.hpp"
 
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
 #include <cstring>
 
 namespace qinfer::artifact {
@@ -139,10 +143,37 @@ const GgufTensorInfo* GgufFile::find(const std::string& name) const {
 }
 
 void GgufFile::close() {
+    if (map_ != nullptr) {
+        ::munmap(const_cast<std::uint8_t*>(map_), static_cast<std::size_t>(map_len_));
+        map_ = nullptr;
+        map_len_ = 0;
+    }
+    map_tried_ = false;
     if (file_.is_open()) file_.close();
     tensors_.clear();
     data_start_ = 0;
     file_size_ = 0;
+}
+
+bool GgufFile::ensure_mapped() const {
+    if (map_ != nullptr) return true;
+    if (map_tried_ || path_.empty() || file_size_ == 0) return false;
+    map_tried_ = true;
+    const int fd = ::open(path_.c_str(), O_RDONLY);
+    if (fd < 0) return false;
+    void* p = ::mmap(nullptr, static_cast<std::size_t>(file_size_), PROT_READ, MAP_SHARED, fd, 0);
+    ::close(fd);  // 映射之后 fd 就可以关掉了（映射自己持有一份引用）
+    if (p == MAP_FAILED) return false;
+    map_ = static_cast<const std::uint8_t*>(p);
+    map_len_ = file_size_;
+    return true;
+}
+
+const std::uint8_t* GgufFile::view_at(std::uint64_t offset_in_data, std::uint64_t n) const {
+    if (n == 0 || !ensure_mapped()) return nullptr;
+    const std::uint64_t at = data_start_ + offset_in_data;
+    if (at > map_len_ || n > map_len_ - at) return nullptr;
+    return map_ + at;
 }
 
 bool GgufFile::open(const std::string& path, std::string& err) {

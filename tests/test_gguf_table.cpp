@@ -187,6 +187,31 @@ int manual_against_real_model(const std::string& model, std::uint32_t row) {
     return 0;
 }
 
+// `view_at`（mmap 直读、不拷贝）与 `read_at`（读进缓冲）必须给出**同样的字节**：专家矩阵现在走前者
+// （engine §6），两条路若不一致就是静默算错。映射不起来时明确跳过并说明（目标平台都能映射）。
+void test_view_and_read_agree() {
+    const std::filesystem::path p = write_fixture("qinfer_fixture_view.gguf", 3);
+    artifact::GgufFile g;
+    std::string err;
+    CHECK(g.open(p.string(), err));
+    const artifact::GgufTensorInfo* t = g.find("per_layer_token_embd.weight");
+    CHECK(t != nullptr);
+    const std::uint64_t nbytes = static_cast<std::uint64_t>(kRowBytes) * 3;  // 这个夹具的张力是 3 行
+    std::vector<std::uint8_t> buf(static_cast<std::size_t>(nbytes));
+    CHECK(g.read_at(t->offset, buf.data(), buf.size()));
+    const std::uint8_t* v = g.view_at(t->offset, nbytes);
+    if (v == nullptr) {
+        std::printf("  view_at 不可用（这台机器映射不起来）——两条路的比对跳过\n");
+    } else {
+        CHECK(std::memcmp(v, buf.data(), buf.size()) == 0);
+        // 越界不能返回「映射区里随便一段」。
+        CHECK(g.view_at(t->offset, g.file_size()) == nullptr);
+        std::printf("  view_at 与 read_at 的字节一致（%llu 字节），越界被拒\n",
+                    (unsigned long long) nbytes);
+    }
+    std::filesystem::remove(p);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -205,6 +230,7 @@ int main(int argc, char** argv) {
     test_rejects_wrong_shape_or_type();
     test_reports_missing_tensor();
     test_rejects_non_gguf();
+    test_view_and_read_agree();
     std::puts("gguf_table: synthetic fixture + rejections hold");
     return 0;
 }
