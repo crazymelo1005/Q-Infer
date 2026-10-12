@@ -10,6 +10,8 @@
 #include "kernels/bf16.hpp"
 #include "kernels/fp16.hpp"
 
+#include <chrono>
+
 #include <cstring>
 
 namespace qinfer::dense {
@@ -209,12 +211,19 @@ bool touch_page(QsaScratch& s, std::uint64_t logical, std::string& err) {
 }  // namespace
 
 bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const float* x, float* out,
-                   QsaScratch& s, std::string& err) {
+                   QsaScratch& s, std::string& err, AttnPhases* phases) {
     err.clear();
     if (x == nullptr || out == nullptr) {
         err = "run_qsa_layer 的输入输出指针为空";
         return false;
     }
+    // 子步计时（给了 phases 才累加）：proj / prep / kv / idx / attend，见 dense/attn_phases.hpp。
+    const auto clk = [] { return std::chrono::steady_clock::now(); };
+    const auto ms = [](std::chrono::steady_clock::time_point a,
+                       std::chrono::steady_clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    double proj_acc = 0.0;
     const std::uint64_t N = layer.q.cols;
     const std::uint64_t hd = layer.sh.head_dim;
     const std::uint64_t idx_dim = layer.idx_dim;
@@ -237,6 +246,7 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
     }
 
     // 1. 四个注意力投影。
+    const auto p_proj = clk();
     s.q_full.assign(static_cast<std::size_t>(layer.q.rows), 0.0f);
     s.k_raw.assign(static_cast<std::size_t>(layer.k.rows), 0.0f);
     s.v_raw.assign(static_cast<std::size_t>(layer.v.rows), 0.0f);
@@ -245,8 +255,10 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
         !project(gguf, *layer.t_v, layer.v, x, s.w_v, reload, s.gemv, s.v_raw.data(), err)) {
         return false;
     }
+    proj_acc += ms(p_proj, clk());
 
     // 2. q/门拆分 + q/k 按头归一 + 部分 NEOX rope。
+    const auto p_prep = clk();
     s.q_ready.assign(static_cast<std::size_t>(layer.sh.n_head * hd), 0.0f);
     s.k_ready.assign(static_cast<std::size_t>(layer.sh.n_head_kv * hd), 0.0f);
     s.gate.assign(s.q_ready.size(), 0.0f);
@@ -258,6 +270,8 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
     }
 
     // 3. KV 写入（fp16）：K 存的是**归一+rope 之后**的那一份（attend 拿它与同样处理过的 q 比），V 原样。
+    if (phases != nullptr) phases->prep_ms += ms(p_prep, clk());
+    const auto p_kv = clk();
     s.k_f16.assign(s.k_ready.size(), 0);
     s.v_f16.assign(s.v_raw.size(), 0);
     for (std::size_t i = 0; i < s.k_ready.size(); ++i) s.k_f16[i] = kernels::f32_to_f16_bits(s.k_ready[i]);
@@ -277,6 +291,8 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
     if (!kv_append(s.kv, s.pos, KvCell{s.k_f16.data(), s.v_f16.data()}, err)) return false;
 
     // 4. 索引器：q 走 bf16 投影 + 归一 + rope；键走 bf16 投影后**原样**交给池化。
+    if (phases != nullptr) phases->kv_ms += ms(p_kv, clk());
+    const auto p_idx = clk();
     s.idx_q_out.assign(static_cast<std::size_t>(layer.idx_q.rows), 0.0f);
     s.idx_k_out.assign(static_cast<std::size_t>(layer.idx_k.rows), 0.0f);
     kernels::bf16_gemv(s.idx_q_w.data(), layer.idx_q.rows, layer.idx_q.cols, x, s.idx_q_out.data());
@@ -302,6 +318,8 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
     }
     const std::uint64_t width = qsa_selection_width(n_kv, layer.sh);
     if (!qsa_select(s.scores.data(), n_kv, width, s.ids, err)) return false;
+    if (phases != nullptr) phases->idx_ms += ms(p_idx, clk());  // 索引器全链 + 逐 cell 打分 + 选择
+    const auto p_gather = clk();
     const std::uint64_t n_ids = s.ids.size();
     // 选中的 cell 所在页都要常驻（按页去重，只搬一次），并在聚集期间钉住。
     std::vector<std::uint64_t> gather_pages;
@@ -325,6 +343,8 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
     }
 
     // 6. softmax GQA → 乘门 → 输出投影。
+    if (phases != nullptr) phases->kv_ms += ms(p_gather, clk());  // 按页聚集（含搬入与钉住）
+    const auto p_att = clk();
     s.attn.assign(static_cast<std::size_t>(layer.sh.n_head * hd), 0.0f);
     if (!qsa_attend(s.q_ready.data(), s.k_scratch.data(), s.v_scratch.data(), n_ids, layer.sh,
                     s.attn.data(), nullptr, err)) {
@@ -334,10 +354,14 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
     if (!qsa_gate_apply_f32(s.attn.data(), s.q_full.data(), layer.sh, s.gated.data(), err)) {
         return false;
     }
+    if (phases != nullptr) phases->attend_ms += ms(p_att, clk());
+    const auto p_out = clk();
     if (!project(gguf, *layer.t_out, layer.out, s.gated.data(), s.w_out, reload, s.gemv, out, err)) {
         return false;
     }
+    proj_acc += ms(p_out, clk());
     if (append_pinned && !s.window->unpin(append_page, err)) return false;
+    if (phases != nullptr) phases->proj_ms += proj_acc;
     s.w_layer = layer.layer;
     ++s.pos;
     return true;

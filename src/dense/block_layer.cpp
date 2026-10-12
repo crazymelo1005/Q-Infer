@@ -203,11 +203,12 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
     clock::time_point t2 = clock::now();
     if (layer.kind == LayerKind::kGdn) {
         if (!run_gdn_layer(gguf, layer.gdn, s.mixed.data(), s.block_out.data(), s.gdn, err,
-                           phases != nullptr ? &phases->attn_proj_ms : nullptr)) {
+                           phases != nullptr ? &phases->attn : nullptr)) {
             return false;
         }
     } else {
-        if (!run_qsa_layer(gguf, layer.qsa, s.mixed.data(), s.block_out.data(), s.qsa, err)) {
+        if (!run_qsa_layer(gguf, layer.qsa, s.mixed.data(), s.block_out.data(), s.qsa, err,
+                           phases != nullptr ? &phases->attn : nullptr)) {
             return false;
         }
     }

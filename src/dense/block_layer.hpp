@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "artifact/gguf_table.hpp"
+#include "dense/attn_phases.hpp"
 #include "dense/gated_residual.hpp"
 #include "dense/gdn_layer.hpp"
 #include "dense/layer_map.hpp"
@@ -73,9 +74,9 @@ struct LayerPhases {
                            // 之后恒为 0——权重按层缓存，见 block_layer.cpp 的 load_gr_group）
     double gr_read_ms = 0.0;
     double attn_ms = 0.0;
-    // attn_ms 里属于「量化投影」的那一段（只有 GDN 层填，QSA 记 0）。**首个 token 含读权重**，
-    // 之后各步的权重已在 scratch 里（按层缓存），故这一段是纯粹的算术时间。
-    double attn_proj_ms = 0.0;
+    // attn_ms 的逐子步切分（互斥且穷尽，见 dense/attn_phases.hpp）。只有 proj 那几段走按行并行的
+    // 池子，其余是手写标量循环——拆开才知道该动哪一段。
+    AttnPhases attn;
     double moe_ms = 0.0;
     // moe_ms 的两半（互斥且穷尽，见 experts/moe_layer.hpp 的 MoePhases）：io 是取数（路由矩阵 + 各专家
     // 字节），ffn 是算（路由 + 逐专家前馈 + 累加 + 共享专家）。它回答「MoE 那一段是在读还是在算」。

@@ -124,7 +124,7 @@ bool build_gdn_layer(const artifact::GgufFile& gguf, int layer, std::uint64_t n_
 }
 
 bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const float* x, float* out,
-                   GdnScratch& s, std::string& err, double* proj_ms) {
+                   GdnScratch& s, std::string& err, AttnPhases* phases) {
     err.clear();
     if (x == nullptr || out == nullptr) {
         err = "run_gdn_layer 的输入输出指针为空";
@@ -191,12 +191,14 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
     proj_acc += ms(p0, clk());
 
     // 3. 前段：卷积+SiLU、拆 q|k|v、q/k 归一、两个门（门用 x 与 BF16 权重）。
+    const auto p_pre = clk();
     const GrTensor conv_w{static_cast<const void*>(s.w_conv1d.data()), GrPrecision::kF32};
     const GrTensor alpha_w{static_cast<const void*>(s.w_alpha.data()), GrPrecision::kBf16};
     const GrTensor beta_w{static_cast<const void*>(s.w_beta.data()), GrPrecision::kBf16};
     const GdnPreWeights pw{conv_w, alpha_w, beta_w, s.dt.data(), s.ssm_a.data()};
     const float eps = 1e-6f;
     if (!gdn_preprocess(layer.pre, pw, x, s.qkv.data(), s.conv, eps, s.pre, err)) return false;
+    if (phases != nullptr) phases->prep_ms += ms(p_pre, clk());
 
     // 4. z = attn_gate @ x（量化投影）——收尾那个 sigmoid 的输入。
     const auto p4 = clk();
@@ -220,6 +222,7 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
     for (float& v : s.q_scaled) v *= qscale;
 
     // 6. 递推 + 收尾。
+    const auto p_rec = clk();
     s.state.resize(layer.rec);
     std::vector<float> beta_gated = s.pre.beta;
     if (!gdn_beta_gate(beta_gated.data(), layer.rec.h_v, err)) return false;
@@ -228,10 +231,13 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
                   s.pre.gate.data(), beta_gated.data(), o.data(), err)) {
         return false;
     }
+    if (phases != nullptr) phases->rec_ms += ms(p_rec, clk());
+    const auto p_close = clk();
     s.y.assign(static_cast<std::size_t>(vd), 0.0f);
     if (!gdn_closing_norm(layer.rec, o.data(), s.z.data(), s.ssm_norm.data(), eps, s.y.data(), err)) {
         return false;
     }
+    if (phases != nullptr) phases->close_ms += ms(p_close, clk());
 
     // 7. out = ssm_out @ y（Q8_0 权重）。
     const auto p7 = clk();
@@ -250,7 +256,7 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
     proj_acc += ms(p7, clk());
     for (std::uint64_t i = 0; i < N; ++i) out[i] = s.out[static_cast<std::size_t>(i)];
     s.w_layer = layer.layer;  // 这一层的权重已全部就位（任一条提前失败都不会走到这里，故下次会重读）
-    if (proj_ms != nullptr) *proj_ms += proj_acc;
+    if (phases != nullptr) phases->proj_ms += proj_acc;
     return true;
 }
 

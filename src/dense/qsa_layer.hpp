@@ -16,6 +16,7 @@
 #include <string>
 
 #include "artifact/gguf_table.hpp"
+#include "dense/attn_phases.hpp"
 #include "dense/kv_page_cache.hpp"
 #include "dense/qsa_indexer.hpp"
 #include "dense/qsa_select.hpp"
@@ -89,6 +90,6 @@ struct QsaScratch {
 // → KV 写入 → 索引器两投影与 q 预处理、键追加 → 逐 cell 打分 → 选择 → 按页聚集 → softmax GQA →
 // 乘门 → 输出投影。索引器的两个投影是 BF16，走与路由同一份 bf16 点积（[S-44]）。
 bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const float* x, float* out,
-                   QsaScratch& s, std::string& err);
+                   QsaScratch& s, std::string& err, AttnPhases* phases = nullptr);
 
 }  // namespace qinfer::dense

@@ -39,7 +39,13 @@ struct GdnRecShapes {
 // 循环状态：**行主序 (S, h_v, S)，j 最快**。
 struct GdnState {
     std::vector<float> data;
-    void resize(const GdnRecShapes& s) { data.assign(static_cast<std::size_t>(s.S * s.h_v * s.S), 0.0f); }
+    // 递推里的两块暂存（每个 h 私有的一片，故按 h 并行安全）：sk 是收缩结果、d 是写入强度。
+    std::vector<float> sk_buf, d_buf;
+    void resize(const GdnRecShapes& s) {
+        data.assign(static_cast<std::size_t>(s.S * s.h_v * s.S), 0.0f);
+        sk_buf.assign(static_cast<std::size_t>(s.h_v * s.S), 0.0f);
+        d_buf.assign(static_cast<std::size_t>(s.h_v * s.S), 0.0f);
+    }
 };
 
 // 一步递推，状态**原地**更新。

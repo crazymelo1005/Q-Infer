@@ -8,6 +8,7 @@
 #include "dense/gdn_recurrence.hpp"
 
 #include "check.hpp"
+#include "scheduling/thread_pool.hpp"
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -309,6 +310,63 @@ void test_bad_inputs_fail_loudly() {
     CHECK(!err.empty());
 }
 
+// 按行并行（池子）与单线程**逐位相同**：每个 (h, j) 列独立——sk 与 o 的累加都只沿 i 走，故切 h 或切 j
+// 都不动任何一个归约的顺序。夹具用真几何（S 128 / h_k 16 / h_v 48）：h_v=4 那种规模切不出第二块，
+// 用例会空转。顺带钉住「状态也逐位相同」——它比 o 更容易被并行改坏（原地更新）。
+void test_row_parallel_is_bitwise_identical() {
+    constexpr std::uint64_t S = 128, Hk = 16, Hv = 48;
+    const GdnRecShapes sh{S, Hk, Hv};
+    Lcg g;
+    std::vector<float> q(Hk * S), k(Hk * S), v(Hv * S), gate(Hv), beta(Hv);
+    for (float& t : q) t = g.next();
+    for (float& t : k) t = g.next();
+    for (float& t : v) t = g.next();
+    for (std::uint64_t h = 0; h < Hv; ++h) {
+        gate[h] = -0.3f + 0.01f * static_cast<float>(h);
+        beta[h] = 0.5f;
+    }
+
+    GdnState st1, st2;
+    st1.resize(sh);
+    st2.resize(sh);
+    // 给状态一点非零初值（否则衰减那一路看不出差别）。
+    for (std::size_t i = 0; i < st1.data.size(); ++i) st1.data[i] = 0.01f * g.next();
+    const std::vector<float> init = st1.data;  // 初值快照：两边都从它出发才可比
+    st2.data = init;
+
+    std::vector<float> o1(Hv * S, 0.0f), o2(Hv * S, 0.0f);
+    std::string err;
+    qinfer::scheduling::set_pool_threads(0);
+    CHECK(gdn_step(st1, sh, q.data(), k.data(), v.data(), gate.data(), beta.data(), o1.data(), err));
+    CHECK(err.empty());
+    qinfer::scheduling::set_pool_threads(8);
+    for (int rep = 0; rep < 3; ++rep) {
+        st2.data = init;  // 每轮都从同一份初值出发
+        CHECK(gdn_step(st2, sh, q.data(), k.data(), v.data(), gate.data(), beta.data(), o2.data(), err));
+    }
+    qinfer::scheduling::set_pool_threads(0);
+
+    int same_o = 0, same_st = 0;
+    for (std::size_t i = 0; i < o1.size(); ++i) {
+        if (std::bit_cast<std::uint32_t>(o1[i]) == std::bit_cast<std::uint32_t>(o2[i])) ++same_o;
+    }
+    for (std::size_t i = 0; i < st1.data.size(); ++i) {
+        if (std::bit_cast<std::uint32_t>(st1.data[i]) == std::bit_cast<std::uint32_t>(st2.data[i])) {
+            ++same_st;
+        }
+    }
+    std::printf("  gdn_step：单线程 对 8 线程，o 位相同 %d/%zu、state 位相同 %d/%zu\n", same_o,
+                o1.size(), same_st, st1.data.size());
+    CHECK(same_o == static_cast<int>(o1.size()));
+    CHECK(same_st == static_cast<int>(st1.data.size()));
+    // 非空转：o 里得有非零值（否则上面比的是两串零）。
+    bool nonzero = false;
+    for (const float t : o1) {
+        if (t != 0.0f) nonzero = true;
+    }
+    CHECK(nonzero);
+}
+
 }  // namespace
 
 int main() {
@@ -317,6 +375,7 @@ int main() {
     test_zero_beta_and_strong_decay_zero_the_state();
     test_beta_zero_leaves_only_the_decay();
     test_bad_inputs_fail_loudly();
+    test_row_parallel_is_bitwise_identical();
     std::puts("gdn_recurrence: 递推（含衰减次序与头配对）、beta 的 sigmoid 与收尾归一都与参考一致，"
               "且四处错读法都被拒");
     return 0;

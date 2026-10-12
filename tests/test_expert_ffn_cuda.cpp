@@ -676,10 +676,10 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
         std::printf("  注意力按层型：GDN %d 层合计 %.0f ms（均 %.1f）；QSA %d 层合计 %.0f ms（均 %.1f）\n",
                     n_gdn, gdn, n_gdn > 0 ? gdn / n_gdn : 0.0, n_qsa, qsa,
                     n_qsa > 0 ? qsa / n_qsa : 0.0);
-        const double proj = ph.attn_proj_ms;
-        std::printf("  GDN 的三个投影（首个 token 含读权重，之后权重常驻）%.0f ms，其余（前段/递推/收尾）"
-                    "%.0f ms\n",
-                    proj, ph.attn_ms - proj);
+        std::printf("  注意力的五段：投影 %.0f / 前段 %.0f / 递推 %.0f / 收尾 %.0f / "
+                    "KV %.0f / 索引器 %.0f / attend+门 %.0f ms\n",
+                    ph.attn.proj_ms, ph.attn.prep_ms, ph.attn.rec_ms, ph.attn.close_ms, ph.attn.kv_ms,
+                    ph.attn.idx_ms, ph.attn.attend_ms);
         std::printf("  最慢的 6 层：");
         for (std::size_t i = 0; i < slow.size() && i < 6; ++i) {
             const int l = slow[i].second;
@@ -722,6 +722,10 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
                         ph.gr_write_ms);
             std::printf("  MoE 的两半（%d 线程）：取数 %.0f ms、算 %.0f ms\n", threads, ph.moe_io_ms,
                         ph.moe_ffn_ms);
+            std::printf("  注意力的五段（%d 线程）：投影 %.0f / 前段 %.0f / 递推 %.0f / 收尾 %.0f / "
+                        "KV %.0f / 索引器 %.0f / attend+门 %.0f ms\n",
+                        threads, ph.attn.proj_ms, ph.attn.prep_ms, ph.attn.rec_ms, ph.attn.close_ms,
+                        ph.attn.kv_ms, ph.attn.idx_ms, ph.attn.attend_ms);
         }
         std::printf("  主机 %d 线程（同一份 x、同一份状态推进）\n", threads);
         for (int t = 0; t < tokens; ++t) {
