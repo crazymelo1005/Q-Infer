@@ -59,4 +59,12 @@ bool ple_vectors_for_tokens(const RowSource& table, const std::int32_t* tokens, 
                             storage::RowCache& cache, std::uint64_t budget_bytes, float* out,
                             PathStats& stats, std::string& err);
 
+// 一个 token 的 16 行 → 一条 2560 的向量，**两个前驱由调用方给**（最老在前，没有的位置是 kTokenNull）。
+// 逐 token 生成一条的那条路（步循环）用它：那边的「前两个 token」是会话状态，不是整个序列重算一遍。
+// 与 `ple_vectors_for_tokens` 的对应位置逐位相同（后者对同一序列就是这么算的），故两者可互相对照。
+bool ple_vector_with_prev(const RowSource& table, std::int32_t token, std::int32_t prev0,
+                          std::int32_t prev1, storage::RowCache& cache,
+                          std::uint64_t budget_bytes, float* out, PathStats& stats,
+                          std::string& err);
+
 }  // namespace qinfer::ple

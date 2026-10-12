@@ -70,6 +70,33 @@ bool prepare_step_scratch(const StepModel& model, std::uint64_t n_pages, std::ui
             out.blocks[l].offload = &(*model.cfg.offload_layers)[l];
         }
     }
+    // PLE（[S-63]）：配置只挂到它自己那一层，别的层保持为空——于是「挂错层」不可能悄悄发生。
+    if (model.cfg.ple != nullptr) {
+        const PleRun& pr = *model.cfg.ple;
+        if (!pr.ready()) {
+            err = "PLE 的配置不完整（层号 / 六张张力 / 表行来源 / 行缓存）";
+            return false;
+        }
+        if (pr.layer >= static_cast<int>(n)) {
+            err = "PLE 挂在第 " + std::to_string(pr.layer) + " 层，但模型只有 " + std::to_string(n) +
+                  " 层";
+            return false;
+        }
+        const std::uint64_t n_embd = model.cfg.n_embd, hc = model.cfg.hc;
+        if (pr.w.key_bf16.size() != static_cast<std::size_t>(n_embd * n_embd * hc) ||
+            pr.w.value_bf16.size() != static_cast<std::size_t>(n_embd * n_embd) ||
+            pr.w.norm_key.size() != static_cast<std::size_t>(n_embd * hc)) {
+            err = "PLE 的权重与模型的几何（n_embd × hc）对不上";
+            return false;
+        }
+        out.ple.hist.assign(static_cast<std::size_t>(ple::kHistRows) * n_embd * hc, 0.0f);
+        out.ple.emb.assign(static_cast<std::size_t>(n_embd), 0.0f);
+        out.ple.prev[0] = kernels::kTokenNull;
+        out.ple.prev[1] = kernels::kTokenNull;
+        out.ple.has_token = false;
+        out.blocks[static_cast<std::size_t>(pr.layer)].ple = model.cfg.ple;
+        out.blocks[static_cast<std::size_t>(pr.layer)].ple_state = &out.ple;
+    }
     for (std::size_t l = 0; l < n; ++l) {
         const BlockLayer& bl = model.blocks[l];
         if (bl.kind != LayerKind::kQsa) continue;
@@ -202,7 +229,34 @@ bool run_token_step(const artifact::GgufFile& gguf, const StepModel& model, cons
     }
     s.embd.assign(static_cast<std::size_t>(e.n_embd), 0.0f);
     if (!read_token_embedding(gguf, e, token, s.embd.data(), err)) return false;
-    return run_step_model(gguf, model, s.embd.data(), s, err);
+
+    // PLE 的表行向量：用**当前 token 与它前面两个**（会话状态里的 `prev`，最老在前；越界处记 NULL，
+    // 与整段重算那条的 `build_prev` 同一口径）。行缓存与字节预算沿用配置里那一份。
+    // 表行向量固定 2560 宽（16 头 × 160，见 [S-63] 的几何），故这一条只在 n_embd 与它相等时可用
+    // ——真模型正是 2560；不相等就明确失败，不截断也不补零。
+    const bool with_ple = model.cfg.ple != nullptr;
+    if (with_ple && model.cfg.ple->can_stage()) {
+        if (e.n_embd != static_cast<std::uint64_t>(ple::kVectorDim)) {
+            err = "PLE 的表行向量固定 " + std::to_string(ple::kVectorDim) + " 宽，与这个模型的 n_embd " +
+                  std::to_string(e.n_embd) + " 不一致";
+            return false;
+        }
+        ple::PathStats stats;
+        if (!ple::ple_vector_with_prev(*model.cfg.ple->table, static_cast<std::int32_t>(token),
+                                       s.ple.prev[0], s.ple.prev[1], *model.cfg.ple->cache,
+                                       model.cfg.ple->budget_bytes, s.ple.emb.data(), stats, err)) {
+            err = "取 PLE 表行失败：" + err;
+            return false;
+        }
+        s.ple.has_token = true;
+    }
+    if (!run_step_model(gguf, model, s.embd.data(), s, err)) return false;
+    // prev 在这一步跑完之后才推进：本步的哈希用的必须是上一步结束时的那两个。
+    if (with_ple && model.cfg.ple->can_stage()) {
+        s.ple.prev[0] = s.ple.prev[1];
+        s.ple.prev[1] = static_cast<std::int32_t>(token);
+    }
+    return true;
 }
 
 }  // namespace qinfer::dense

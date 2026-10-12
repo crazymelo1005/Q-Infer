@@ -702,7 +702,9 @@ void test_cache_and_budget() {
 }
 
 // 真模型手工入口：整模型跑几个 token，打印判型摘要与 logits 概况。
-int manual_model_entry(const char* model, int tokens) {
+// 给了 `ple_table`（分片2，装着 `per_layer_token_embd.weight`）就再跑一条配上 PLE 的：那条按
+// **真 token 序列**走 `run_token_step`（表行由当前 token 与前两个决定），并与不配那条比相对偏离。
+int manual_model_entry(const char* model, int tokens, const char* ple_table) {
     artifact::GgufFile g;
     std::string err;
     if (!g.open(model, err)) {
@@ -761,7 +763,359 @@ int manual_model_entry(const char* model, int tokens) {
     }
     std::printf("  %d 个 token：logits |值| 合计 %.6g、有限：%s、argmax %zu\n", tokens, mag,
                 finite ? "是" : "否", argmax);
-    return finite ? 0 : 1;
+
+    if (ple_table == nullptr) return finite ? 0 : 1;
+
+    // ---- 配上 PLE 的那一条（真表行的来源是分片2）----
+    artifact::GgufTable table;
+    if (!table.open(ple_table, err)) {
+        std::printf("打开表（PLE）失败：%s\n", err.c_str());
+        return 1;
+    }
+    ple::GgufTableRowSource src(table);
+    storage::RowCache rows(4096);
+    ple::PleSpec pspec;
+    ple::PleBuffers pw;
+    if (!ple::read_ple_spec(g, /*layer=*/1, 2560, 4, pspec, err) || !pspec.present ||
+        !ple::load_ple_weights(g, pspec, pw, err)) {
+        std::printf("读第 1 层的 PLE 登记/权重失败：%s\n", err.c_str());
+        return 1;
+    }
+    PleRun run;
+    run.layer = 1;
+    run.spec = pspec;
+    run.w = pw;
+    run.table = &src;
+    run.cache = &rows;
+    StepConfig cfg_ple = cfg;
+    cfg_ple.ple = &run;
+    StepModel mp;
+    if (!build_step_model(g, cfg_ple, mp, err)) {
+        std::printf("建模型（含 PLE）失败：%s\n", err.c_str());
+        return 1;
+    }
+    TokenEmbed te;
+    if (!build_token_embed(g, 2560, te, err)) {
+        std::printf("读 token embedding 失败：%s\n", err.c_str());
+        return 1;
+    }
+    StepScratch sp;
+    if (!prepare_step_scratch(mp, static_cast<std::uint64_t>(tokens) + 2, 0, sp, err)) {
+        std::printf("预备 scratch（含 PLE）失败：%s\n", err.c_str());
+        return 1;
+    }
+    double mag_ple = 0.0;
+    bool finite_ple = true;
+    std::size_t argmax_ple = 0;
+    // 逐 token 的取表行（会话状态里的 prev + 推进时机）必须与「整段重算」那条给出**同一份向量**。
+    // 这一条把 prev 的顺序与推进时机钉住，是合成夹具照不到的地方（那个模型的 n_embd 与表行向量宽
+    // 不一致，走不了自动取表行那条）：整段那条用的是 `build_prev`，与会话状态完全独立。
+    std::vector<std::int32_t> seq(static_cast<std::size_t>(tokens));
+    for (int t = 0; t < tokens; ++t) seq[static_cast<std::size_t>(t)] = 1 + (t % 7);
+    std::vector<float> whole(static_cast<std::size_t>(tokens) * ple::kVectorDim, 0.0f);
+    {
+        storage::RowCache cw(4096);
+        ple::PathStats stw;
+        if (!ple::ple_vectors_for_tokens(src, seq.data(), tokens, cw, 0, whole.data(), stw, err)) {
+            std::printf("整段算表行失败：%s\n", err.c_str());
+            return 1;
+        }
+    }
+    int emb_same = 0, emb_total = 0;
+    // 真表上跑：token 序列用重复的 1..tokens（前驱会随会话状态推进，故哈希的输入是变的）。
+    for (int t = 0; t < tokens; ++t) {
+        const std::uint64_t tok = static_cast<std::uint64_t>(1 + (t % 7));
+        if (!run_token_step(g, mp, te, tok, sp, err)) {
+            std::printf("（含 PLE）第 %d 个 token 跑不动：%s\n", t, err.c_str());
+            return 1;
+        }
+        for (int i = 0; i < ple::kVectorDim; ++i) {
+            ++emb_total;
+            const float a = sp.ple.emb[static_cast<std::size_t>(i)];
+            const float b = whole[static_cast<std::size_t>(t) * ple::kVectorDim + i];
+            if (std::bit_cast<std::uint32_t>(a) == std::bit_cast<std::uint32_t>(b)) ++emb_same;
+        }
+    }
+    std::printf("  逐 token 取的表行向量 vs 整段重算：逐位相同 %d/%d\n", emb_same, emb_total);
+    if (emb_same != emb_total) return 1;
+    for (std::size_t i = 0; i < sp.head.logits.size(); ++i) {
+        if (!std::isfinite(sp.head.logits[i])) finite_ple = false;
+        mag_ple += std::fabs((double) sp.head.logits[i]);
+        if (sp.head.logits[i] > sp.head.logits[argmax_ple]) argmax_ple = i;
+    }
+    std::printf("  含 PLE：logits |值| 合计 %.6g、有限：%s、argmax %zu；表行读 %llu 行、命中 %llu\n",
+                mag_ple, finite_ple ? "是" : "否", argmax_ple,
+                (unsigned long long) rows.misses(), (unsigned long long) rows.hits());
+    // 与「不配 PLE、同一条 token 序列」比：那条也要按 token 走，否则比的是两份不同的输入。
+    StepScratch s2;
+    if (!prepare_step_scratch(m, static_cast<std::uint64_t>(tokens) + 2, 0, s2, err)) return 1;
+    for (int t = 0; t < tokens; ++t) {
+        const std::uint64_t tok = static_cast<std::uint64_t>(1 + (t % 7));
+        if (!run_token_step(g, m, te, tok, s2, err)) {
+            std::printf("（不含 PLE）第 %d 个 token 跑不动：%s\n", t, err.c_str());
+            return 1;
+        }
+    }
+    const double rel = rel_diff(s2.head.logits, sp.head.logits);
+    std::printf("  PLE 开/关（同一条 token 序列）：logits 相对偏离 %.3g；PLE 的逐层同一步进\n", rel);
+    return (finite && finite_ple && rel > 1e-3) ? 0 : 1;
+}
+
+// ---- PLE（第 1 层那一步，[S-63]）----
+//
+// 合成替身表与行号口径同 test_ple_read_path：行数取真表的行数（哈希常量是按那个几何转录的，故行号
+// 必然落在那个范围内），行字节只由行号决定，五块都设尺度。
+std::uint16_t ple_scale_bits(std::uint32_t row) {
+    return static_cast<std::uint16_t>(0x1000u + (row % 0x2000u));
+}
+
+struct PleSynthTable : ple::RowSource {
+    std::uint64_t rows() const override { return 320001536ull; }
+    bool read_row(std::uint32_t row, std::uint8_t* out) const override {
+        const std::uint16_t sb = ple_scale_bits(row);
+        std::memset(out, 0, kernels::kIq4nlRowBytes);
+        for (int blk = 0; blk < 5; ++blk) {
+            out[blk * 18] = static_cast<std::uint8_t>(sb & 0xFF);
+            out[blk * 18 + 1] = static_cast<std::uint8_t>(sb >> 8);
+        }
+        return true;
+    }
+};
+
+template <typename T>
+std::vector<std::uint8_t> bytes_of(const std::vector<T>& v) {
+    std::vector<std::uint8_t> out(v.size() * sizeof(T));
+    std::memcpy(out.data(), v.data(), out.size());
+    return out;
+}
+
+std::vector<std::uint8_t> bf16_lin(std::uint64_t n, float base, float step) {
+    std::vector<std::uint16_t> b(n);
+    for (std::uint64_t i = 0; i < n; ++i) {
+        b[static_cast<std::size_t>(i)] =
+            kernels::f32_to_bf16_bits(base + step * static_cast<float>(i));
+    }
+    return bytes_of(b);
+}
+
+std::vector<std::uint8_t> f16_lin(std::uint64_t n, float base, float step) {
+    std::vector<std::uint16_t> b(n);
+    for (std::uint64_t i = 0; i < n; ++i) {
+        b[static_cast<std::size_t>(i)] =
+            kernels::f32_to_f16_bits(base + step * static_cast<float>(i));
+    }
+    return bytes_of(b);
+}
+
+// 第 1 层的六张 PLE 张力（形状按 ne 序：key 是 [n_embd, hc_dim]、卷积核是 [4, hc_dim]）。
+std::vector<TensorSpec> ple_tensors() {
+    const std::uint64_t hc_dim = kN * kHc;
+    std::vector<TensorSpec> ts;
+    ts.push_back({"blk.1.ple_key.weight", {kN, hc_dim}, 30, bf16_lin(kN * hc_dim, -0.02f, 0.00007f)});
+    ts.push_back({"blk.1.ple_value.weight", {kN, kN}, 30, bf16_lin(kN * kN, 0.004f, 0.0001f)});
+    ts.push_back({"blk.1.ple_norm_key.weight", {hc_dim}, 0, f32_lin(hc_dim, 1.0f)});
+    ts.push_back({"blk.1.ple_norm_query.weight", {hc_dim}, 0, f32_lin(hc_dim, 0.7f)});
+    ts.push_back({"blk.1.ple_norm_conv.weight", {hc_dim}, 0, f32_lin(hc_dim, 1.3f)});
+    ts.push_back({"blk.1.ple_conv1d.weight", {4, hc_dim}, 1, f16_lin(4 * hc_dim, -0.03f, 0.0005f)});
+    return ts;
+}
+
+std::vector<TensorSpec> model_tensors_with_ple() {
+    std::vector<TensorSpec> ts = model_tensors();
+    append(ts, ple_tensors());
+    return ts;
+}
+
+// PLE 那一套的持有者：登记 + 常驻权重 + 挂进 StepConfig 的那份配置。表行来源**不给**：这条用例走
+// 「调用方自己把 emb 填好」（引擎那侧的 `ple_stage_token` 与图里那一半也是分开的）。
+struct PleRig {
+    ple::PleSpec spec;
+    ple::PleBuffers w;
+    PleRun run;
+    bool init(const artifact::GgufFile& g, int layer, std::string& err) {
+        if (!ple::read_ple_spec(g, layer, kN, kHc, spec, err)) return false;
+        if (!spec.present) {
+            err = "这一层没有 PLE";
+            return false;
+        }
+        if (!ple::load_ple_weights(g, spec, w, err)) return false;
+        run.layer = layer;
+        run.spec = spec;
+        run.w = w;
+        return true;
+    }
+};
+
+// 填一条确定的 emb（宽度 = 模型的 n_embd；真模型上它由表行路径给出，长度 2560）。
+void fill_ple_emb(StepScratch& s, int seed) {
+    for (std::size_t i = 0; i < s.ple.emb.size(); ++i) {
+        s.ple.emb[i] = 0.02f * static_cast<float>(static_cast<int>((i + seed * 7) % 23) - 11);
+    }
+    s.ple.has_token = true;
+}
+
+// 跑若干步（每步由调用方填 emb），返回最后一步的 logits 与每步之后的历史快照。
+std::vector<float> run_ple_steps(const artifact::GgufFile& g, const StepModel& m,
+                                 std::vector<std::vector<float>>* hist_log = nullptr) {
+    std::string err;
+    const std::vector<float> x = make_embd();
+    StepScratch s;
+    CHECK(prepare_step_scratch(m, 4, 0, s, err));
+    for (int t = 0; t < 3; ++t) {
+        fill_ple_emb(s, t);
+        CHECK(run_step_model(g, m, x.data(), s, err));
+        if (hist_log != nullptr) hist_log->push_back(s.ple.hist);
+    }
+    return s.head.logits;
+}
+
+void test_ple_step() {
+    const std::filesystem::path p = write_gguf("qinfer_step_ple.gguf", model_tensors_with_ple());
+    artifact::GgufFile g;
+    std::string err;
+    CHECK(g.open(p.string(), err));
+    TokenEmbed te;
+    CHECK(build_token_embed(g, kN, te, err));
+
+    // 不配 PLE：那六张张力在文件里也**不该改变任何东西**（引擎那条「这一层没有 PLE 就整块跳过」
+    // 的对称面：有张力但没配 PleRun，同样一步都不跑）。
+    StepConfig off = two_layer_config();
+    StepModel m_off;
+    CHECK(build_step_model(g, off, m_off, err));
+    const std::vector<float> base = run_ple_steps(g, m_off);
+
+    const std::filesystem::path p0 = write_gguf("qinfer_step_nople.gguf", model_tensors());
+    artifact::GgufFile g0;
+    CHECK(g0.open(p0.string(), err));
+    StepModel m0;
+    CHECK(build_step_model(g0, two_layer_config(), m0, err));
+    const std::vector<float> base0 = run_ple_steps(g0, m0);
+    for (std::size_t i = 0; i < base.size(); ++i) {
+        CHECK(std::bit_cast<std::uint32_t>(base[i]) == std::bit_cast<std::uint32_t>(base0[i]));
+    }
+    std::printf("  不配 PLE：带张力与不带张力两份模型逐位一致（整块跳过）\n");
+
+    // 配上（第 1 层）：跑得动、logits 有限，且与不配那一条**明显不同**（PLE 不是空操作）。
+    PleRig rig;
+    CHECK(rig.init(g, /*layer=*/1, err));
+    StepConfig on = two_layer_config();
+    on.ple = &rig.run;
+    StepModel m_on;
+    CHECK(build_step_model(g, on, m_on, err));
+    std::vector<std::vector<float>> hist;
+    const std::vector<float> with_ple = run_ple_steps(g, m_on, &hist);
+    CHECK(with_ple.size() == kVocab);
+    bool finite = true;
+    for (float v : with_ple) {
+        if (!std::isfinite(v)) finite = false;
+    }
+    CHECK(finite);
+    const double rel = rel_diff(base, with_ple);
+    std::printf("  配上第 1 层的 PLE：logits 与不配那条相对偏离 %.3g\n", rel);
+    CHECK(rel > 1e-3);
+
+    // 历史确实在动：连续三步之后，每次的 9 行都是「左移一格 + 追加一行」（结构判据）。
+    CHECK(hist.size() == 3u);
+    for (std::size_t t = 1; t < hist.size(); ++t) {
+        for (std::size_t c = 0; c < kN * kHc; ++c) {
+            for (int r = 0; r + 1 < ple::kHistRows; ++r) {
+                CHECK(hist[t][c * ple::kHistRows + static_cast<std::size_t>(r)] ==
+                      hist[t - 1][c * ple::kHistRows + static_cast<std::size_t>(r) + 1]);
+            }
+            CHECK(hist[t][c * ple::kHistRows + ple::kHistRows - 1] !=
+                  hist[t - 1][c * ple::kHistRows + ple::kHistRows - 1]);
+        }
+    }
+    std::printf("  历史：9 行每次左移一格并追加（末行与上一次不同）\n");
+
+    // 同一个 scratch 再跑一遍同一组 emb → 逐位一致；换一组 emb → 不同（表行向量确实进了这一层）。
+    const std::vector<float> again = run_ple_steps(g, m_on);
+    for (std::size_t i = 0; i < again.size(); ++i) {
+        CHECK(std::bit_cast<std::uint32_t>(again[i]) == std::bit_cast<std::uint32_t>(with_ple[i]));
+    }
+    std::printf("  同一组 emb 两次独立跑：logits 逐位一致\n");
+
+    // 挂错层：把 layer 改成 0（权重仍读的是第 1 层那六张）→ 在层 0 上就地写 R → logits 明显不同。
+    PleRig wrong;
+    CHECK(wrong.init(g, /*layer=*/1, err));
+    wrong.run.layer = 0;
+    StepConfig off_layer = two_layer_config();
+    off_layer.ple = &wrong.run;
+    StepModel m_wrong;
+    CHECK(build_step_model(g, off_layer, m_wrong, err));
+    const std::vector<float> at0 = run_ple_steps(g, m_wrong);
+    std::printf("  挂到第 0 层（权重仍是第 1 层那六张）：与第 1 层那条相对偏离 %.3g\n",
+                rel_diff(with_ple, at0));
+    CHECK(rel_diff(with_ple, at0) > 1e-3);
+
+    // 配了 PLE 但这一层没有喂 token（has_token 为假）→ 明确报错，不静默跳过。
+    {
+        const std::vector<float> x = make_embd();
+        StepScratch s;
+        CHECK(prepare_step_scratch(m_on, 4, 0, s, err));
+        CHECK(!run_step_model(g, m_on, x.data(), s, err));
+        CHECK(!err.empty());
+        std::printf("  配了 PLE 却没喂 token：明确报错（%s）\n", err.c_str());
+    }
+
+    // 配了 PLE 又走 `run_token_step`（自动取表行）：这条合成模型的 n_embd 是 256，而表行向量固定
+    // 2560 宽 → 明确失败，不截断不补零。（真模型的 n_embd 正是 2560，那条在 --model 入口上。）
+    {
+        PleRig staged;
+        CHECK(staged.init(g, /*layer=*/1, err));
+        PleSynthTable table;
+        storage::RowCache cache(64);
+        staged.run.table = &table;
+        staged.run.cache = &cache;
+        StepConfig cfg = two_layer_config();
+        cfg.ple = &staged.run;
+        StepModel ms;
+        CHECK(build_step_model(g, cfg, ms, err));
+        StepScratch s;
+        CHECK(prepare_step_scratch(ms, 4, 0, s, err));
+        CHECK(!run_token_step(g, ms, te, 1, s, err));
+        CHECK(!err.empty());
+        std::printf("  表行向量宽（2560）与 n_embd（256）不符：明确报错（%s）\n", err.c_str());
+    }
+
+    // 表行那条路径的两个入口（单 token 带前驱 / 整段重算）必须给出同一份向量——用替身表直接核，
+    // 不经过模型（真几何：16 头 × 160 宽）。
+    {
+        PleSynthTable table;
+        storage::RowCache c1(64);
+        ple::PathStats st;
+        const std::int32_t seq[3] = {1, 2, 3};
+        std::vector<float> seq_out(3 * ple::kVectorDim, 0.0f);
+        CHECK(ple::ple_vectors_for_tokens(table, seq, 3, c1, 0, seq_out.data(), st, err));
+        const std::int32_t prevs[3][2] = {{-1, -1}, {-1, 1}, {1, 2}};
+        for (int t = 0; t < 3; ++t) {
+            storage::RowCache c2(64);
+            ple::PathStats st1;
+            std::vector<float> one(ple::kVectorDim, 0.0f);
+            CHECK(ple::ple_vector_with_prev(table, seq[t], prevs[t][0], prevs[t][1], c2, 0,
+                                            one.data(), st1, err));
+            for (int i = 0; i < ple::kVectorDim; ++i) {
+                CHECK(one[static_cast<std::size_t>(i)] ==
+                      seq_out[static_cast<std::size_t>(t) * ple::kVectorDim +
+                              static_cast<std::size_t>(i)]);
+            }
+        }
+        std::printf("  表行：单 token（带前驱）与整段重算逐位一致\n");
+
+        // 前驱的**顺序**是有意义的（哈希按位置取不同的乘子）：两个前驱对调必须是另一组行号。
+        // 这条把「接线把 prev[0]/prev[1] 传反了」这类错钉在行号这一级——真权重入口上也照得住。
+        std::vector<float> a(ple::kVectorDim, 0.0f), b(ple::kVectorDim, 0.0f);
+        storage::RowCache ca(64), cb(64);
+        ple::PathStats sa, sb;
+        CHECK(ple::ple_vector_with_prev(table, 5, 3, 9, ca, 0, a.data(), sa, err));
+        CHECK(ple::ple_vector_with_prev(table, 5, 9, 3, cb, 0, b.data(), sb, err));
+        int diff = 0;
+        for (int i = 0; i < ple::kVectorDim; ++i) {
+            if (a[static_cast<std::size_t>(i)] != b[static_cast<std::size_t>(i)]) ++diff;
+        }
+        std::printf("  表行：两个前驱对调后 %d/%d 个值不同（顺序有意义）\n", diff, ple::kVectorDim);
+        CHECK(diff > 0);
+    }
 }
 
 }  // namespace
@@ -769,10 +1123,19 @@ int manual_model_entry(const char* model, int tokens) {
 int main(int argc, char** argv) {
     if (argc >= 3 && std::string(argv[1]) == "--model") {
         int tokens = 1;
-        for (int i = 2; i + 1 < argc; ++i) {
-            if (std::string(argv[i]) == "--tokens") tokens = std::atoi(argv[i + 1]);
+        const char* ple_table = nullptr;
+        for (int i = 2; i < argc; ++i) {
+            const std::string a = argv[i];
+            if (a == "--tokens" && i + 1 < argc) {
+                tokens = std::atoi(argv[++i]);
+            } else if (a == "--ple" && i + 1 < argc) {
+                ple_table = argv[++i];
+            } else if (a != argv[2]) {
+                std::printf("不认识的参数：%s\n", a.c_str());
+                return 2;
+            }
         }
-        return manual_model_entry(argv[2], tokens);
+        return manual_model_entry(argv[2], tokens, ple_table);
     }
     test_build_and_run();
     test_order_and_layers_matter();
@@ -781,6 +1144,7 @@ int main(int argc, char** argv) {
     test_token_generation();
     test_spec_decode();
     test_cache_and_budget();
+    test_ple_step();
     std::puts("step_loop: 按层表串起 GDN+QSA 两层并出 logits；层序对调 / 少跑一层 / 不跑循环都可观测，"
               "逐层状态各归各层，token→embedding→logits→贪心的最小生成环可复现，三种接错都明确报错；"
               "投机解码接受/拒绝只改步数、不改序列");

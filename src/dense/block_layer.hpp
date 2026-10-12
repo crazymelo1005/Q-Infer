@@ -21,8 +21,38 @@
 #include "dense/layer_map.hpp"
 #include "dense/qsa_layer.hpp"
 #include "experts/moe_layer.hpp"
+#include "ple/block.hpp"
+#include "ple/row_path.hpp"
+#include "ple/spec.hpp"
 
 namespace qinfer::dense {
+
+// 第 1 层那一步的可选配置（引擎 `PleRun` 的对应物，见 [S-63]）：六张张力的登记与常驻权重，加表行来源。
+// 由调用方建好、用指针挂进 `StepConfig`（与 `offload_layers` 是同一套做法）；不给或那一层没有六张张力
+// 就整块跳过。`layer` 是它挂在哪一层（引擎的 `ple.layers = [1]` 说的是第 1 层）。
+//
+// 表行来源是**可选**的：给了就由 `run_token_step` 自动按当前 token 取表行（引擎的 `ple_stage_token`），
+// 不给则由调用方自己把 `PleState::emb` 填好、`has_token` 置真再跑——引擎那侧也是这么分两半的
+// （`ple_issue_token` / `ple_finish_token` 在驱动侧，图里只有 `ple_block`）。
+struct PleRun {
+    int layer = -1;
+    ple::PleSpec spec;
+    ple::PleBuffers w;
+    ple::RowSource* table = nullptr;
+    storage::RowCache* cache = nullptr;
+    std::uint64_t budget_bytes = 0;
+    bool ready() const { return layer >= 0 && spec.usable(); }
+    bool can_stage() const { return table != nullptr && cache != nullptr; }
+};
+
+// PLE 的会话侧状态：9 行归一化历史（行最快）、当前 token 的表行向量、以及它的两个前驱（最老在前）。
+// 历史是**跨 token** 的（卷积要看的正是它），故它跟着 scratch 走而不是跟着层走。
+struct PleState {
+    std::vector<float> hist;
+    std::vector<float> emb;
+    std::int32_t prev[2] = {kernels::kTokenNull, kernels::kTokenNull};
+    bool has_token = false;
+};
 
 // 一层的静态描述：判型 + 两组 hc_* 张力 + 该走哪条注意力路径 + MoE。
 struct BlockLayer {
@@ -63,6 +93,11 @@ struct BlockScratch {
     // 可选的「把未命中专家这批算力交出去」（interfaces §8）。为空就走逐专家的主机路径。
     // 由调用方按本层的档给候选组与字节来源；见 `experts/moe_layer.hpp` 的 MoeOffload。
     const experts::MoeOffload* offload = nullptr;
+
+    // 可选的 PLE：只在 `ple->layer` 那一层挂上（由 `prepare_step_scratch` 挂），别的层为空。
+    const PleRun* ple = nullptr;
+    PleState* ple_state = nullptr;
+    ple::BlockScratch ple_scratch;  // 块自己的中间缓冲（逐层一份，常驻不重分配）
 };
 
 // 一层的四段耗时（毫秒）。只作观测：给了 `phases` 才计时，不给就一点开销都不多花。

@@ -1,7 +1,7 @@
 // 顶层步循环：把「一层的组合」按层表串成整个模型的一个 decode 步，两端接上残差栈的初值与输出头。
 //
 // 依据 [S-60]/[S-61]：48 层是**每层一个图**，层间只传那个 hc 条流的栈 R；PLE 挂在 `block_layer_pre`
-// 上、缺张力时整个跳过（故本实现把它留成可选的一步，先不含）；LM head 在循环之外，由调用方单独计时。
+// 上（只在第 1 层，[S-63]），缺张力时整个跳过；LM head 在循环之外，由调用方单独计时。
 //
 //   R = 广播(embedding)                       （[S-61]：真序列首个 token 就是 embedding 广播到每条流）
 //   for l in 0..n_layers-1:  R = run_block_layer(l)(R)
@@ -56,6 +56,12 @@ struct StepConfig {
     // 调用方按层的档建好每层一份（长度须等于 n_layers），每层一份字节来源；不给就还是逐专家的
     // 主机路径。两条路的归并顺序相同，故逐位一样（见 experts/moe_layer.hpp 的 MoeOffload）。
     const std::vector<experts::MoeOffload>* offload_layers = nullptr;
+
+    // 可选的 PLE（第 1 层那一步，[S-63]）：给了就在 `ple->layer` 那一层、第一段门控残差之前把它并进
+    // 残差栈。配置由调用方建（六张张力 + 表行来源 + 行缓存），**本步的 token 要靠 `run_token_step` 喂**
+    // ——`run_step_model` 只收 embedding 行、不知道 token，故配了 PLE 又直接调 `run_step_model` 会明确
+    // 报错（不静默跳过：静默跳过就等于在算另一个模型）。
+    const PleRun* ple = nullptr;
 };
 
 struct StepModel {
@@ -76,6 +82,9 @@ struct StepScratch {
     std::vector<float> R;     // hc·n_embd
     std::vector<float> embd;  // n_embd，`run_token_step` 读进来的那一行 token embedding
     bool ready = false;       // QSA 层的 KV 与 rope 是否已配好（未配则 run 明确报错）
+
+    // PLE 的会话侧状态（只在 `cfg.ple` 非空时有意义）：9 行历史 + 当前 token 的表行向量 + 两个前驱。
+    PleState ple;
 
     // 每步观测（interfaces §7 的预算与缓存两侧）。`last_record` 由 `run_step_model` 每次覆写。
     experts::StepRecord last_record;
@@ -103,6 +112,9 @@ bool run_step_model(const artifact::GgufFile& gguf, const StepModel& model, cons
 
 // 便捷入口：从 token id 读 embedding 行（`token_embd.weight`）再跑一步。等价于先
 // `read_token_embedding` 到 `s.embd` 再 `run_step_model(..., s.embd.data(), ...)`。
+//
+// 配了 PLE 时这一步还负责两件事：按**当前 token 与它前面两个**取表行向量（前驱来自 `s.ple.prev`，
+// 只有 token 才知道的两个位置），跑完之后才把 prev 推进一格——本步用的必须是上一步结束时的那两个。
 bool run_token_step(const artifact::GgufFile& gguf, const StepModel& model, const TokenEmbed& e,
                     std::uint64_t token, StepScratch& s, std::string& err);
 

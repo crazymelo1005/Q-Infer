@@ -176,6 +176,24 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
         err = "run_block_layer 的 R 为空";
         return false;
     }
+    // PLE 挂在第 1 层、且在**第一段门控残差之前**（[S-63] 取的是引擎 `block_layer_pre` 的调用点）：
+    // 它就地写 R（`out = hidden + gated + silu(conv)`，读出与写回同一下标是良定义的），随后推进历史。
+    // 块的中间结果落在 `s.ple_scratch`，故历史推进用的是**块跑完之后**那个指针（resize 可能换缓冲）。
+    if (s.ple != nullptr) {
+        if (s.ple_state == nullptr || !s.ple_state->has_token) {
+            err = "这一层配了 PLE，但本步没有喂 token（PLE 要用当前 token 的表行向量）";
+            return false;
+        }
+        const ple::BlockShapes g{layer.n_embd, static_cast<std::uint64_t>(layer.gr.hc)};
+        ple::BlockOut po;
+        po.result = R;
+        if (!ple::ple_block(s.ple_state->emb.data(), R, s.ple_state->hist.data(), s.ple->w.view(), g,
+                            po, s.ple_scratch, err)) {
+            err = "层 " + std::to_string(layer.layer) + " 的 PLE：" + err;
+            return false;
+        }
+        ple::ple_history_advance(s.ple_state->hist.data(), s.ple_scratch.normalized.data(), g);
+    }
     // 计时点每层只有八处（纳秒级），故不做条件分支，只在末尾写进 phases（为空就丢掉）。
     using clock = std::chrono::steady_clock;
     const auto ms_between = [](clock::time_point a, clock::time_point b) {

@@ -61,7 +61,7 @@ add_library(qinfer_dense
   src/dense/mtp_entry.cpp
 )
 target_include_directories(qinfer_dense PUBLIC src)
-target_link_libraries(qinfer_dense PUBLIC qinfer_kernels qinfer_artifact qinfer_experts)
+target_link_libraries(qinfer_dense PUBLIC qinfer_kernels qinfer_artifact qinfer_experts qinfer_ple)
 
 add_library(qinfer_experts
   src/experts/expert_formats.cpp
