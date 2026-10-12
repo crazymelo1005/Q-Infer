@@ -22,7 +22,7 @@
 
 | 组件 | 职责 | 位置 |
 |------|------|------|
-| HTTP 传输 | 监听、路由、连接生命周期 | `third_party/httplib/httplib.h`（裁剪入库） |
+| HTTP 传输 | 监听、路由、连接生命周期 | `third_party/httplib/httplib.h`（整份入库，锁定版本号；只启用服务端所需特性） |
 | 协议层 | OpenAI / Anthropic 请求解析与响应序列化、SSE 帧 | `src/serve/protocol.hpp/.cpp` |
 | JSON | 协议层的地基（手写子集） | `src/serve/json.hpp/.cpp` |
 | 调度器 | 槽位租约、有界队列、计时观测 | `src/serve/scheduler.hpp/.cpp` |
@@ -39,6 +39,10 @@
 ## 3. 路由表
 
 v0 提供以下路由。判据：Strata v0.1.43 有的、与本引擎相关的、成本可控的，全部提供；其余明确 404。
+
+### 鉴权
+
+v0 支持可选 `--api-key`。设了之后，`/v1/*`、`/api/*`、`/metrics` 全部要求 `Authorization: Bearer <key>`，缺失或错误返回 401（对应域的 error 形状）；`/web` 与 `/api-monitor` 静态页可达，页面把 key 存 sessionStorage 并在请求时携带（对齐 Strata 的 monitor 页交互）。不设 key 则全部开放（本机默认）。
 
 ### OpenAI 兼容域
 
@@ -136,7 +140,7 @@ Strata 的并发延迟来自全局锁与 GIL 以及 solo 路径的换槽机制�
 | 期 | 内容 | 验收 |
 |----|------|------|
 | M1.1 | 装配门面：把 `tests/test_step_loop.cpp` 的真权重装配上提为 `src/serve/facade`，补 tokenizer 的 encode/decode 封装与 GGUF `tokenizer.chat_template` 模板器；采样器 | 真权重对拍判据保持通过（分词 2889/2889、步循环逐段一致）；模板器单测覆盖主案例 GGUF 的模板原文 |
-| M1.2 | `third_party/httplib` 入库；JSON 子集；`/v1/chat/completions` 非流式、`/v1/completions`、`/v1/models`、错误形状；调度器与槽位租约 | 集成测试：非流式请求返回正确文本；并发 8 请求全部成功且 `queue_s` 可观测；400/503 错误体正确 |
+| M1.2 | `third_party/httplib` 入库；JSON 子集；`/v1/chat/completions` 非流式、`/v1/completions`、`/v1/models`、错误形状；鉴权（可选 `--api-key`）；调度器与槽位租约 | 集成测试：非流式请求返回正确文本；并发 8 请求全部成功且 `queue_s` 可观测；400/401/503 错误体正确 |
 | M1.3 | SSE 流式；Anthropic 域（`/v1/messages`、`count_tokens`）；`/v1/status`、`/status`、`/health`、`/props`、`/slots` | 流式与 curl 逐 chunk 对照；`count_tokens` 与分词器逐 id 对照；两个兼容域同一请求产出相同 token 序列 |
 | M1.4 | 遥测（NVML dlopen + 降级）；`/metrics`、`/api/requests`、`/api-monitor`；前端三页 | 集成测试断言 `/metrics` 全键类型；无 GPU 环境（CI）字段为 `null` 且页面可渲染占位；End-to-end 有 GPU 时读数非空 |
 | M1.5 | 环境2 真权重端到端；修复 README 与 docs/README.md 的陈旧表述；engine.md §12 扩充为实现说明；新增 ADR-012；docs 清单登记 | engine.md §17 序 2 验收通过（单请求正确跑通）；`scripts/docs_checks.py` 全绿；`ctest` 全绿；提交（不推送远程） |
@@ -157,7 +161,7 @@ Strata 的并发延迟来自全局锁与 GIL 以及 solo 路径的换槽机制�
 
 随 M1.5 写入 `docs/design/adr/ADR-012-http-transport-and-serving-stack.md`，内容即本节：
 
-- HTTP 传输用 cpp-httplib 裁剪入库（MIT 许可证，单头，llama.cpp 同款。保留版权与许可注释，锁定上游提交号；删除以来未用的客户端分支与回退后端）。协议解析、SSE、轮询全部自写，不引入任何 HTTP 协议栈之外的依赖。
+- HTTP 传输用 cpp-httplib 入库（MIT 许可证，单头，llama.cpp 同款）。文件整份入库、保留版权与许可注释、锁定上游发布版本号（改造上游不是目的，维护一个 diff 才是成本）；「裁剪」落实为只启用服务端所需特性：不定义 `CPPHTTPLIB_OPENSSL_SUPPORT` 与 `CPPHTTPLIB_ZLIB_SUPPORT`，线程池大小由入口按槽位数配置。协议解析、SSE、轮询全部自写，不引入任何 HTTP 协议栈之外的依赖。
 - 单进程自包含，不做独立网关进程：零 IPC、零部署面，与 ADR-008 一致。Strata 也是单进程（Python），本设计在进程内解决并发，而非分进程。
 - JSON 手写子集入库：对象、数组、字符串（含转义与 `\uXXXX`）、数字、布尔、空。两个兼容域的请求与响应都在这个子集内；越界输入返回 400。
 - 监控只出页面用的 JSON，Prometheus 文本延迟到 M2：用户已确认监控形态为 Web 页面实时查看，不先做完整对接。
