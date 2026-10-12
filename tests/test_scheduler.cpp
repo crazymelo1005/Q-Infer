@@ -2,6 +2,7 @@
 // 槽位租约按队列序；队列满 enqueue 返回假（HTTP 层回 503）。
 #include "check.hpp"
 #include "serve/scheduler.hpp"
+#include "serve/server.hpp"   // kQueueFullBody：队列满的 503 体（server.cpp 直接用同一常量）
 
 #include <atomic>
 #include <chrono>
@@ -97,6 +98,15 @@ int main() {
         s.stop();
         auto jn = s.take();
         CHECK(!jn);                                  // stop 后 take 返回空
+    }
+    // ---- 队列满 → 503 的字面量：全服务唯一的常量（server.cpp 直接用），两端钉死它 ----
+    {
+        CHECK(std::string(kQueueFullBody) == "{\"error\":\"queue full\"}");
+        Scheduler s(1, 2);                           // 1 槽、队列容量 2（=槽位数×2，规格 §4.1）
+        CHECK(s.enqueue(std::make_shared<Job>(Job{1})));
+        CHECK(s.enqueue(std::make_shared<Job>(Job{2})));
+        CHECK(!s.enqueue(std::make_shared<Job>(Job{3})));   // 队列满，入队拒绝
+        s.stop();
     }
     std::puts("scheduler: 通过");
     return 0;

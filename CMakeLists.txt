@@ -42,12 +42,21 @@ add_library(qinfer_serve
   src/serve/facade.cpp
   src/serve/json.cpp
   src/serve/scheduler.cpp
+  src/serve/server.cpp
 )
 target_include_directories(qinfer_serve PUBLIC src)
 target_link_libraries(qinfer_serve PUBLIC qinfer_text qinfer_dense qinfer_ple qinfer_storage qinfer_kernels)
 # third_party/httplib/httplib.h = cpp-httplib v0.18.6（整份入库，SHA-256 见提交说明）。
 # 「裁剪」落实为不定义 CPPHTTPLIB_OPENSSL_SUPPORT 与 CPPHTTPLIB_ZLIB_SUPPORT；线程池由入口按槽位配置。
 target_include_directories(qinfer_serve PUBLIC third_party/httplib)
+
+# M1 服务入口（T9）：HTTP 接线层 + 集成脚本（同库下继续加源，可执行单挂 main.cpp）。
+# 可执行名沿用产品名 qinfer-server（run.sh 与 main.cpp 的用法说明都按连字符引用）。
+add_executable(qinfer-server src/serve/main.cpp)
+target_link_libraries(qinfer-server PRIVATE qinfer_serve qinfer_text qinfer_artifact)
+add_test(NAME serve_integration
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/serve/run.sh
+                 ${CMAKE_BINARY_DIR} 18080)
 
 add_library(qinfer_ple
   src/ple/row_path.cpp
