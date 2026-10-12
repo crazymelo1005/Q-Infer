@@ -41,6 +41,7 @@ add_library(qinfer_serve
   src/serve/prompt.cpp
   src/serve/facade.cpp
   src/serve/json.cpp
+  src/serve/scheduler.cpp
 )
 target_include_directories(qinfer_serve PUBLIC src)
 target_link_libraries(qinfer_serve PUBLIC qinfer_text qinfer_dense qinfer_ple qinfer_storage qinfer_kernels)
@@ -145,6 +146,9 @@ target_link_libraries(test_facade PRIVATE qinfer_serve)
 
 add_executable(test_json tests/test_json.cpp)
 target_link_libraries(test_json PRIVATE qinfer_serve)
+
+add_executable(test_scheduler tests/test_scheduler.cpp)
+target_link_libraries(test_scheduler PRIVATE qinfer_serve)
 
 add_executable(test_iq4nl tests/test_iq4nl.cpp)
 target_link_libraries(test_iq4nl PRIVATE qinfer_kernels)
@@ -329,6 +333,7 @@ add_test(NAME sampler COMMAND test_sampler)
 add_test(NAME prompt COMMAND test_prompt)
 add_test(NAME facade COMMAND test_facade)
 add_test(NAME json COMMAND test_json)
+add_test(NAME scheduler COMMAND test_scheduler)
 add_test(NAME iq4nl COMMAND test_iq4nl)
 add_test(NAME iq2xs COMMAND test_iq2xs)
 add_test(NAME q8k COMMAND test_q8k)
