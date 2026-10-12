@@ -1,8 +1,11 @@
 // 设备侧的一层专家前馈：权重常驻 + 一次算一批专家（interfaces.md §8 的设备侧那一半）。
 //
-// 一条前馈在这条路径上是同一个流里的四个 kernel，**中间不与主机同步**（§8.4：每步只有一个显存与
+// 一条前馈在这条路径上是同一个流里的一串 kernel，**中间不与主机同步**（§8.4：每步只有一个显存与
 // 主机的汇合点）：
 //   gate GEMV → up GEMV → silu·up 并就地量化成 Q8_0 → down GEMV
+// 其中 gate、up、down 三条各自**一次**提交（行数 ×本批专家数），只有中间的量化逐专家——它的网格
+// 本来就小（ffn/32 个块）。为什么三条要并：一个专家只有 ffn 或 hidden 行，单专家一次提交的网格太
+// 小，卡上的 SM 大半空着（见 engine §6 与那条「改指令级之前先看网格」）。
 // 激活在主机侧量化（复用 `experts/ffn` 的 `quantize_input`，不另写一份量化算术），只把块搬上去；
 // h 的量化在设备上做（它只存在于设备），照主机 `kernels/q8_0` 的量化器逐句对应。
 //
@@ -62,13 +65,13 @@ private:
     void* d_x_ = nullptr;                // 激活块（主机量化后搬上来）
     // 按批收集的权重（gate/up 各一块，slots × 各自字节数）：一次提交先把本批用到的专家从常驻区
     // D2D 拷成连续的一段，再对整段**一次**启动。为什么：一个专家只有 ffn 行（真模型 640 行 = 5 个
-    // 128 线程的块），网格太小、36 个 SM 大半空着；并成一次启动后网格 ×n。down 的激活是**各专家
-    // 自己的 h**，共用不了，故那一路仍逐专家（见 engine §6）。
+    // 128 线程的块），网格太小、36 个 SM 大半空着；并成一次启动后网格 ×n。
     void* d_gate_w_ = nullptr;
     void* d_up_w_ = nullptr;
     void* d_gate_ = nullptr;             // slots × ffn 个 float
     void* d_up_ = nullptr;               // slots × ffn 个 float
-    void* d_h_ = nullptr;                // down 的 Q8_0 块
+    void* d_h_ = nullptr;                // slots × h_blocks_bytes_
+    int* d_slots_ = nullptr;             // 本批的槽号（down 的批量启动按行取专家号）
     void* d_out_ = nullptr;              // slots × hidden 个 float
     FfnScratch scratch_;                 // 主机侧：复用主机的量化器
 };

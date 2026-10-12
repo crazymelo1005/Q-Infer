@@ -31,4 +31,18 @@ bool q2_0_gemv_q8_0_cuda(const std::uint8_t* w, int n_rows, int n_blocks, const 
 bool q2_0_gemv_q8_0_cuda_ddd(const void* d_w, int n_rows, int n_blocks, const void* d_y,
                              void* d_out, std::string& err);
 
+// 批量入口：一次把 n_experts × rows_per_expert 行算完，**每行的权重基址与激活都由专家号决定**：
+// 权重 = d_w + slots[e] × slot_bytes + i × row_bytes（row_bytes = n_blocks × 18），
+// 激活 = d_y + e × y_bytes_per_expert。`y_bytes_per_expert == 0` 表示各专家共用同一份激活
+// （gate/up 就是那样）；down 的激活是各专家自己的 h，传它自己的步长。slots 是长度 n_experts 的
+// 设备数组（专家号 → 常驻槽号），槽距由调用方给——本入口不持有常驻区布局的知识。
+//
+// 为什么要有它：down 的激活共用不了，只能逐专家启动，可一个专家只有 rows_per_expert 行（真模型
+// 2560），网格也才 20 个块，36 个 SM 空着大半；并成一次启动后网格 ×n_experts。每行的累加顺序一字
+// 未改，故与主机那份仍逐位相同（见 engine §6 与那条「改指令级之前先看网格」）。
+bool q2_0_gemv_q8_0_cuda_batch(const void* d_w, const int* d_slots, int n_experts,
+                               int rows_per_expert, int n_blocks, std::size_t slot_bytes,
+                               const void* d_y, int y_bytes_per_expert, void* d_out,
+                               std::string& err);
+
 }  // namespace qinfer::kernels

@@ -7,8 +7,9 @@
 //   1. 每个专家的一次前馈，设备结果与主机 `expert_ffn` 对齐（逐元素，报告位相同的个数与 L1 相对差）。
 //      一层的三档在设备侧都有内核，故这条覆盖的是「四个 kernel 串起来 + 设备侧 h 量化」。
 //   2. 常驻：`uploaded_bytes` 在第一次上传后不再增长——第二个 `run` 不该再搬权重。
-//   3. 槽位：同一批里两个专家用同一个槽时，两次结果都等于该槽里那份权重（不串）。
-//   4. 越出支持范围明确失败：down 的激活搭档不是 Q8_0、或三矩阵里有设备侧没有内核的档。
+//   3. 槽位：同一批里两个专家用同一个槽时，两次结果都等于该槽里那份权重（不串）；槽号与专家号错位
+//      （三元轮换）时，每一位取到的是它要的那个槽（结构判据，逐位相同）。
+//   4. 越出支持范围明确失败：down 不是 Q2_0、或三矩阵里有设备侧没有内核的档。
 //   5. 入参不合法明确失败。
 #include "artifact/gguf_table.hpp"
 #include "dense/step_loop.hpp"
@@ -219,10 +220,52 @@ void test_same_slot_twice_gives_that_slot() {
     }
 }
 
+// 一批里专家号与槽号**不成恒等**（这里是一个三元轮换：位置 0 要槽 2、位置 1 要槽 0、位置 2 要槽 1）。
+// 三矩阵的权重与激活都按专家号在设备上查表，若哪一路拿位置号当专家号、或拿槽号当专家号，这一条就会错。
+//
+// 判据用结构而不是浮点差：错位那一批的第 e 位，必须与恒等那一批的「它要的那个槽」那一位**逐位相同**
+// （同一个专家、同一段 h，只是落在另一个偏移上）。
+void test_slot_permutation_moves_the_whole_row() {
+    const LayerSpec spec = make_spec();
+    const std::vector<ExpertBytes> experts{make_expert(4), make_expert(5), make_expert(6)};
+    const std::vector<float> x = make_x();
+
+    ExpertFfnDevice dev;
+    std::string err;
+    must(dev.init(0, spec, 3, err), err, "init");
+    for (int e = 0; e < 3; ++e) {
+        must(dev.upload(e, experts[static_cast<std::size_t>(e)].view(), err), err, "upload");
+    }
+
+    const std::vector<int> ident_slots{0, 1, 2};
+    std::vector<float> got_ident(3 * kHidden, 0.0f);
+    must(dev.run(ident_slots.data(), 3, x.data(), got_ident.data(), err), err, "恒等的一批");
+
+    // 用轮换而不是对换：对换的逆就是它自己，于是「拿槽号当专家号」那种错读法在对换上会碰巧对上。
+    const std::vector<int> perm_slots{2, 0, 1};
+    std::vector<float> got_perm(3 * kHidden, 0.0f);
+    must(dev.run(perm_slots.data(), 3, x.data(), got_perm.data(), err), err, "错位的一批");
+
+    int same = 0;
+    for (int e = 0; e < 3; ++e) {
+        const float* want = got_ident.data() +
+                            static_cast<std::size_t>(perm_slots[static_cast<std::size_t>(e)]) * kHidden;
+        const float* got = got_perm.data() + static_cast<std::size_t>(e) * kHidden;
+        for (int i = 0; i < kHidden; ++i) {
+            if (std::bit_cast<std::uint32_t>(got[static_cast<std::size_t>(i)]) ==
+                std::bit_cast<std::uint32_t>(want[static_cast<std::size_t>(i)])) {
+                ++same;
+            }
+        }
+    }
+    std::printf("  槽号轮换：每一位取到的是它要的那个槽，逐位相同 %d/%d\n", same, 3 * kHidden);
+    CHECK(same == 3 * kHidden);
+}
+
 void test_unsupported_layers_fail_loudly() {
     ExpertFfnDevice dev;
     std::string err;
-    // down 换成 IQ2_S（激活搭档是 Q8_K，设备侧只有 Q8_0 的 h 量化器）：明确失败。
+    // down 换成 IQ2_S（设备侧的 down 只做了 Q2_0 的批量内核）：明确失败。
     LayerSpec bad = make_spec();
     bad.down.format = Format::kIq2S;
     bad.down.cols = kFfn;
@@ -959,6 +1002,7 @@ int main(int argc, char** argv) {
     }
     for (const GuFormat& gu : kGuFormats) test_device_matches_host(gu);
     test_same_slot_twice_gives_that_slot();
+    test_slot_permutation_moves_the_whole_row();
     test_unsupported_layers_fail_loudly();
     test_bad_inputs_fail_reply();
     test_worker_computes_a_job_and_stays_resident();

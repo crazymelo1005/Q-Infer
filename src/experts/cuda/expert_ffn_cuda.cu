@@ -1,8 +1,9 @@
 // 见 expert_ffn_cuda.hpp 的口径说明。
 //
-// 一处已知的效率欠账：每个矩阵的启动入口各自带一次 cudaDeviceSynchronize（它要如实报错），故一层
-// 一批是 4×n 次同步。那不是「多了一个与主机的汇合点」（参数与结果仍只在上传/回传那两处跨界），
-// 但确实该合成一个流上一次等；融合留到后面与批式前向一起做。
+// 一处已知的效率欠账：每条矩阵的启动入口各自带一次 cudaDeviceSynchronize（它要如实报错），故一层
+// 一批是 3 次同步（三条矩阵各一次，已与本批的专家数无关）。那不是「多了一个与主机的汇合点」
+// （参数与结果仍只在上传/回传那两处跨界），但确实该合成一个流上一次等；融合留到后面与批式前向
+// 一起做。
 #include "experts/cuda/expert_ffn_cuda.hpp"
 
 #include <cuda_runtime.h>
@@ -120,9 +121,10 @@ ExpertFfnDevice::~ExpertFfnDevice() {
 
 bool ExpertFfnDevice::free_all(std::string& err) {
     bool ok = true;
-    auto rel = [&ok, &err](void*& p, const char* what) {
+    // 泛型：缓冲里有 void*（显存块）也有 int*（槽号表），按各自的指针类型收一个引用就好。
+    auto rel = [&ok, &err](auto*& p, const char* what) {
         if (p == nullptr) return;
-        const cudaError_t st = cudaFree(p);
+        const cudaError_t st = cudaFree(static_cast<void*>(p));
         if (st != cudaSuccess) {
             if (ok) err = std::string("释放（") + what + "）失败：" + cudaGetErrorString(st);
             ok = false;
@@ -136,6 +138,7 @@ bool ExpertFfnDevice::free_all(std::string& err) {
     rel(d_gate_w_, "gate 收集区");
     rel(d_up_w_, "up 收集区");
     rel(d_h_, "h 的量化块");
+    rel(d_slots_, "槽号");
     rel(d_out_, "输出");
     w_bytes_ = 0;
     uploaded_ = 0;
@@ -162,8 +165,10 @@ bool ExpertFfnDevice::init(int device, const LayerSpec& spec, int slots, std::st
         err = "设备侧这条路径的 gate/up 激活按 Q8_K 走，这一层的档不是";
         return false;
     }
-    if (activation_format(spec.down.format) != ActFormat::kQ8_0) {
-        err = "设备侧只做了 Q8_0 的 h 量化器，这一层 down 的激活搭档不是它";
+    // down 这条路是**一条批量启动**：每行的权重按槽号取、激活按专家号取。现在只有 Q2_0 有这条
+    // 内核（其余配 Q8_0 激活的档要么设备侧没内核，要么块几何对不上）。不满足就明确失败，不放行。
+    if (spec.down.format != Format::kQ2_0) {
+        err = "设备侧的 down 只做了 Q2_0 这一档的批量内核，这一层不是";
         return false;
     }
     int devices = 0;
@@ -205,7 +210,10 @@ bool ExpertFfnDevice::init(int device, const LayerSpec& spec, int slots, std::st
                  "分配 gate 收集区", err) ||
         !cuda_ok(cudaMalloc(&d_up_w_, static_cast<std::size_t>(up_bytes_ * slots)),
                  "分配 up 收集区", err) ||
-        !cuda_ok(cudaMalloc(&d_h_, static_cast<std::size_t>(h_blocks_bytes_)), "分配 h 的块", err) ||
+        !cuda_ok(cudaMalloc(&d_h_, static_cast<std::size_t>(h_blocks_bytes_ * slots)),
+                 "分配 h 的块", err) ||
+        !cuda_ok(cudaMalloc(&d_slots_, static_cast<std::size_t>(slots_) * sizeof(int)),
+                 "分配槽号", err) ||
         !cuda_ok(cudaMalloc(&d_out_, static_cast<std::size_t>(out_bytes)), "分配输出", err)) {
         free_all(err);
         return false;
@@ -286,6 +294,12 @@ bool ExpertFfnDevice::run(const int* slots, int n, const float* x, float* out, s
             return false;
         }
     }
+    // 槽号也要上设备：down 的批量启动按行取专家号，在设备上查这一张表。只有 n 个 int。
+    if (!cuda_ok(cudaMemcpy(d_slots_, slots, static_cast<std::size_t>(n) * sizeof(int),
+                            cudaMemcpyHostToDevice),
+                 "上传槽号", err)) {
+        return false;
+    }
     // 1. 把本批用到的专家的 gate/up 从常驻区**收集**成连续的两段（每个专家一段、按 e 递增排好，
     //    与后面结果的布局 [e·ffn, (e+1)·ffn) 一致）。D2D 拷贝，几十 KB 级。
     for (int e = 0; e < n; ++e) {
@@ -312,23 +326,28 @@ bool ExpertFfnDevice::run(const int* slots, int n, const float* x, float* out, s
     if (!run_matrix_dev(gate_all, d_gate_w_, d_x_, d_gate_, err)) return false;
     if (!run_matrix_dev(up_all, d_up_w_, d_x_, d_up_, err)) return false;
 
+    // 3. silu·up 就地量化成 Q8_0，逐专家写进 d_h_ 的第 e 段（它的网格本来就只有 ffn/32 个块，
+    //    不值得再并为一次启动）。
+    const std::size_t ffn = static_cast<std::size_t>(spec_.gate.rows);
     for (int e = 0; e < n; ++e) {
-        const std::uint8_t* base =
-            static_cast<const std::uint8_t*>(d_w_) + static_cast<std::size_t>(slots[e]) * per_expert_;
-        const std::size_t ffn = static_cast<std::size_t>(spec_.gate.rows);
         const float* d_gate_e = static_cast<const float*>(d_gate_) + static_cast<std::size_t>(e) * ffn;
         const float* d_up_e = static_cast<const float*>(d_up_) + static_cast<std::size_t>(e) * ffn;
+        std::uint8_t* d_h_e =
+            static_cast<std::uint8_t*>(d_h_) + static_cast<std::size_t>(e) * h_blocks_bytes_;
 
         const int threads = 128;
         const int blocks = (h_blocks + threads - 1) / threads;
-        swiglu_quant_q8_0_kernel<<<blocks, threads>>>(d_gate_e, d_up_e,
-                                                      static_cast<std::uint8_t*>(d_h_), h_blocks);
+        swiglu_quant_q8_0_kernel<<<blocks, threads>>>(d_gate_e, d_up_e, d_h_e, h_blocks);
         if (!cuda_ok(cudaGetLastError(), "swiglu 量化内核启动", err)) return false;
-
-        float* d_out_e = static_cast<float*>(d_out_) + static_cast<std::size_t>(e) * hidden;
-        if (!run_matrix_dev(spec_.down, base + gate_bytes_ + up_bytes_, d_h_, d_out_e, err)) {
-            return false;
-        }
+    }
+    // 4. down：**一次**启动算完整批（n × hidden 行）。权重按槽号取（槽距 = 一个专家的三矩阵之和，
+    //    down 段从 gate+up 之后开始），激活按专家号取（各专家自己那段 h，故给每专家的步长）。
+    const void* d_down_w = static_cast<const std::uint8_t*>(d_w_) + gate_bytes_ + up_bytes_;
+    if (!kernels::q2_0_gemv_q8_0_cuda_batch(
+            d_down_w, d_slots_, n, static_cast<int>(hidden),
+            static_cast<int>(spec_.down.row_blocks()), static_cast<std::size_t>(per_expert_), d_h_,
+            static_cast<int>(h_blocks_bytes_), d_out_, err)) {
+        return false;
     }
     if (!cuda_ok(cudaDeviceSynchronize(), "汇合点同步", err)) return false;
     if (!cuda_ok(cudaMemcpy(out, d_out_, static_cast<std::size_t>(n) * hidden * sizeof(float),
