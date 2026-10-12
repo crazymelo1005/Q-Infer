@@ -99,6 +99,51 @@ bool drain_nonstream(const std::shared_ptr<Job>& job, std::string& text, std::st
     }
 }
 
+// 消息列表组装（Anthropic 域）：system + messages（只收 user/assistant；content 收字符串或文本块
+// 数组，出现图像块等一律拒绝）→ 与 OpenAI 域同一套 Message 列表交给 render_chat。产出与 OpenAI 域
+// 同源的 prompt——两个兼容域对同一请求出同一 token 序列（M1.3 硬指标）就靠这条单一渲染路径。
+bool messages_to_conversation(const Json& body, std::vector<Message>& conv, std::string& err) {
+    const Json* sys = body.find("system");
+    if (sys != nullptr) {
+        if (!sys->is_str()) { err = "system 必须是字符串"; return false; }
+        conv.emplace_back(Message{"system", sys->str});
+    }
+    const Json* msgs = body.find("messages");
+    if (msgs == nullptr || !msgs->is_arr()) { err = "缺少 messages 数组"; return false; }
+    for (const Json& m : msgs->arr) {
+        if (!m.is_obj()) { err = "messages 元素不是对象"; return false; }
+        const Json* role = m.find("role");
+        const Json* content = m.find("content");
+        if (role == nullptr || !role->is_str() ||
+            (role->str != "user" && role->str != "assistant")) {
+            err = "role 只收 user/assistant";
+            return false;
+        }
+        std::string text;
+        if (content == nullptr) { err = "缺 content"; return false; }
+        if (content->is_str()) {
+            text = content->str;
+        } else if (content->is_arr()) {
+            for (const Json& blk : content->arr) {
+                if (!blk.is_obj() || !blk.find("type") || !blk.find("type")->is_str() ||
+                    blk.find("type")->str != "text") {
+                    err = "content 块只收 {type: text}（图像等多模态 M2）";
+                    return false;
+                }
+                const Json* t = blk.find("text");
+                if (t == nullptr || !t->is_str()) { err = "文本块缺 text"; return false; }
+                text += t->str;
+            }
+        } else {
+            err = "content 必须是字符串或块数组";
+            return false;
+        }
+        if (text.empty()) continue;
+        conv.emplace_back(Message{role->str, text});
+    }
+    return true;
+}
+
 }  // namespace
 
 Serve::Serve(ServeConfig cfg, std::shared_ptr<Engine> eng)
@@ -365,6 +410,92 @@ void Serve::serve_sse(const std::shared_ptr<Job>& job, bool include_usage, httpl
     res.set_chunked_content_provider("text/event-stream", provider);
 }
 
+// Anthropic 兼容 SSE。事件序钉死：message_start → content_block_start → content_block_delta×n →
+// content_block_stop → message_delta → message_stop；kError 走 error 事件收尾。形状与 serve_sse
+// 同构（provider 每次调用恰好消费一个事件），事件 data 顶层带与事件名一致的 type 字段（Anthropic
+// 官方形状，集成测试逐条核对）。
+void Serve::serve_anthropic_sse(const std::shared_ptr<Job>& job, httplib::Response& res) {
+    const std::string id = "msg_" + std::to_string(job->id);
+    const std::string model = eng_->model_name();
+    const auto first = std::make_shared<bool>(true);
+    auto provider = [this, job, id, model, first](size_t, httplib::DataSink& sink) -> bool {
+        const auto w = [&](const std::string& s) {
+            // 实仓 DataSink::write 是 std::function<bool(const char*, size_t)>（两参调用，见 httplib.h:538）。
+            if (!sink.write(s.data(), s.size())) { job->events->cancel(); record_request(job, 499, true); return false; }
+            return true;
+        };
+        const auto ev = [&](const std::string& name, Json data) {
+            return w("event: " + name + "\ndata: " + json_dump(data) + "\n\n");
+        };
+        JobEvent e;
+        if (!job->events->pop(e)) { record_request(job, 499, job->events->cancelled()); return false; }
+        if (e.kind == EventKind::kToken) {
+            if (*first) {
+                Json m = Json::objv();
+                m.set("type", Json::strv("message_start"));
+                m.set("id", Json::strv(id));
+                m.set("role", Json::strv("assistant"));
+                m.set("model", Json::strv(model));
+                m.set("content", Json::arrv());
+                m.set("stop_reason", Json::nullv());
+                m.set("stop_sequence", Json::nullv());
+                Json us = Json::objv();
+                us.set("input_tokens", Json::numv(static_cast<double>(job->n_prompt)));
+                us.set("output_tokens", Json::numv(0.0));
+                m.set("usage", std::move(us));
+                if (!ev("message_start", std::move(m))) return false;
+                Json cb = Json::objv();
+                cb.set("type", Json::strv("content_block_start"));
+                cb.set("index", Json::numv(0.0));
+                Json blk = Json::objv();
+                blk.set("type", Json::strv("text"));
+                blk.set("text", Json::strv(""));
+                cb.set("content_block", std::move(blk));
+                if (!ev("content_block_start", std::move(cb))) return false;
+                *first = false;
+            }
+            Json d = Json::objv();
+            d.set("type", Json::strv("content_block_delta"));
+            d.set("index", Json::numv(0.0));
+            Json delta = Json::objv();
+            delta.set("type", Json::strv("text_delta"));
+            delta.set("text", Json::strv(e.text));
+            d.set("delta", std::move(delta));
+            return ev("content_block_delta", std::move(d));
+        }
+        if (e.kind == EventKind::kDone) {
+            Json s1 = Json::objv();
+            s1.set("type", Json::strv("content_block_stop"));
+            s1.set("index", Json::numv(0.0));
+            if (!ev("content_block_stop", std::move(s1))) return false;
+            Json md = Json::objv();
+            md.set("type", Json::strv("message_delta"));
+            Json dlt = Json::objv();
+            dlt.set("stop_reason", Json::strv(job->finish == "length" ? "max_tokens" : "end_turn"));
+            dlt.set("stop_sequence", Json::nullv());
+            md.set("delta", std::move(dlt));
+            Json us = Json::objv();
+            us.set("output_tokens", Json::numv(static_cast<double>(job->n_gen)));
+            md.set("usage", std::move(us));
+            if (!ev("message_delta", std::move(md))) return false;
+            record_request(job, 200, false);
+            Json stop = Json::objv();
+            stop.set("type", Json::strv("message_stop"));
+            return ev("message_stop", std::move(stop));
+        }
+        // kError：Anthropic 用 error 事件收尾（形状与事件流其他帧一致）。
+        Json er = Json::objv();
+        Json inner = Json::objv();
+        inner.set("type", Json::strv("server_error"));
+        inner.set("message", Json::strv(e.err.empty() ? "生成失败" : e.err));
+        er.set("type", Json::strv("error"));
+        er.set("error", std::move(inner));
+        record_request(job, 500, false);
+        return ev("error", std::move(er));
+    };
+    res.set_chunked_content_provider("text/event-stream", provider);
+}
+
 void Serve::handle_completions(const httplib::Request& req, httplib::Response& res) {
     Json body;
     std::string jerr;
@@ -432,6 +563,120 @@ void Serve::handle_completions(const httplib::Request& req, httplib::Response& r
     r.set("usage", std::move(usage));
     send_json(res, 200, r);
     record_request(job, 200, false);
+}
+
+void Serve::handle_messages(const httplib::Request& req, httplib::Response& res) {
+    Json body;
+    std::string jerr;
+    if (!json_parse(req.body, body, jerr) || !body.is_obj()) {
+        send_json(res, 400, anthropic_err("invalid_request_error", "请求体不是合法 JSON 对象：" + jerr));
+        return;
+    }
+    double mt = 0.0;
+    if (!num_param(body, "max_tokens", 0, mt) || mt <= 0) {
+        send_json(res, 400, anthropic_err("invalid_request_error", "max_tokens 必填且为正"));
+        return;
+    }
+    std::vector<Message> conv;
+    if (!messages_to_conversation(body, conv, jerr)) {
+        send_json(res, 400, anthropic_err("invalid_request_error", jerr));
+        return;
+    }
+    // 裁定⑦：空会话 400——与 chat 域的空 prompt 拒绝同姿态，两个兼容域校验一致。
+    if (conv.empty()) {
+        send_json(res, 400, anthropic_err("invalid_request_error", "没有可渲染的消息内容"));
+        return;
+    }
+    GenOptions opts;
+    double t = 0.0, p = 0.0;
+    bool numeric_ok = num_param(body, "temperature", 0.8, t) && num_param(body, "top_p", 0.95, p);
+    if (!numeric_ok) { send_json(res, 400, anthropic_err("invalid_request_error", "temperature/top_p 必须为数字")); return; }
+    opts.temperature = static_cast<float>(t);
+    opts.top_p = static_cast<float>(p);
+    opts.max_tokens = static_cast<std::uint64_t>(mt);
+    // stop_sequences → stop（字符串数组；缺省空）。
+    const Json* stops = body.find("stop_sequences");
+    if (stops != nullptr) {
+        if (!stops->is_arr()) { send_json(res, 400, anthropic_err("invalid_request_error", "stop_sequences 必须是数组")); return; }
+        for (const Json& s : stops->arr) {
+            if (!s.is_str()) { send_json(res, 400, anthropic_err("invalid_request_error", "stop_sequences 元素必须是字符串")); return; }
+            opts.stop.push_back(s.str);
+        }
+    }
+    std::string prompt, rerr;
+    if (!render_chat(eng_->chat_template(), conv, /*add_generation_prompt=*/true, prompt, rerr)) {
+        send_json(res, 500, anthropic_err("server_error", "chat 模板不支持的结构：" + rerr));
+        return;
+    }
+    // 裁定②：Json 没有 is_bool——用 kind == kBool 判。
+    const Json* s = body.find("stream");
+    const bool stream = s != nullptr && s->kind == Json::kBool && s->b;
+    std::shared_ptr<Job> job = launch(req.path, prompt, opts, stream);
+    if (!job) {
+        send_json(res, 503, anthropic_err("overloaded_error", "queue full"));
+        record_request(nullptr, 503, false);   // 裁定⑧：503 记录与 chat/completions 侧对齐
+        return;
+    }
+    if (stream) { serve_anthropic_sse(job, res); return; }
+    std::string text, drain_err;
+    if (!drain_nonstream(job, text, drain_err)) {
+        // 记账与 chat 域同款：每个退出路径恰好一次（kError 记 500 写体；客户端断开记 499 不写体）。
+        const int st = job->events->cancelled() ? 499 : 500;
+        if (st == 500) send_json(res, 500, anthropic_err("server_error", drain_err));
+        record_request(job, st, job->events->cancelled());
+        return;
+    }
+    Json r = Json::objv();
+    r.set("id", Json::strv("msg_" + std::to_string(job->id)));
+    r.set("type", Json::strv("message"));
+    r.set("role", Json::strv("assistant"));
+    r.set("model", Json::strv(job->model));
+    Json block = Json::objv();
+    block.set("type", Json::strv("text"));
+    block.set("text", Json::strv(text));
+    Json content = Json::arrv();
+    content.push(std::move(block));
+    r.set("content", std::move(content));
+    r.set("stop_reason", Json::strv(job->finish == "length" ? "max_tokens" : "end_turn"));
+    r.set("stop_sequence", Json::nullv());
+    Json usage = Json::objv();
+    usage.set("input_tokens", Json::numv(static_cast<double>(job->n_prompt)));
+    usage.set("output_tokens", Json::numv(static_cast<double>(job->n_gen)));
+    r.set("usage", std::move(usage));
+    send_json(res, 200, r);
+    record_request(job, 200, false);
+}
+
+void Serve::handle_count_tokens(const httplib::Request& req, httplib::Response& res) {
+    Json body;
+    std::string jerr;
+    if (!json_parse(req.body, body, jerr) || !body.is_obj()) {
+        send_json(res, 400, anthropic_err("invalid_request_error", "请求体不是合法 JSON 对象：" + jerr));
+        return;
+    }
+    std::vector<Message> conv;
+    if (!messages_to_conversation(body, conv, jerr)) {
+        send_json(res, 400, anthropic_err("invalid_request_error", jerr));
+        return;
+    }
+    // 与 handle_messages 同款空会话 400，两路校验一致。
+    if (conv.empty()) {
+        send_json(res, 400, anthropic_err("invalid_request_error", "没有可渲染的消息内容"));
+        return;
+    }
+    std::string prompt, rerr;
+    if (!render_chat(eng_->chat_template(), conv, /*add_generation_prompt=*/true, prompt, rerr)) {
+        send_json(res, 500, anthropic_err("server_error", "chat 模板不支持的结构：" + rerr));
+        return;
+    }
+    std::vector<std::int32_t> ids;
+    if (!eng_->tokenizer().encode(prompt, /*parse_special=*/true, ids, rerr)) {
+        send_json(res, 500, anthropic_err("server_error", "分词失败：" + rerr));
+        return;
+    }
+    Json r = Json::objv();
+    r.set("input_tokens", Json::numv(static_cast<double>(ids.size())));
+    send_json(res, 200, r);
 }
 
 void Serve::record_request(const std::shared_ptr<Job>& job, int http_status, bool disconnected) {
@@ -511,6 +756,9 @@ void Serve::register_routes() {
     });
     svr.Post("/v1/completions",
              [this](const httplib::Request& req, httplib::Response& res) { handle_completions(req, res); });
+    // Anthropic 域：/v1/messages（含流式）+ count_tokens。401 域分流已在 pre-routing（anthropic_path）。
+    svr.Post("/v1/messages", [this](const httplib::Request& req, httplib::Response& res) { handle_messages(req, res); });
+    svr.Post("/v1/messages/count_tokens", [this](const httplib::Request& req, httplib::Response& res) { handle_count_tokens(req, res); });
     // 静态页（T15/T16 落地文件；此刻 404 也正常——T9 只验 API 面）。
     svr.Get("/", [this](const httplib::Request&, httplib::Response& res) {
         res.set_content(web_index_, "text/html; charset=utf-8");

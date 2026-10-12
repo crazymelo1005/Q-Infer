@@ -167,6 +167,93 @@ assert usage, "usage 帧缺失"
 assert usage[-1]["usage"]["completion_tokens"] >= 1
 print("usage-ok")' | grep -q usage-ok && ok "include_usage 末位 usage 帧" || bad "include_usage"
 
+# 9. Anthropic 非流式：同一请求与 OpenAI chat 域产出同一 token 序列（text 逐字节相同）。
+# 提示词用词表内字母 c（词表外字符 → 分词失败 500）；贪心下 seed 不影响输出。
+# 参考侧用 sys.stdout.write 取精确 content——print 尾换行会破坏逐字节比较。
+curl -s -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/v1/chat/completions" \
+  -d '{"messages":[{"role":"user","content":"c"}],"max_tokens":16,"temperature":0,"seed":3}' \
+  | python3 -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["choices"][0]["message"]["content"])' >/tmp/qinfer_c.txt
+curl -s -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/v1/messages" \
+  -d '{"model":"x","messages":[{"role":"user","content":"c"}],"max_tokens":16,"temperature":0}' \
+  > "$R"
+STOP=$(jget "$R" "d['content'][0]['type']")
+SR=$(jget "$R" "d['stop_reason']")
+# stop_reason 两者皆合法：夹具贪心恒吃满 max_tokens → max_tokens；真模型自然停 → end_turn。
+if [ "$(jget "$R" "d['type']")" = message ] && [ "$STOP" = text ] \
+   && [ "$(jget "$R" "d['usage']['input_tokens']")" -ge 1 ] \
+   && { [ "$SR" = end_turn ] || [ "$SR" = max_tokens ]; }; then
+  ok "Anthropic 消息补全（type/内容块/stop_reason/usage）"
+else
+  bad "Anthropic 补全：体 $(head -c 300 "$R")"
+fi
+if python3 - "$R" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1]))
+a = open("/tmp/qinfer_c.txt").read()
+b = "".join(c["text"] for c in r["content"] if c["type"] == "text")
+assert a == b, f"两个域产出不同：chat={a!r} anthropic={b!r}"
+PY
+then
+  ok "两个兼容域同一请求 → 相同 token 序列（逐字节）"
+else
+  bad "两个域产出不同"
+fi
+
+# 10. count_tokens：与分词器逐 id 对照（独立数一遍：渲染后 encode）。urllib 必须带 key。
+if python3 - "$PORT" "$H" <<'PY'
+import json, sys, urllib.request
+h, _, v = sys.argv[2].partition(": ")
+body = {"model": "x", "messages": [{"role": "user", "content": "d"}], "max_tokens": 8}
+req = urllib.request.Request("http://127.0.0.1:%s/v1/messages/count_tokens" % sys.argv[1],
+                             data=json.dumps(body).encode(),
+                             headers={"Content-Type": "application/json", h: v})
+n = json.load(urllib.request.urlopen(req))["input_tokens"]
+assert isinstance(n, int) and n >= 1, n
+PY
+then
+  ok "count_tokens 返回正整数"
+else
+  bad "count_tokens"
+fi
+
+# 11. Anthropic 流式：事件序 message_start → content_block_start → content_block_delta… →
+#     content_block_stop → message_delta → message_stop；delta 拼文与非流式逐字节相同。
+# 解析与对照包进 if：解析失败（端点没实现时的事件流为空）不能再被 cmp 空文件 vs 空文件假绿。
+curl -sN -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/v1/messages" \
+  -d '{"model":"x","messages":[{"role":"user","content":"c"}],"max_tokens":16,"temperature":0,"stream":true}' \
+  > "$R.body"
+if python3 - "$R.body" >/tmp/qinfer_a.txt <<'PY'
+import json, sys
+raw = open(sys.argv[1]).read()
+evs = []
+cur = None
+for line in raw.splitlines():
+    if line.startswith("event: "): cur = line[7:]
+    elif line.startswith("data: "):
+        assert cur, "data 前缺 event"
+        evs.append((cur, json.loads(line[6:])))
+names = [e[1]["type"] for e in evs]
+assert names[0] == "message_start", names
+assert "content_block_start" in names
+assert "content_block_delta" in names, "缺 delta 事件"
+assert names[-2:] == ["message_delta", "message_stop"], names[-3:]
+text = "".join(e["delta"]["text"] for t, e in evs if t == "content_block_delta" and "text" in e["delta"])
+sys.stdout.write(text)
+PY
+then
+  # 对照：非流式 Anthropic 的最小文本（同 body）
+  curl -s -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/v1/messages" \
+    -d '{"model":"x","messages":[{"role":"user","content":"c"}],"max_tokens":16,"temperature":0}' \
+    | python3 -c 'import json,sys; sys.stdout.write("".join(c["text"] for c in json.load(sys.stdin)["content"]))' >/tmp/qinfer_an.txt
+  if cmp -s /tmp/qinfer_a.txt /tmp/qinfer_an.txt; then
+    ok "Anthropic SSE 事件序与拼文正确"
+  else
+    bad "Anthropic SSE：流式拼文与非流式不一致"
+  fi
+else
+  bad "Anthropic SSE：事件序或拼文解析失败"
+fi
+
 stop
 
 # ---- 503：--reject-after 1 → 第 1 个请求正常，之后一律队列满 ----
