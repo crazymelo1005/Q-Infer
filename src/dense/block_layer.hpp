@@ -72,6 +72,9 @@ struct LayerPhases {
     double load_ms = 0.0;  // 把两组 hc_* 的六个投影解成 F32（每层每次调用都做一遍，见下面的说明）
     double gr_read_ms = 0.0;
     double attn_ms = 0.0;
+    // attn_ms 里属于「量化投影」的那一段（**含每步重新读这些权重**；只有 GDN 层填，QSA 记 0）。
+    // 它和 rest = attn_ms − attn_proj_ms 的比，就是「在读权重还是在算」。
+    double attn_proj_ms = 0.0;
     double moe_ms = 0.0;
     double gr_write_ms = 0.0;
 };

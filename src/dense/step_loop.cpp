@@ -98,6 +98,7 @@ LayerPhases sum_phases(const std::vector<LayerPhases>& phases) {
         t.load_ms += p.load_ms;
         t.gr_read_ms += p.gr_read_ms;
         t.attn_ms += p.attn_ms;
+        t.attn_proj_ms += p.attn_proj_ms;
         t.moe_ms += p.moe_ms;
         t.gr_write_ms += p.gr_write_ms;
     }

@@ -643,6 +643,9 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
         std::printf("  注意力按层型：GDN %d 层合计 %.0f ms（均 %.1f）；QSA %d 层合计 %.0f ms（均 %.1f）\n",
                     n_gdn, gdn, n_gdn > 0 ? gdn / n_gdn : 0.0, n_qsa, qsa,
                     n_qsa > 0 ? qsa / n_qsa : 0.0);
+        const double proj = ph.attn_proj_ms;
+        std::printf("  GDN 的三个投影（含每步重读权重）%.0f ms，其余（前段/递推/收尾）%.0f ms\n", proj,
+                    ph.attn_ms - proj);
         std::printf("  最慢的 6 层：");
         for (std::size_t i = 0; i < slow.size() && i < 6; ++i) {
             const int l = slow[i].second;

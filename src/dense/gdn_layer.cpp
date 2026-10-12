@@ -1,4 +1,6 @@
 #include "dense/gdn_layer.hpp"
+
+#include <chrono>
 #include <cstring>
 
 #include "experts/ffn.hpp"
@@ -122,12 +124,19 @@ bool build_gdn_layer(const artifact::GgufFile& gguf, int layer, std::uint64_t n_
 }
 
 bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const float* x, float* out,
-                   GdnScratch& s, std::string& err) {
+                   GdnScratch& s, std::string& err, double* proj_ms) {
     err.clear();
     if (x == nullptr || out == nullptr) {
         err = "run_gdn_layer 的输入输出指针为空";
         return false;
     }
+    // 三个投影各自计时（含读权重）：读盘与 GEMV 都在这一段里，故它能回答「是在读还是在算」。
+    const auto clk = [] { return std::chrono::steady_clock::now(); };
+    double proj_acc = 0.0;
+    const auto ms = [](std::chrono::steady_clock::time_point a,
+                       std::chrono::steady_clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
     const std::uint64_t N = layer.pre.n_embd;
     const std::uint64_t cd = layer.pre.conv_dim();
     const std::uint64_t vd = layer.pre.v_dim();
@@ -162,6 +171,7 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
     }
 
     // 2. qkv = attn_qkv @ x（按档分派，与专家同一份表）。
+    const auto p0 = clk();
     s.w_qkv.resize(static_cast<std::size_t>(layer.qkv.rows * layer.qkv.row_bytes()));
     if (!gguf.read_at(layer.t_qkv->offset, s.w_qkv.data(), s.w_qkv.size())) {
         err = "读 attn_qkv 失败";
@@ -172,6 +182,7 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
         !experts::run_gemv(layer.qkv, s.w_qkv.data(), s.gemv, s.qkv.data(), err)) {
         return false;
     }
+    proj_acc += ms(p0, clk());
 
     // 3. 前段：卷积+SiLU、拆 q|k|v、q/k 归一、两个门（门用 x 与 BF16 权重）。
     const GrTensor conv_w{static_cast<const void*>(s.w_conv1d.data()), GrPrecision::kF32};
@@ -182,6 +193,7 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
     if (!gdn_preprocess(layer.pre, pw, x, s.qkv.data(), s.conv, eps, s.pre, err)) return false;
 
     // 4. z = attn_gate @ x（量化投影）——收尾那个 sigmoid 的输入。
+    const auto p4 = clk();
     s.w_gate.resize(static_cast<std::size_t>(layer.gate.rows * layer.gate.row_bytes()));
     if (!gguf.read_at(layer.t_gate->offset, s.w_gate.data(), s.w_gate.size())) {
         err = "读 attn_gate 失败";
@@ -192,6 +204,7 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
         !experts::run_gemv(layer.gate, s.w_gate.data(), s.gemv, s.z.data(), err)) {
         return false;
     }
+    proj_acc += ms(p4, clk());
 
     // 5. q 乘 1/sqrt(S)——契约明写这一步归调用方（[S-56]）。
     const float qscale = static_cast<float>(1.0 / std::sqrt(static_cast<double>(hd)));
@@ -213,6 +226,7 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
     }
 
     // 7. out = ssm_out @ y（Q8_0 权重）。
+    const auto p7 = clk();
     s.w_out.resize(static_cast<std::size_t>(layer.out.rows * layer.out.row_bytes()));
     if (!gguf.read_at(layer.t_out->offset, s.w_out.data(), s.w_out.size())) {
         err = "读 ssm_out 失败";
@@ -223,7 +237,9 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
         !experts::run_gemv(layer.out, s.w_out.data(), s.gemv, s.out.data(), err)) {
         return false;
     }
+    proj_acc += ms(p7, clk());
     for (std::uint64_t i = 0; i < N; ++i) out[i] = s.out[static_cast<std::size_t>(i)];
+    if (proj_ms != nullptr) *proj_ms += proj_acc;
     return true;
 }
 

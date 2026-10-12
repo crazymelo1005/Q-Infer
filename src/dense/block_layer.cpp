@@ -202,7 +202,8 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
     if (!gr_read(layer.gr, aw, R, 1e-6f, s.mixed.data(), s.inject.data(), s.gr, err)) return false;
     clock::time_point t2 = clock::now();
     if (layer.kind == LayerKind::kGdn) {
-        if (!run_gdn_layer(gguf, layer.gdn, s.mixed.data(), s.block_out.data(), s.gdn, err)) {
+        if (!run_gdn_layer(gguf, layer.gdn, s.mixed.data(), s.block_out.data(), s.gdn, err,
+                           phases != nullptr ? &phases->attn_proj_ms : nullptr)) {
             return false;
         }
     } else {

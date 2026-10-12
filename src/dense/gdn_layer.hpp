@@ -60,7 +60,9 @@ struct GdnScratch {
 };
 
 // 跑一层：x 长 n_embd，out 长 n_embd（覆盖写）。state 与 conv 跨 token 存活。
+// `proj_ms` 非空时把「三个量化投影」那三段的耗时（**含每步重新读这些权重**）累加进去——一层里
+// 到底是在读权重还是在算，就靠它和 `attn_ms` 相减看出来。QSA 那半边暂不拆（它只占注意力的两成）。
 bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const float* x, float* out,
-                   GdnScratch& s, std::string& err);
+                   GdnScratch& s, std::string& err, double* proj_ms = nullptr);
 
 }  // namespace qinfer::dense
