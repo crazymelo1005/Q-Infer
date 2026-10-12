@@ -19,6 +19,7 @@
 
 #include "serve/facade.hpp"
 #include "serve/scheduler.hpp"
+#include "serve/telemetry.hpp"
 
 namespace httplib {
 class Server;
@@ -64,6 +65,7 @@ private:
     std::shared_ptr<Job> launch(const std::string& path, std::string prompt,
                                 const GenOptions& opts, bool stream);
     void record_request(const std::shared_ptr<Job>& job, int http_status, bool disconnected);   // T12：填 last_timings；T14：追加 Records 环
+    TelemetryExtra telemetry_extra() const;   // T13：遥测每采样读一份的引擎侧指标（随 record_request 的累计）
 
     ServeConfig cfg_;
     std::shared_ptr<Engine> eng_;
@@ -80,9 +82,15 @@ private:
         std::uint64_t prompt_tokens = 0, output_tokens = 0;
         std::string finish;
     };
-    std::mutex last_mu_;
+    mutable std::mutex last_mu_;     // telemetry_extra() 是 const，锁内读数需 mutable（同 EventBuffer::mu_）
     LastTimings last_;
     std::time_t started_;              // 服务启动时刻（/v1/status 的 uptime_s）
+    // 遥测：T13 起在构造函数里 start()（launch 是每请求入口，无请求时也应采样）；/v1/status 的
+    // machine 与 T14 的 /metrics 都读它。
+    std::unique_ptr<Telemetry> tel_;
+    // tok_s_mean 的累计口径：最近一次请求的解码速度是 v0 的 tok_s，全程均值另记这两项。
+    std::uint64_t gen_done_ = 0;   // 累计生成的 token 数（成功请求才累加）
+    std::uint64_t gen_us_ = 0;     // 累计解码耗时（µs）
 };
 
 // main.cpp 用：命令行解析（自写的键值扫描，零依赖）。

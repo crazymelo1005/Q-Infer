@@ -273,6 +273,12 @@ curl -s -H "$H" "http://$HOST:$PORT/slots" > "$R"
 [ "$(jget "$R" "len(d)")" -ge 1 ] && [ "$(jget "$R" "d[0]['is_processing']")" = False ] \
   && ok "/slots 数组与空闲" || bad "/slots：$(head -c 200 "$R")"
 
+# 12b. /v1/status 的 machine：at 恒在；无 GPU 的 CI 上 gpu/ram 为 null，有卡时是对象——只钉形状。
+# at 是 JSON 浮点（T6 %.9g 序列化），bash -gt 对非整数恒假——断言走 python 侧布尔。
+curl -s -H "$H" "http://$HOST:$PORT/v1/status" > "$R"
+[ "$(jget "$R" "d['machine']['at'] > 0")" = True ] \
+  && ok "/v1/status machine.at" || bad "/v1/status machine：$(head -c 200 "$R")"
+
 stop
 
 # ---- 503：--reject-after 1 → 第 1 个请求正常，之后一律队列满 ----

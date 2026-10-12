@@ -1,6 +1,7 @@
 #include "serve/server.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <ctime>
 #include <filesystem>
@@ -144,6 +145,13 @@ bool messages_to_conversation(const Json& body, std::vector<Message>& conv, std:
     return true;
 }
 
+// v/unit，四舍五入 digits 位；nullopt → null。
+static Json scaled_mib_gib(const std::optional<double>& v, double unit, int digits) {
+    if (!v) return Json::nullv();
+    const double p = std::pow(10.0, digits);
+    return Json::numv(std::round(*v / unit * p) / p);
+}
+
 }  // namespace
 
 Serve::Serve(ServeConfig cfg, std::shared_ptr<Engine> eng)
@@ -155,6 +163,10 @@ Serve::Serve(ServeConfig cfg, std::shared_ptr<Engine> eng)
     const std::filesystem::path base = std::filesystem::path(__FILE__).parent_path() / "web";
     web_index_ = read_file((base / "index.html").string());
     web_monitor_ = read_file((base / "monitor.html").string());
+    // T13：遥测在构造函数启动（launch 是每请求入口，放那无请求时 tel_ 恒 null、T14 的 /metrics
+    // 首帧无数据）；进程生存期采样，析构经 tel_ 的 dtor join。
+    tel_ = std::make_unique<Telemetry>([this] { return telemetry_extra(); });
+    tel_->start();
 }
 
 Serve::~Serve() { stop(); }
@@ -704,7 +716,30 @@ void Serve::record_request(const std::shared_ptr<Job>& job, int http_status, boo
     {
         std::lock_guard<std::mutex> lk(last_mu_);
         last_ = lt;
+        // T13：tok_s_mean 的全程累计（生成 token ÷ 解码耗时；与 telemetry_extra 同锁，采样线程前一次
+        // 读数与本次累加之间有 happens-before 边）。编码失败/断开路径已在上面的早退拦掉。
+        if (job->n_gen > 0 && job->done_at > job->leased_at &&
+            job->done_at != std::chrono::steady_clock::time_point{}) {
+            const auto start = job->first_at != std::chrono::steady_clock::time_point{}
+                                   ? job->first_at : job->leased_at;
+            if (job->done_at > start) {
+                gen_done_ += job->n_gen;
+                gen_us_ += static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::microseconds>(job->done_at - start).count());
+            }
+        }
     }
+}
+
+TelemetryExtra Serve::telemetry_extra() const {
+    std::lock_guard<std::mutex> lk(last_mu_);
+    TelemetryExtra ex;
+    if (last_.have && last_.decode_tok_s > 0.0) ex.tok_s = last_.decode_tok_s;
+    if (last_.have && last_.first_token_s > 0.001)
+        ex.prefill_tok_s_mean = static_cast<double>(last_.prompt_tokens) / last_.first_token_s;
+    if (gen_us_ > 0) ex.tok_s_mean = 1e6 * static_cast<double>(gen_done_) /
+                                     static_cast<double>(gen_us_);
+    return ex;
 }
 
 void Serve::register_routes() {
@@ -844,8 +879,40 @@ void Serve::register_routes() {
         r.set("vram", Json::objv());
         Json mach = Json::objv();
         mach.set("at", Json::numv(static_cast<double>(now)));
-        mach.set("gpu", Json::nullv());      // T13 接遥测后填
-        mach.set("ram", Json::nullv());
+        if (tel_) {
+            const auto ts = tel_->snapshot();
+            const auto& hw = ts.now;
+            const auto& st = ts.stat;
+            auto get = [&hw](const char* k) -> std::optional<double> {
+                return hw.count(k) ? std::optional<double>(hw.at(k)) : std::nullopt;
+            };
+            if (!st.gpu_name.empty()) {   // Strata: machine.gpu 在无卡时整个为 null
+                Json g = Json::objv();
+                g.set("name", Json::strv(st.gpu_name));
+                g.set("used_mib", scaled_mib_gib(get("gpu_mem_used"), 1 << 20, 0));
+                g.set("total_mib", scaled_mib_gib(get("gpu_mem_total"), 1 << 20, 0));
+                g.set("util_pct", get("gpu_util").has_value() ? Json::numv(*get("gpu_util"))
+                                                              : Json::nullv());
+                g.set("temp_c", get("gpu_temp").has_value() ? Json::numv(*get("gpu_temp"))
+                                                            : Json::nullv());
+                g.set("power_w", get("gpu_power").has_value() ? Json::numv(*get("gpu_power"))
+                                                              : Json::nullv());
+                mach.set("gpu", std::move(g));
+            } else {
+                mach.set("gpu", Json::nullv());
+            }
+            if (get("ram_total").has_value()) {
+                Json rm = Json::objv();
+                rm.set("used_gib", scaled_mib_gib(get("ram_used"), 1 << 30, 1));
+                rm.set("total_gib", scaled_mib_gib(get("ram_total"), 1 << 30, 1));
+                mach.set("ram", std::move(rm));
+            } else {
+                mach.set("ram", Json::nullv());
+            }
+        } else {
+            mach.set("gpu", Json::nullv());
+            mach.set("ram", Json::nullv());
+        }
         r.set("machine", std::move(mach));
         send_json(res, 200, r);
     });
