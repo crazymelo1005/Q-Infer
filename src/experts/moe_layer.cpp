@@ -270,12 +270,15 @@ bool add_shared_expert(const artifact::GgufFile& gguf, const MoeLayer& layer, co
     if (!layer.shared.present) return true;
     const std::size_t hidden = static_cast<std::size_t>(layer.hidden);
     const bool shexp_bf16 = layer.shared.gate_inp_type == 30;
+    // 字节数随声明的档走（ADR-010）：bf16 每元素 2 字节、F32 每元素 4 字节。**这里曾经无论哪种档都只读
+    // 隐藏维×2**，于是 F32 门只填了一半、后半留零，门的点积跟着错（真模型部署那份是 BF16，故没暴露；
+    // F32 门出现在社区那份 MTP pack 上）。tests/test_moe_layer 有一条专咬它的用例。
+    const std::uint64_t shexp_gate_bytes = hidden * (shexp_bf16 ? 2u : 4u);
     s.s_gate_inp.resize(shexp_bf16 ? hidden : 0);
     s.s_gate_inp_f32.assign(shexp_bf16 ? 0 : hidden, 0.0f);
     std::uint8_t* shexp_dst = shexp_bf16 ? reinterpret_cast<std::uint8_t*>(s.s_gate_inp.data())
                                          : reinterpret_cast<std::uint8_t*>(s.s_gate_inp_f32.data());
-    if (!gguf.read_at(layer.s_gate_inp->offset, shexp_dst,
-                      hidden * 2)) {
+    if (!gguf.read_at(layer.s_gate_inp->offset, shexp_dst, shexp_gate_bytes)) {
         err = "读共享专家的标量门失败";
         return false;
     }
@@ -285,14 +288,23 @@ bool add_shared_expert(const artifact::GgufFile& gguf, const MoeLayer& layer, co
     s.s_gate.resize(static_cast<std::size_t>(s_gate_bytes));
     s.s_up.resize(static_cast<std::size_t>(s_up_bytes));
     s.s_down.resize(static_cast<std::size_t>(s_down_bytes));
-    // 共享专家没有专家维，故起点就是张力起点，不加逐专家偏移。
-    if (!gguf.read_at(layer.s_gate->offset, s.s_gate.data(), s.s_gate.size()) ||
-        !gguf.read_at(layer.s_up->offset, s.s_up.data(), s.s_up.size()) ||
-        !gguf.read_at(layer.s_down->offset, s.s_down.data(), s.s_down.size())) {
-        err = "读共享专家的矩阵失败";
-        return false;
+    // 共享专家没有专家维，故起点就是张力起点，不加逐专家偏移。三张矩阵是大块（每层约 1.5 MB、每步都要
+    // 用一次），与逐专家那批同样优先**直接映射**（view_at，不拷贝）；映射不到再退回读进缓冲。
+    const std::uint8_t* sgp = gguf.view_at(layer.s_gate->offset, s_gate_bytes);
+    const std::uint8_t* sup = gguf.view_at(layer.s_up->offset, s_up_bytes);
+    const std::uint8_t* sdp = gguf.view_at(layer.s_down->offset, s_down_bytes);
+    ExpertWeights sw{};
+    if (sgp != nullptr && sup != nullptr && sdp != nullptr) {
+        sw = ExpertWeights{sgp, sup, sdp};
+    } else {
+        if (!gguf.read_at(layer.s_gate->offset, s.s_gate.data(), s.s_gate.size()) ||
+            !gguf.read_at(layer.s_up->offset, s.s_up.data(), s.s_up.size()) ||
+            !gguf.read_at(layer.s_down->offset, s.s_down.data(), s.s_down.size())) {
+            err = "读共享专家的矩阵失败";
+            return false;
+        }
+        sw = ExpertWeights{s.s_gate.data(), s.s_up.data(), s.s_down.data()};
     }
-    ExpertWeights sw{s.s_gate.data(), s.s_up.data(), s.s_down.data()};
     s.shared_out.assign(hidden, 0.0f);
     const void* shexp_w = shexp_bf16 ? static_cast<const void*>(s.s_gate_inp.data())
                                      : static_cast<const void*>(s.s_gate_inp_f32.data());

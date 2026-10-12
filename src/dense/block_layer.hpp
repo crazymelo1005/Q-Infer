@@ -73,6 +73,8 @@ struct LayerPhases {
     double load_ms = 0.0;  // 把两组 hc_* 的六个投影解成 F32（**每层一次**：该层的 scratch 第一次调用时读，
                            // 之后恒为 0——权重按层缓存，见 block_layer.cpp 的 load_gr_group）
     double gr_read_ms = 0.0;
+    // gr_read_ms 的逐子步切分（两次 gr_read 累加；见 dense/gated_residual.hpp 的 GrPhases）。
+    GrPhases gr_split;
     double attn_ms = 0.0;
     // attn_ms 的逐子步切分（互斥且穷尽，见 dense/attn_phases.hpp）。只有 proj 那几段走按行并行的
     // 池子，其余是手写标量循环——拆开才知道该动哪一段。

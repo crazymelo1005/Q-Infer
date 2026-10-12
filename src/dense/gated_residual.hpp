@@ -70,13 +70,24 @@ struct GrScratch {
     std::vector<float> lq;   // hc_lr，bf16(lo)
 };
 
+// gr_read 的逐子步耗时（只作观测）：norm（逐流 RMS + 缩放 + act 的 bf16 舍入）/ lo（320 行投影，
+// 按行并行）/ mixed（2560 行、每行 4 条流各一次 320 点积，按行并行）/ inject（hc 行投影，**没有并行**）。
+// 四者互斥且穷尽。拆它的理由与注意力那次一样：这一段从没拆过，而它占了相位图里的一整项。
+struct GrPhases {
+    double norm_ms = 0.0;
+    double lo_ms = 0.0;
+    double mixed_ms = 0.0;
+    double inject_ms = 0.0;
+};
+
 // 一条流的 RMS。w_norm 存的已经是 (1 + w)。
 float rms_scale(const float* row, std::uint64_t n, float eps);
 
 // R 是 (hc, n_embd)，n_embd 最快（第 c 条流从 c·n_embd 开始）。mixed 与 inject 由调用方给缓冲
 // （mixed 长 n_embd、inject 长 hc）。w_inject 缺席时 inject 原样不动。
 bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, float* mixed,
-             float* inject, GrScratch& scratch, std::string& err);
+             float* inject, GrScratch& scratch, std::string& err,
+              GrPhases* phases = nullptr);
 
 // R_out[c,d] = R[c,d] + block_out[d] · 2·sigmoid(inject[c] / hc)。block_out 逐条流都是同一份。
 bool gr_write(const GrShapes& s, const float* R, const float* block_out, const float* inject,

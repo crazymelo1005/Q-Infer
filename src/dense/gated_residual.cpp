@@ -3,6 +3,7 @@
 #include "kernels/bf16.hpp"
 #include "scheduling/thread_pool.hpp"
 
+#include <chrono>
 #include <cmath>
 
 namespace qinfer::dense {
@@ -50,7 +51,12 @@ float rms_scale(const float* row, std::uint64_t n, float eps) {
 }
 
 bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, float* mixed,
-             float* inject, GrScratch& scratch, std::string& err) {
+             float* inject, GrScratch& scratch, std::string& err, GrPhases* phases) {
+    const auto clk = [] { return std::chrono::steady_clock::now(); };
+    const auto msx = [](std::chrono::steady_clock::time_point a,
+                        std::chrono::steady_clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
     err.clear();
     if (!s.sane()) {
         err = "超连接的几何不成立（n_embd / hc / hc_lr 有零）";
@@ -70,6 +76,7 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
     const std::uint64_t hc_dim = hc * n;
 
     // xn = rms_norm(R) · (1 + w)，逐流一条 RMS。
+    const auto p_norm = clk();
     scratch.xn.resize(static_cast<std::size_t>(hc_dim));
     scratch.act.resize(static_cast<std::size_t>(hc_dim));
     for (std::uint64_t c = 0; c < hc; ++c) {
@@ -84,7 +91,9 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
         scratch.act[static_cast<std::size_t>(i)] = round_act(scratch.xn[static_cast<std::size_t>(i)]);
     }
 
+    if (phases != nullptr) phases->norm_ms += msx(p_norm, clk());
     // lo = silu((bf16(xn) · w_downᵀ) / hc)：除 hc 在 silu 里面。
+    const auto p_lo = clk();
     // 两个投影都按**行**并行（与 experts/ffn 的 run_gemv 同一条口径）：一行一个独立的点积、行间无依赖，
     // 故只切行不改任何一个输出元素的累加顺序——并行版与单线程逐位相同（tests/test_gated_residual）。
     // 它们是这一层里最后两块没走池子的稠密算术（每层两次 gr_read，实测占 20 线程步长的约四分之一）。
@@ -106,6 +115,7 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
     } else {
         for (std::uint64_t k = 0; k < lr; ++k) lo_row(k);
     }
+    if (phases != nullptr) phases->lo_ms += msx(p_lo, clk());
     scratch.lq.resize(static_cast<std::size_t>(lr));
     for (std::uint64_t k = 0; k < lr; ++k) {
         scratch.lq[static_cast<std::size_t>(k)] = round_act(scratch.lo[static_cast<std::size_t>(k)]);
@@ -113,6 +123,7 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
 
     // mixed[d] = (1/hc) Σ_c xn[c,d] · sigmoid(bf16(lo) · w_up[c,d]ᵀ)：按流求平均，不是求和；
     // 被门乘的是**未舍入**的 xn（gated 平均要的是未舍入值）。同样按 d 并行。
+    const auto p_mixed = clk();
     const auto mixed_row = [&](std::uint64_t d) {
         float m = 0.0f;
         for (std::uint64_t c = 0; c < hc; ++c) {
@@ -136,6 +147,8 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
         for (std::uint64_t d = 0; d < n; ++d) mixed_row(d);
     }
 
+    if (phases != nullptr) phases->mixed_ms += msx(p_mixed, clk());
+    const auto p_inj = clk();
     // inject[c] = bf16(xn)[c] · w_inject[c]ᵀ。w_inject 缺席时（最后那个 mixer）原样不动。
     if (w.w_inject.present()) {
         for (std::uint64_t c = 0; c < hc; ++c) {
@@ -148,6 +161,7 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
             inject[c] = static_cast<float>(acc);
         }
     }
+    if (phases != nullptr) phases->inject_ms += msx(p_inj, clk());
     return true;
 }
 

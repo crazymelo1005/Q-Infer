@@ -635,6 +635,10 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
                     cfg.n_layers, ph.load_ms, ph.gr_read_ms, ph.attn_ms, ph.moe_ms, ph.gr_write_ms);
         std::printf("  MoE 的四项：取数 %.0f / 路由 %.0f / 逐专家 %.0f / 共享 %.0f ms\n", ph.moe_io_ms,
                     ph.moe_route_ms, ph.moe_expert_ms, ph.moe_shared_ms);
+        std::printf("  gr_read 的四段：逐流归一+舍入 %.0f / lo 投影 %.0f / mixed 投影 %.0f / "
+                    "inject 投影 %.0f ms\n",
+                    ph.gr_split.norm_ms, ph.gr_split.lo_ms, ph.gr_split.mixed_ms,
+                    ph.gr_split.inject_ms);
         // MoE 的「逐专家」按层摊开：均匀说明是某个系统性的开销，集中在几层则多半是那几层的档。
         std::vector<std::pair<double, int>> slow_moe;
         for (int l = 0; l < cfg.n_layers; ++l) {
@@ -723,6 +727,10 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
                         ph.gr_write_ms);
             std::printf("  MoE 的四项（%d 线程）：取数 %.0f / 路由 %.0f / 逐专家 %.0f / 共享 %.0f ms\n",
                         threads, ph.moe_io_ms, ph.moe_route_ms, ph.moe_expert_ms, ph.moe_shared_ms);
+            std::printf("  gr_read 的四段（%d 线程）：逐流归一+舍入 %.0f / lo %.0f / mixed %.0f / "
+                        "inject %.0f ms\n",
+                        threads, ph.gr_split.norm_ms, ph.gr_split.lo_ms, ph.gr_split.mixed_ms,
+                        ph.gr_split.inject_ms);
             std::printf("  注意力的五段（%d 线程）：投影 %.0f / 前段 %.0f / 递推 %.0f / 收尾 %.0f / "
                         "KV %.0f / 索引器 %.0f / attend+门 %.0f ms\n",
                         threads, ph.attn.proj_ms, ph.attn.prep_ms, ph.attn.rec_ms, ph.attn.close_ms,

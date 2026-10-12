@@ -355,6 +355,50 @@ double ref_gate_scalar(const std::vector<std::uint8_t>& ginp, const float* x, do
     return 1.0 / (1.0 + std::exp(-dot * scale));
 }
 
+// 共享专家的标量门声明为 F32 时要**按 F32 读满**：这条曾在 moe_layer 里漏过——无论哪种档都只读
+// 「隐藏维 × 2」字节，F32 档于是只填了一半、后半留零，门的点积自然就错，而当时只有 BF16 档的用例
+// （真模型部署那份正是 BF16，F32 门出现在社区那份 MTP pack 上）。夹具刻意让门的上半段非零。
+void test_f32_scalar_gate_is_read_in_full() {
+    std::vector<TensorSpec> ts = with_shared(layer_tensors("blk.0.", false, 0), "blk.0.", 0, 1, 1.0f);
+    const std::size_t gidx = 4 + 3;  // 共享专家那四个张力的最后一个 = 标量门
+    std::vector<float> gate(kHidden);
+    for (std::size_t j = 0; j < gate.size(); ++j) {
+        gate[j] = 0.25f + 0.0005f * static_cast<float>(j);  // 后半是前半的两倍量级：截断读必错
+    }
+    std::vector<std::uint8_t> bytes(gate.size() * 4);
+    std::memcpy(bytes.data(), gate.data(), bytes.size());
+    ts[gidx].type = 0;  // F32
+    ts[gidx].data = bytes;
+
+    const std::filesystem::path p = write_gguf("qinfer_moe_shexp_f32.gguf", ts);
+    artifact::GgufFile g;
+    std::string err;
+    CHECK(g.open(p.string(), err));
+    MoeLayer layer;
+    CHECK(build_moe_layer(g, 0, kTopK, layer, err));
+    CHECK(layer.shared.present && layer.shared.usable());
+    CHECK(layer.shared.gate_inp_type == 0);
+
+    const std::vector<float> x = make_x_shared();
+    MoeScratch s;
+    std::vector<float> out(kHidden, 0.0f);
+    CHECK(run_moe_layer(g, layer, x.data(), out.data(), s, err));
+
+    // 读进来的缓冲必须就是张力里那串 F32（截断读会让后半变成 0）。
+    CHECK(s.s_gate_inp_f32.size() == gate.size());
+    int same = 0;
+    for (std::size_t j = 0; j < gate.size(); ++j) {
+        if (s.s_gate_inp_f32[j] == gate[j]) ++same;
+    }
+    // 据此算出的门也要与「用完整门算」的一致。
+    const float got = shared_scalar_gate_f32(s.s_gate_inp_f32.data(), x.data(), kHidden);
+    const float want = shared_scalar_gate_f32(gate.data(), x.data(), kHidden);
+    std::printf("  F32 标量门：读回与张力相同 %d/%zu、门 %.6f 对 %.6f\n", same, gate.size(),
+                static_cast<double>(got), static_cast<double>(want));
+    CHECK(same == static_cast<int>(gate.size()));
+    CHECK(got == want);
+}
+
 void test_shared_expert_plain_add() {
     // 共享专家的整体口径：路由侧按权重、共享侧不加权直接相加（y = Σ wᵢ·expertᵢ + shared）。
     const auto ts = with_shared(layer_tensors("blk.0.", false, 0), "blk.0.", 0, 1, 1.0f);
@@ -1108,6 +1152,7 @@ int main(int argc, char** argv) {
     test_expert_offsets();
     test_nonuniform_router_weights();
     test_failures();
+    test_f32_scalar_gate_is_read_in_full();
     test_shared_expert_plain_add();
     test_shared_scalar_gate_applied_once();
     test_expert_source();
