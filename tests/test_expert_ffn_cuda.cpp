@@ -617,6 +617,12 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
         host_ms.push_back(std::chrono::duration<double, std::milli>(b - a).count());
         host_logits.push_back(s_ref.head.logits);
     }
+    {
+        const qinfer::dense::LayerPhases ph = qinfer::dense::sum_phases(s_ref.phases);
+        std::printf("  主机单线程相位（%d 层、最后一步）：load %.0f / gr_read %.0f / attn %.0f / "
+                    "moe %.0f / gr_write %.0f ms\n",
+                    cfg.n_layers, ph.load_ms, ph.gr_read_ms, ph.attn_ms, ph.moe_ms, ph.gr_write_ms);
+    }
 
     // 若给了 --threads：主机路径再跑一遍（换一份 scratch、开线程池），比用时与逐位结果。
     if (threads > 1) {
@@ -640,6 +646,13 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
             mt_logits.push_back(s_mt.head.logits);
         }
         qinfer::scheduling::set_pool_threads(0);
+        {
+            const qinfer::dense::LayerPhases ph = qinfer::dense::sum_phases(s_mt.phases);
+            std::printf("  主机 %d 线程相位（%d 层、最后一步）：load %.0f / gr_read %.0f / attn %.0f / "
+                        "moe %.0f / gr_write %.0f ms\n",
+                        threads, cfg.n_layers, ph.load_ms, ph.gr_read_ms, ph.attn_ms, ph.moe_ms,
+                        ph.gr_write_ms);
+        }
         std::printf("  主机 %d 线程（同一份 x、同一份状态推进）\n", threads);
         for (int t = 0; t < tokens; ++t) {
             int same = 0;

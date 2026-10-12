@@ -80,7 +80,13 @@ struct StepScratch {
     // 每步观测（interfaces §7 的预算与缓存两侧）。`last_record` 由 `run_step_model` 每次覆写。
     experts::StepRecord last_record;
     bool has_record = false;
+
+    // 本步每层各段的耗时（与 `last_record` 一样，由 `run_step_model` 每次覆写）。调参要看的就是它。
+    std::vector<LayerPhases> phases;
 };
+
+// 把一层的各段耗时加起来（报告用）。
+LayerPhases sum_phases(const std::vector<LayerPhases>& phases);
 
 // 给每层 QSA 配分页 KV（`n_pages` 个物理页、恒等页表）与 rope 表；`pos_base` 是序列首个 cell 的位置
 // （[S-59]：不能由 cell 号反推）。真模型上页的换入换出属于存储层，这里只给恒等页表。

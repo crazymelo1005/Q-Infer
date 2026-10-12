@@ -59,6 +59,7 @@ bool prepare_step_scratch(const StepModel& model, std::uint64_t n_pages, std::ui
     const std::size_t n = static_cast<std::size_t>(model.cfg.n_layers);
     out.R.assign(static_cast<std::size_t>(model.cfg.n_embd * model.cfg.hc), 0.0f);
     out.blocks.resize(n);
+    out.phases.assign(n, LayerPhases{});  // 每步的相位耗时（interfaces §7 的「每步耗时」按层拆）
     // 交出（interfaces §8）：把调用方按层建好的那一条挂到该层的 scratch 上，跑每一步时逐层生效。
     if (model.cfg.offload_layers != nullptr) {
         if (model.cfg.offload_layers->size() != n) {
@@ -91,6 +92,18 @@ bool prepare_step_scratch(const StepModel& model, std::uint64_t n_pages, std::ui
     return true;
 }
 
+LayerPhases sum_phases(const std::vector<LayerPhases>& phases) {
+    LayerPhases t;
+    for (const LayerPhases& p : phases) {
+        t.load_ms += p.load_ms;
+        t.gr_read_ms += p.gr_read_ms;
+        t.attn_ms += p.attn_ms;
+        t.moe_ms += p.moe_ms;
+        t.gr_write_ms += p.gr_write_ms;
+    }
+    return t;
+}
+
 bool run_step_model(const artifact::GgufFile& gguf, const StepModel& model, const float* x_embd,
                     StepScratch& s, std::string& err, const scheduling::StepDemand* demand) {
     err.clear();
@@ -108,6 +121,9 @@ bool run_step_model(const artifact::GgufFile& gguf, const StepModel& model, cons
         return false;
     }
 
+    // 相位计时清零：run_block_layer 是累加的，清零才得到「本步」的数。
+    std::fill(s.phases.begin(), s.phases.end(), LayerPhases{});
+
     // 残差栈的初值：同一个向量广播到 hc 条流（[S-61]）。
     hc_broadcast_init(x_embd, model.cfg.n_embd, model.cfg.hc, s.R.data());
     experts::StepRecord rec;
@@ -119,7 +135,9 @@ bool run_step_model(const artifact::GgufFile& gguf, const StepModel& model, cons
         const experts::CacheSnapshot prev = ms.source != nullptr
                                                 ? experts::CacheSnapshot::of(*ms.source)
                                                 : experts::CacheSnapshot{};
-        if (!run_block_layer(gguf, model.blocks[l], s.R.data(), s.blocks[l], err)) {
+        LayerPhases* ph =
+            l < s.phases.size() ? &s.phases[l] : nullptr;  // 每步覆写，故是「本步」的数
+        if (!run_block_layer(gguf, model.blocks[l], s.R.data(), s.blocks[l], err, ph)) {
             err = "层 " + std::to_string(l) + " 跑不动：" + err;
             return false;
         }

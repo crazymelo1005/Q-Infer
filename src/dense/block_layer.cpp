@@ -1,5 +1,7 @@
 #include "dense/block_layer.hpp"
 
+#include <chrono>
+
 #include "experts/ffn.hpp"
 #include "kernels/bf16.hpp"
 #include "kernels/q8_0.hpp"
@@ -168,12 +170,18 @@ bool build_block_layer(const artifact::GgufFile& gguf, int layer, std::uint64_t 
 }
 
 bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, float* R,
-                     BlockScratch& s, std::string& err) {
+                     BlockScratch& s, std::string& err, LayerPhases* phases) {
     err.clear();
     if (R == nullptr) {
         err = "run_block_layer 的 R 为空";
         return false;
     }
+    // 计时点每层只有八处（纳秒级），故不做条件分支，只在末尾写进 phases（为空就丢掉）。
+    using clock = std::chrono::steady_clock;
+    const auto ms_between = [](clock::time_point a, clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    clock::time_point t0 = clock::now();
     const std::uint64_t n_embd = layer.n_embd;
     if (!load_gr_group(gguf, *layer.a_norm, *layer.a_down, *layer.a_up, *layer.a_inject,
                        s.a_norm_f32, s.a_down_f32, s.a_up_f32, s.a_inject_f32, err) ||
@@ -181,6 +189,7 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
                        s.f_norm_f32, s.f_down_f32, s.f_up_f32, s.f_inject_f32, err)) {
         return false;
     }
+    clock::time_point t1 = clock::now();
     s.mixed.assign(static_cast<std::size_t>(n_embd), 0.0f);
     s.inject.assign(static_cast<std::size_t>(layer.gr.hc), 0.0f);
     s.block_out.assign(static_cast<std::size_t>(n_embd), 0.0f);
@@ -191,6 +200,7 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
                        GrTensor{s.a_up_f32.data(), GrPrecision::kF32},
                        GrTensor{s.a_inject_f32.data(), GrPrecision::kF32}};
     if (!gr_read(layer.gr, aw, R, 1e-6f, s.mixed.data(), s.inject.data(), s.gr, err)) return false;
+    clock::time_point t2 = clock::now();
     if (layer.kind == LayerKind::kGdn) {
         if (!run_gdn_layer(gguf, layer.gdn, s.mixed.data(), s.block_out.data(), s.gdn, err)) {
             return false;
@@ -200,7 +210,9 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
             return false;
         }
     }
+    clock::time_point t3 = clock::now();
     if (!gr_write(layer.gr, R, s.block_out.data(), s.inject.data(), R, err)) return false;
+    clock::time_point t4 = clock::now();
 
     // post：gr_read(hc_ffn_*) → MoE → gr_write。
     const GrWeights fw{GrTensor{s.f_norm_f32.data(), GrPrecision::kF32},
@@ -208,11 +220,22 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
                        GrTensor{s.f_up_f32.data(), GrPrecision::kF32},
                        GrTensor{s.f_inject_f32.data(), GrPrecision::kF32}};
     if (!gr_read(layer.gr, fw, R, 1e-6f, s.mixed.data(), s.inject.data(), s.gr, err)) return false;
+    clock::time_point t5 = clock::now();
     if (!run_moe_layer(gguf, layer.moe, s.mixed.data(), s.block_out.data(), s.moe, err, nullptr,
                        nullptr, s.offload)) {
         return false;
     }
-    return gr_write(layer.gr, R, s.block_out.data(), s.inject.data(), R, err);
+    clock::time_point t6 = clock::now();
+    const bool ok = gr_write(layer.gr, R, s.block_out.data(), s.inject.data(), R, err);
+    const clock::time_point t7 = clock::now();
+    if (phases != nullptr) {
+        phases->load_ms += ms_between(t0, t1);
+        phases->gr_read_ms += ms_between(t1, t2) + ms_between(t4, t5);
+        phases->attn_ms += ms_between(t2, t3);
+        phases->gr_write_ms += ms_between(t3, t4) + ms_between(t6, t7);
+        phases->moe_ms += ms_between(t5, t6);
+    }
+    return ok;
 }
 
 }  // namespace qinfer::dense
