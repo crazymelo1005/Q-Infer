@@ -115,9 +115,33 @@ void test_gemv_bitwise_same_as_single_thread() {
     CHECK(same == kRows);
 }
 
+// 池子刚建好就提交：工作线程可能还没被调度上 CPU，那时 epoch 已经是 1。它若把「还没做的那个作业」
+// 当成做过了，就会去等下一个作业，而调用方在等它报工——双方各等一个永远不来的事件（实测症状是两个
+// 线程都停在 futex_wait）。这条用例专咬这个：建池子立刻提交、重复多轮（线程起得晚是常态，不是偶发）。
+void test_first_job_submitted_before_the_worker_starts() {
+    for (int round = 0; round < 200; ++round) {
+        qinfer::scheduling::ThreadPool pool(2);
+        const std::uint64_t n = 64;
+        std::vector<std::atomic<int>> hits(static_cast<std::size_t>(n));
+        for (std::size_t i = 0; i < hits.size(); ++i) hits[i].store(0);
+        pool.run_rows(n, /*grain=*/8, [&](std::uint64_t b, std::uint64_t e) {
+            for (std::uint64_t i = b; i < e; ++i) hits[static_cast<std::size_t>(i)].fetch_add(1);
+        });
+        for (std::uint64_t i = 0; i < n; ++i) {
+            if (hits[static_cast<std::size_t>(i)].load() != 1) {
+                std::printf("FAIL 第 %d 轮：行 %llu 被算了 %d 次\n", round, (unsigned long long) i,
+                            hits[static_cast<std::size_t>(i)].load());
+                CHECK(false);
+            }
+        }
+    }
+    std::printf("  刚建池就提交：200 轮 × 64 行，每行恰好一次\n");
+}
+
 }  // namespace
 
 int main() {
+    test_first_job_submitted_before_the_worker_starts();
     test_rows_covered_exactly_once();
     test_gemv_bitwise_same_as_single_thread();
     std::puts("thread_pool: 每行恰好一次，且按行并行与单线程逐位相同");

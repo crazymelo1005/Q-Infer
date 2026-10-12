@@ -26,6 +26,8 @@ public:
     int threads() const { return n_threads_; }
 
     // 把 [0, n) 切成至多 threads() 块（每块不少于 grain 行）跑完再返回；每块调 fn(begin, end)。
+    // 一次提交的代价不只是分派：工作线程若已挂起，还得把它唤醒——实测这一步约 200 µs，而真实路径
+    // 一步有上千次提交、之间夹着几十微秒的取数（见 thread_pool.cpp 与 engine §6）。
     void run_rows(std::uint64_t n, std::uint64_t grain,
                   const std::function<void(std::uint64_t, std::uint64_t)>& fn);
 

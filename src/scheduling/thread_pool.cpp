@@ -1,6 +1,8 @@
 #include "scheduling/thread_pool.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -10,7 +12,16 @@ namespace qinfer::scheduling {
 
 // 一次只跑一个作业的池：没有任务队列，因为调用点很密、每次的活很小，队列的延迟比它省下的更多。
 // 作业放在固定字段里，工作线程靠 epoch 变化醒过来，然后自己不停认领下一块，直到块被认领完。
+//
+// **唤醒要花钱，且随提交之间的间隔变大**：实测（环境2，`measure/thread_pool_bench.cpp` 第 5 节）
+// 十次 640×2560 的 GEMV，背靠背跑净算术 0.52 ms；中间各夹 1 ms 的串行工作后净算术涨到 2.86 ms
+// ——即每次提交多付约 200 µs。真实路径正是一步 48 层 × 30 次提交、之间夹着取数与量化，于是「等着
+// 被唤醒」那部分被算进了 GEMV 的窗口里。故工作线程先**有界自旋**一小段再去睡：间隔落在自旋窗口
+// 内的提交就不用付挂起/唤醒的钱。
 struct ThreadPool::Impl {
+    // 自旋窗口取「提交之间的典型间隔」的量级：太长会在真闲下来时白烧 CPU，太短又回到挂起。
+    static constexpr std::uint64_t kSpinUs = 200;
+
     std::mutex m;
     std::condition_variable cv_job;
     std::condition_variable cv_idle;
@@ -18,26 +29,39 @@ struct ThreadPool::Impl {
     const std::function<void(std::uint64_t, std::uint64_t)>* fn = nullptr;
     std::uint64_t n = 0;
     std::uint64_t chunk = 1;
-    std::uint64_t next = 0;   // 下一个可认领的块起点
-    std::uint64_t epoch = 0;  // 每来一个作业加一
+    std::uint64_t next = 0;               // 下一个可认领的块起点
+    std::atomic<std::uint64_t> epoch{0};  // 每来一个作业加一；自旋时无锁地读它，其余都在 m 下
     std::uint64_t done = 0;   // 这一轮已经收工的参与方数（调用线程 + 醒过来的工作线程）
     std::size_t participants = 1;
     bool stop = false;
     std::vector<std::thread> workers;
 
-    // 一个作业：醒过来 → 不停认领块直到认领完 → 记一次收工。
+    // 一个作业：醒过来（先自旋、后睡）→ 不停认领块直到认领完 → 记一次收工。
     // 判「作业做完」用的是**参与方个数**而不是「还有谁在忙」：工作线程可能醒得晚，用忙闲计数会在
     // 它还没醒的时候就以为做完了（那样调用方会先返回，fn 就成了悬垂指针）。按个数等就没有这个缝。
     void worker_loop() {
+        // `seen` 必须从 0 起，**不是**让它在构造时读当前 epoch：工作线程可能起得晚——第一个作业已经
+        // 提交、epoch 已经是 1，它才被调度上 CPU。那时若把 seen 记成 1，它会把「还没做的那个作业」当成
+        // 做过了，转身去等下一个；而调用方正等着它报工 → 双方各等一个永远不来的事件（实测两个线程都
+        // 停在 futex_wait，tests/test_thread_pool 有一条专咬这个的用例）。
         std::uint64_t seen = 0;
         for (;;) {
             const std::function<void(std::uint64_t, std::uint64_t)>* job = nullptr;
             std::uint64_t total = 0, step = 1;
             {
+                // 有界自旋：提交若落在窗口内，这里就看见了，不进内核。
+                const auto deadline =
+                    std::chrono::steady_clock::now() + std::chrono::microseconds(kSpinUs);
+                while (epoch.load(std::memory_order_acquire) == seen &&
+                       std::chrono::steady_clock::now() < deadline) {
+                    std::this_thread::yield();
+                }
                 std::unique_lock<std::mutex> lk(m);
-                cv_job.wait(lk, [&] { return stop || epoch != seen; });
+                cv_job.wait(lk, [&] {
+                    return stop || epoch.load(std::memory_order_acquire) != seen;
+                });
                 if (stop) return;
-                seen = epoch;
+                seen = epoch.load(std::memory_order_relaxed);
                 job = fn;
                 total = n;
                 step = chunk;
@@ -98,7 +122,7 @@ void ThreadPool::run_rows(std::uint64_t n, std::uint64_t grain,
         impl_->next = 0;
         impl_->done = 0;
         impl_->participants = impl_->workers.size() + 1;  // 工作线程 + 调用线程自己
-        ++impl_->epoch;
+        impl_->epoch.fetch_add(1, std::memory_order_release);
     }
     impl_->cv_job.notify_all();
     // 调用线程自己也认领块——20 个核时它不该站着看。
