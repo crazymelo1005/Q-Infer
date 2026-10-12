@@ -205,6 +205,49 @@ int manual_model_entry(const char* model, int layer) {
     return (finite && state_moves && reproducible) ? 0 : 1;
 }
 
+// 递推状态必须**跨 token 存活**：线性注意力的记忆就在这个状态里，每 token 清零等于这层没有记忆
+// （契约见 gdn_recurrence.hpp 的「状态原地更新」与 gdn_layer.hpp 的「state 与 conv 跨 token 存活」）。
+//
+// 判据要控住卷积状态的干扰（它在两次调用之间本来就在变，会把「状态有没有被保留」这件事盖住）：
+// 同一条输入序列跑两遍，一份在两次调用之间**手工把递推状态清零**、一份不清；若层内部每个 token 都
+// 清零，两份的末态逐位相同；若状态真的跨 token，两份必不同。故「不同」才是对的。
+void test_recurrence_state_survives_across_tokens() {
+    const std::filesystem::path p = write_gguf("qinfer_gdn_state.gguf", gdn_tensors("blk.0."));
+    artifact::GgufFile g;
+    std::string err;
+    CHECK(g.open(p.string(), err));
+    GdnLayer gl;
+    CHECK(build_gdn_layer(g, 0, kN, kHd, kDc, gl, err));
+    const std::vector<float> x = make_x();
+    std::vector<float> out(kN, 0.0f);
+
+    GdnScratch zeroed;
+    CHECK(run_gdn_layer(g, gl, x.data(), out.data(), zeroed, err));
+    zeroed.state.data.assign(zeroed.state.data.size(), 0.0f);  // 手工清零＝「每 token 清零」那条路
+    CHECK(run_gdn_layer(g, gl, x.data(), out.data(), zeroed, err));
+
+    GdnScratch carried;
+    CHECK(run_gdn_layer(g, gl, x.data(), out.data(), carried, err));
+    CHECK(run_gdn_layer(g, gl, x.data(), out.data(), carried, err));  // 状态原样带过去
+
+    int diff = 0;
+    for (std::size_t i = 0; i < zeroed.state.data.size(); ++i) {
+        if (std::bit_cast<std::uint32_t>(zeroed.state.data[i]) !=
+            std::bit_cast<std::uint32_t>(carried.state.data[i])) {
+            ++diff;
+        }
+    }
+    std::printf("  跨 token 的递推状态：手工清零与不清零的末态不同 %d/%zu（该 >0）\n", diff,
+                zeroed.state.data.size());
+    CHECK(diff > 0);
+    // 末态还得是有限值（不是被清零或炸掉）。
+    bool finite = true;
+    for (const float t : carried.state.data) {
+        if (!std::isfinite(t)) finite = false;
+    }
+    CHECK(finite);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -216,7 +259,9 @@ int main(int argc, char** argv) {
         return manual_model_entry(argv[2], layer);
     }
 
-    // 合成：跑通、有限且非零、状态在动、可复现。
+        test_recurrence_state_survives_across_tokens();
+
+// 合成：跑通、有限且非零、状态在动、可复现。
     {
         const std::filesystem::path p = write_gguf("qinfer_gdn_ok.gguf", gdn_tensors("blk.0."));
         artifact::GgufFile g;

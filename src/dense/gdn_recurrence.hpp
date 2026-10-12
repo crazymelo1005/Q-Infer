@@ -37,14 +37,18 @@ struct GdnRecShapes {
 };
 
 // 循环状态：**行主序 (S, h_v, S)，j 最快**。
+//
+// `resize` 必须用「只在需要时初始化」的语义（`std::vector::resize` 同尺寸时是 no-op），**不能**用
+// `assign`：层在每个 token 都会调它，`assign` 会把递推状态每步清零——那样这层就没有跨 token 记忆了
+// （线性注意力的记忆全在这个状态里）。首次调用（或几何变了）才零初始化，正是 `resize` 的行为。
 struct GdnState {
     std::vector<float> data;
     // 递推里的两块暂存（每个 h 私有的一片，故按 h 并行安全）：sk 是收缩结果、d 是写入强度。
     std::vector<float> sk_buf, d_buf;
     void resize(const GdnRecShapes& s) {
-        data.assign(static_cast<std::size_t>(s.S * s.h_v * s.S), 0.0f);
-        sk_buf.assign(static_cast<std::size_t>(s.h_v * s.S), 0.0f);
-        d_buf.assign(static_cast<std::size_t>(s.h_v * s.S), 0.0f);
+        data.resize(static_cast<std::size_t>(s.S * s.h_v * s.S), 0.0f);
+        sk_buf.resize(static_cast<std::size_t>(s.h_v * s.S), 0.0f);
+        d_buf.resize(static_cast<std::size_t>(s.h_v * s.S), 0.0f);
     }
 };
 
