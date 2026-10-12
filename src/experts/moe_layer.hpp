@@ -61,6 +61,9 @@ struct MoeScratch {
     FfnScratch ffn;
     std::vector<std::uint16_t> router_w;      // 路由矩阵（声明为 BF16 时）
     std::vector<float> router_w_f32;          // 路由矩阵（声明为 F32 时，ADR-010）
+    // 上面那两份缓冲是按**层号**缓存的：路由矩阵每层一份且逐 token 恒定，不缓存的话每步每层都要重读
+    // 2.6 MB。记账的是层号，不是「缓冲空不空」（同一份 scratch 跨层复用时后者会拿错层的路由）。
+    int router_layer = -1;
     std::vector<std::uint8_t> gate, up, down;
     std::vector<float> expert_out;
     std::vector<int> ids;
@@ -93,15 +96,19 @@ struct MoeOffload {
     RerouteStats* stats = nullptr;                          // 重派计数（观测用，可为空）
 };
 
-// 一层 MoE 的耗时切分（只作观测，给了才计时）。两半是互斥且穷尽的：`io_ms` 是**取数**（路由矩阵的
-// 读 + 逐专家的字节取数，走缓存时含查找与未命中时的拷入），`ffn_ms` 是**算**（路由计算 + 逐专家前馈
-// + 加权累加 + 共享专家）。
+// 一层 MoE 的耗时切分（只作观测，给了才计时）。四项互斥且穷尽：
+//   io     取数：路由矩阵的读 + 逐专家的字节取数（走缓存时含查找与未命中时的拷入）
+//   route  路由计算：bf16/f32 点积 + softmax + top-k + 再归一
+//   expert 逐专家前馈 + 加权累加（那 3k 次按档 GEMV 都在这里）
+//   shared 共享专家（它常驻显存侧，不在未命中那一批里）
 //
-// 为什么要切这两半：整步相位图里 MoE 是最大的单段，而「它是在读还是在算」决定了下一步该动字节
-// 常驻还是动内核——实测过「读被页缓存吃掉」这种想当然的结论是错的（engine §6）。
+// 为什么要切：整步相位图里 MoE 是最大的单段，而「读 / 路由 / 逐专家 / 共享」四者的修法完全不同
+// （分别是字节常驻、把路由也按行并行、把提交并大、共享专家单独处理），不切就只能猜。
 struct MoePhases {
     double io_ms = 0.0;
-    double ffn_ms = 0.0;
+    double route_ms = 0.0;
+    double expert_ms = 0.0;
+    double shared_ms = 0.0;
 };
 
 // 跑一层：读路由矩阵 → 路由出 top-k → 逐个读该专家的三矩阵并前馈 → 按权重累加 → 有共享专家则再加。

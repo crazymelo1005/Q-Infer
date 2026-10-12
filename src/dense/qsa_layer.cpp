@@ -295,8 +295,12 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
     const auto p_idx = clk();
     s.idx_q_out.assign(static_cast<std::size_t>(layer.idx_q.rows), 0.0f);
     s.idx_k_out.assign(static_cast<std::size_t>(layer.idx_k.rows), 0.0f);
-    kernels::bf16_gemv(s.idx_q_w.data(), layer.idx_q.rows, layer.idx_q.cols, x, s.idx_q_out.data());
-    kernels::bf16_gemv(s.idx_k_w.data(), layer.idx_k.rows, layer.idx_k.cols, x, s.idx_k_out.data());
+    if (!experts::run_bf16_gemv(s.idx_q_w.data(), layer.idx_q.rows, layer.idx_q.cols, x,
+                                s.idx_q_out.data(), err) ||
+        !experts::run_bf16_gemv(s.idx_k_w.data(), layer.idx_k.rows, layer.idx_k.cols, x,
+                                s.idx_k_out.data(), err)) {
+        return false;
+    }
     s.q_idx.assign(static_cast<std::size_t>(layer.idx_n_head * idx_dim), 0.0f);
     if (!qsa_indexer_prep(layer.idx_n_head, idx_dim, layer.n_rot, s.pos, s.idx_q_out.data(),
                           s.idx_q_norm_w.data(), 1e-6f, s.cos_tab, s.sin_tab, s.q_idx.data(), err)) {

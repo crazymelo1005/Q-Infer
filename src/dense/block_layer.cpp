@@ -238,7 +238,9 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
         phases->gr_write_ms += ms_between(t3, t4) + ms_between(t6, t7);
         phases->moe_ms += ms_between(t5, t6);
         phases->moe_io_ms += mp.io_ms;
-        phases->moe_ffn_ms += mp.ffn_ms;
+        phases->moe_route_ms += mp.route_ms;
+        phases->moe_expert_ms += mp.expert_ms;
+        phases->moe_shared_ms += mp.shared_ms;
     }
     return ok;
 }

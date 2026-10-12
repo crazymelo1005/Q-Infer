@@ -53,6 +53,13 @@ bool quantize_input(const MatrixSpec& m, const float* x, FfnScratch& s, std::str
 bool run_gemv(const MatrixSpec& m, const std::uint8_t* w, FfnScratch& s, float* out,
               std::string& err);
 
+// BF16 投影的按行并行入口（与 `run_gemv` 同一个池子、同一条口径：只切行、不切归约维，故与单线程
+// 逐位相同）。三处用它：路由门控、QSA 索引器的两个投影——那份 artifact 里它们是 BF16，不走量化档
+// 的分派表（[S-44]/[S-54]）。512 个专家的点积互相独立，按行并行实测把路由那一段从 26 降到 5 至 6 ms
+// （激活的 bf16 舍入另外提成一步，那是为切行服务的，单线程上并不提速，见 kernels/bf16.hpp）。
+bool run_bf16_gemv(const std::uint16_t* w, std::uint64_t rows, std::uint64_t cols, const float* x,
+                   float* out, std::string& err);
+
 // 单个专家的一次前馈：结果写入 out（长度 hidden，覆盖写）。
 bool expert_ffn(const LayerSpec& spec, const ExpertWeights& w, const float* x, FfnScratch& scratch,
                 float* out, std::string& err);

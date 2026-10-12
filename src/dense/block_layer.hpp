@@ -78,10 +78,12 @@ struct LayerPhases {
     // 池子，其余是手写标量循环——拆开才知道该动哪一段。
     AttnPhases attn;
     double moe_ms = 0.0;
-    // moe_ms 的两半（互斥且穷尽，见 experts/moe_layer.hpp 的 MoePhases）：io 是取数（路由矩阵 + 各专家
-    // 字节），ffn 是算（路由 + 逐专家前馈 + 累加 + 共享专家）。它回答「MoE 那一段是在读还是在算」。
+    // moe_ms 的四项（互斥且穷尽，见 experts/moe_layer.hpp 的 MoePhases）：取数 / 路由 / 逐专家 / 共享。
+    // 四者的修法完全不同（字节常驻、把路由也按行并行、把提交并大、共享专家单独处理），故要分开量。
     double moe_io_ms = 0.0;
-    double moe_ffn_ms = 0.0;
+    double moe_route_ms = 0.0;
+    double moe_expert_ms = 0.0;
+    double moe_shared_ms = 0.0;
     double gr_write_ms = 0.0;
 };
 

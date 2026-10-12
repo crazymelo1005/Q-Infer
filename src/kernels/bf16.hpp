@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 namespace qinfer::kernels {
 
@@ -33,16 +34,33 @@ inline std::uint16_t f32_to_bf16_bits(float s) {
 // 两处口径，都有实测来源：**激活也要按 bf16 舍入**（权重是 bf16 时 ggml 会把激活转到权重的 vec_dot_type；
 // 引擎自注此处的路由投影若改用 fp16 会引入 8.100e-03 的误差并翻掉选择，见 S-44）；累加在 float 上。
 // 三处用同一份：路由门控（S-44）、以及 QSA 索引器的两个投影（那份 artifact 里它们是 BF16，见 S-54）。
-inline void bf16_gemv(const std::uint16_t* w_bf16, std::uint64_t rows, std::uint64_t cols,
-                      const float* x, float* out) {
+//
+// 分成三步是为了**按行并行**（见 `experts/ffn` 的 `run_bf16_gemv`）：并行要切行，而激活的舍入与行数
+// 无关，切行时每块各舍一遍太浪费，故把它提成单独一步、一次做好。注意：**这一步本身不带来提速**——
+// 单线程实测「提出去」与「逐行各算一遍」没有差别（27 对 28 ms），因为编译器本来就会把那个纯粹计算
+// 提到循环外；拆开只为并行服务，且与原来的算术**逐位相同**（同一个舍入值、同一份乘加顺序）。
+inline void bf16_round_row(const float* x, std::uint64_t cols, std::uint16_t* dst) {
+    for (std::uint64_t i = 0; i < cols; ++i) dst[i] = f32_to_bf16_bits(x[i]);
+}
+
+// 用已经舍好的一行激活做若干行的点积（`rows` 行、从 `w_bf16` 起）。
+inline void bf16_gemv_rows(const std::uint16_t* w_bf16, std::uint64_t rows, std::uint64_t cols,
+                           const std::uint16_t* x_bf16, float* out) {
     for (std::uint64_t o = 0; o < rows; ++o) {
         const std::uint16_t* row = w_bf16 + o * cols;
         float acc = 0.0f;
         for (std::uint64_t i = 0; i < cols; ++i) {
-            acc += bf16_bits_to_f32(row[i]) * bf16_bits_to_f32(f32_to_bf16_bits(x[i]));
+            acc += bf16_bits_to_f32(row[i]) * bf16_bits_to_f32(x_bf16[i]);
         }
         out[o] = acc;
     }
+}
+
+inline void bf16_gemv(const std::uint16_t* w_bf16, std::uint64_t rows, std::uint64_t cols,
+                      const float* x, float* out) {
+    std::vector<std::uint16_t> xb(static_cast<std::size_t>(cols));
+    bf16_round_row(x, cols, xb.data());
+    bf16_gemv_rows(w_bf16, rows, cols, xb.data(), out);
 }
 
 }  // namespace qinfer::kernels

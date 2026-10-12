@@ -107,7 +107,9 @@ LayerPhases sum_phases(const std::vector<LayerPhases>& phases) {
         t.attn.attend_ms += p.attn.attend_ms;
         t.moe_ms += p.moe_ms;
         t.moe_io_ms += p.moe_io_ms;
-        t.moe_ffn_ms += p.moe_ffn_ms;
+        t.moe_route_ms += p.moe_route_ms;
+        t.moe_expert_ms += p.moe_expert_ms;
+        t.moe_shared_ms += p.moe_shared_ms;
         t.gr_write_ms += p.gr_write_ms;
     }
     return t;

@@ -633,17 +633,18 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
         std::printf("  主机单线程相位（%d 层、最后一步）：load %.0f / gr_read %.0f / attn %.0f / "
                     "moe %.0f / gr_write %.0f ms\n",
                     cfg.n_layers, ph.load_ms, ph.gr_read_ms, ph.attn_ms, ph.moe_ms, ph.gr_write_ms);
-        std::printf("  MoE 的两半：取数 %.0f ms、算 %.0f ms\n", ph.moe_io_ms, ph.moe_ffn_ms);
-        // MoE 的「算」按层摊开：均匀说明是某个系统性的开销，集中在几层则多半是那几层的档。
+        std::printf("  MoE 的四项：取数 %.0f / 路由 %.0f / 逐专家 %.0f / 共享 %.0f ms\n", ph.moe_io_ms,
+                    ph.moe_route_ms, ph.moe_expert_ms, ph.moe_shared_ms);
+        // MoE 的「逐专家」按层摊开：均匀说明是某个系统性的开销，集中在几层则多半是那几层的档。
         std::vector<std::pair<double, int>> slow_moe;
         for (int l = 0; l < cfg.n_layers; ++l) {
-            slow_moe.push_back({s_ref.phases[static_cast<std::size_t>(l)].moe_ffn_ms, l});
+            slow_moe.push_back({s_ref.phases[static_cast<std::size_t>(l)].moe_expert_ms, l});
         }
         std::sort(slow_moe.begin(), slow_moe.end(),
                   [](const auto& x, const auto& y) { return x.first > y.first; });
         double moe_sum = 0.0;
         for (const auto& p : slow_moe) moe_sum += p.first;
-        std::printf("  MoE 的算：均 %.2f ms/层；最慢的 6 层：", moe_sum / cfg.n_layers);
+        std::printf("  MoE 的逐专家：均 %.2f ms/层；最慢的 6 层：", moe_sum / cfg.n_layers);
         for (std::size_t i = 0; i < slow_moe.size() && i < 6; ++i) {
             const int l = slow_moe[i].second;
             std::printf(" 层 %d(%s gate %s %s) %.2f", l,
@@ -720,8 +721,8 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
                         "moe %.0f / gr_write %.0f ms\n",
                         threads, cfg.n_layers, ph.load_ms, ph.gr_read_ms, ph.attn_ms, ph.moe_ms,
                         ph.gr_write_ms);
-            std::printf("  MoE 的两半（%d 线程）：取数 %.0f ms、算 %.0f ms\n", threads, ph.moe_io_ms,
-                        ph.moe_ffn_ms);
+            std::printf("  MoE 的四项（%d 线程）：取数 %.0f / 路由 %.0f / 逐专家 %.0f / 共享 %.0f ms\n",
+                        threads, ph.moe_io_ms, ph.moe_route_ms, ph.moe_expert_ms, ph.moe_shared_ms);
             std::printf("  注意力的五段（%d 线程）：投影 %.0f / 前段 %.0f / 递推 %.0f / 收尾 %.0f / "
                         "KV %.0f / 索引器 %.0f / attend+门 %.0f ms\n",
                         threads, ph.attn.proj_ms, ph.attn.prep_ms, ph.attn.rec_ms, ph.attn.close_ms,

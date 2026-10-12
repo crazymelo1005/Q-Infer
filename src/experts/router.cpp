@@ -1,5 +1,6 @@
 #include "experts/router.hpp"
 
+#include "experts/ffn.hpp"  // run_bf16_gemv（激活舍一遍 + 按行并行）
 #include "kernels/bf16.hpp"
 
 #include <algorithm>
@@ -34,10 +35,11 @@ bool read_router_spec(const artifact::GgufFile& gguf, int layer, RouterSpec& spe
 
 void router_logits(const std::uint16_t* w_bf16, int n_expert, int hidden, const float* x,
                    float* logits) {
-    // 与 QSA 索引器那两个 BF16 投影同一份算术（权重与激活都按 bf16 读、float 累加），
-    // 故直接走共用那一份，免得两处各写一遍口径。
-    kernels::bf16_gemv(w_bf16, static_cast<std::uint64_t>(n_expert),
-                       static_cast<std::uint64_t>(hidden), x, logits);
+    // 与 QSA 索引器那两个 BF16 投影同一份算术（权重与激活都按 bf16 读、float 累加），故走共用的
+    // 那个入口：激活舍一遍 + 按行并行（512 个专家的点积互相独立，只切行不动归约维）。
+    std::string err;
+    run_bf16_gemv(w_bf16, static_cast<std::uint64_t>(n_expert), static_cast<std::uint64_t>(hidden),
+                  x, logits, err);
 }
 
 // 权重与激活都不舍 bf16（F32×F32），累加在 double 上——与 bf16 那条的差别只在这一点（ADR-010）。

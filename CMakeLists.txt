@@ -208,7 +208,7 @@ add_executable(test_layer_dispatch tests/test_layer_dispatch.cpp)
 target_link_libraries(test_layer_dispatch PRIVATE qinfer_experts)
 
 add_executable(test_bf16_gemv tests/test_bf16_gemv.cpp)
-target_link_libraries(test_bf16_gemv PRIVATE qinfer_kernels)
+target_link_libraries(test_bf16_gemv PRIVATE qinfer_experts qinfer_scheduling)
 
 add_executable(test_model_head tests/test_model_head.cpp)
 target_link_libraries(test_model_head PRIVATE qinfer_dense qinfer_artifact)

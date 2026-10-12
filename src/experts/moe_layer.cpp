@@ -118,21 +118,27 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
         return std::chrono::duration<double, std::milli>(b - a).count();
     };
     const clock::time_point t_io0 = clk();
-    double io_ms = 0.0, ffn_ms = 0.0;
+    double io_ms = 0.0, route_ms = 0.0, expert_ms = 0.0, shared_ms = 0.0;
     const int k = layer.top_k;
     const std::size_t hidden = static_cast<std::size_t>(layer.hidden);
 
     // 路由矩阵：档随张力声明走（ADR-010）——bf16 每元素 2 字节、F32 每元素 4 字节，两条各读各的。
     const bool router_bf16 = layer.router_spec.type == 30;
     const std::size_t router_elems = hidden * static_cast<std::size_t>(layer.n_expert);
-    s.router_w.resize(router_elems);
-    s.router_w_f32.assign(router_elems, 0.0f);
-    std::uint8_t* router_dst = router_bf16
-                                   ? reinterpret_cast<std::uint8_t*>(s.router_w.data())
-                                   : reinterpret_cast<std::uint8_t*>(s.router_w_f32.data());
-    if (!gguf.read_at(layer.router->offset, router_dst, router_elems * (router_bf16 ? 2u : 4u))) {
-        err = "读路由矩阵失败";
-        return false;
+    // 路由矩阵每层一份、且逐 token 恒定，故按层缓存（与稠密权重同一个毛病、同一种修法）：不缓存的话
+    // 每步每层都要从文件重读 2.6 MB（48 层合 126 MB/步，实测约占 MoE 取数那一项的两成）。
+    if (s.router_layer != layer.layer) {
+        s.router_w.resize(router_elems);
+        s.router_w_f32.assign(router_elems, 0.0f);
+        std::uint8_t* router_dst =
+            router_bf16 ? reinterpret_cast<std::uint8_t*>(s.router_w.data())
+                        : reinterpret_cast<std::uint8_t*>(s.router_w_f32.data());
+        if (!gguf.read_at(layer.router->offset, router_dst,
+                          router_elems * (router_bf16 ? 2u : 4u))) {
+            err = "读路由矩阵失败";
+            return false;
+        }
+        s.router_layer = layer.layer;
     }
     s.ids.resize(static_cast<std::size_t>(k));
     s.weights.resize(static_cast<std::size_t>(k));
@@ -146,7 +152,7 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
                                 static_cast<int>(hidden), k, x, s.router, s.ids.data(),
                                 s.weights.data(), err);
     if (!routed) return false;
-    ffn_ms += ms_between(t_route0, clk());  // 算：路由（bf16/f32 点积 + softmax + top-k + 再归一）
+    route_ms += ms_between(t_route0, clk());  // 路由（bf16/f32 点积 + softmax + top-k + 再归一）
     if (ids_out != nullptr) {
         for (int i = 0; i < k; ++i) ids_out[i] = s.ids[static_cast<std::size_t>(i)];
     }
@@ -195,12 +201,16 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
                                   s.weights.data(), k, x, out, *offload->scratch, rs, err)) {
             return false;
         }
-        ffn_ms += ms_between(t_off0, clk());
+        expert_ms += ms_between(t_off0, clk());  // 交出去的那批（含批量分派与汇合）
+        const clock::time_point t_sh0 = clk();
+        const bool sh_ok = add_shared_expert(gguf, layer, x, out, s, err);
         if (phases != nullptr) {
             phases->io_ms += io_ms;
-            phases->ffn_ms += ffn_ms;
+            phases->route_ms += route_ms;
+            phases->expert_ms += expert_ms;
+            phases->shared_ms += ms_between(t_sh0, clk());
         }
-        return add_shared_expert(gguf, layer, x, out, s, err);
+        return sh_ok;
     }
 
     for (int t = 0; t < k; ++t) {
@@ -230,16 +240,17 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
         if (!expert_ffn(layer.spec, w, x, s.ffn, s.expert_out.data(), err)) return false;
         const float wt = s.weights[i];
         for (std::size_t j = 0; j < hidden; ++j) out[j] += wt * s.expert_out[j];
-        ffn_ms += ms_between(t_ffn0, clk());
+        expert_ms += ms_between(t_ffn0, clk());
     }
 
-    if (phases != nullptr) {
-        phases->io_ms += io_ms;
-        phases->ffn_ms += ffn_ms;
-    }
     const clock::time_point t_shared0 = clk();
     const bool shared_ok = add_shared_expert(gguf, layer, x, out, s, err);
-    if (phases != nullptr) phases->ffn_ms += ms_between(t_shared0, clk());
+    if (phases != nullptr) {
+        phases->io_ms += io_ms;
+        phases->route_ms += route_ms;
+        phases->expert_ms += expert_ms;
+        phases->shared_ms += ms_between(t_shared0, clk());
+    }
     return shared_ok;
 }
 

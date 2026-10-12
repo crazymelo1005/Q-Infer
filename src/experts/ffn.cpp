@@ -135,6 +135,27 @@ bool run_gemv(const MatrixSpec& m, const std::uint8_t* w, FfnScratch& s, float* 
 
 float silu(float x) { return x / (1.0f + std::exp(-x)); }
 
+bool run_bf16_gemv(const std::uint16_t* w, std::uint64_t rows, std::uint64_t cols, const float* x,
+                   float* out, std::string& err) {
+    if (w == nullptr || x == nullptr || out == nullptr) {
+        err = "bf16 投影的参数为空";
+        return false;
+    }
+    // 激活舍一遍就够（与行数无关，为切行服务；单线程上并不比逐行各算一遍快，编译器本来就提），
+    // 再按行并行。两处都不动任何元素的归约顺序 → 与单线程逐位相同。
+    std::vector<std::uint16_t> xb(static_cast<std::size_t>(cols));
+    kernels::bf16_round_row(x, cols, xb.data());
+    scheduling::ThreadPool* p = scheduling::pool();
+    if (p == nullptr || rows <= 1) {
+        kernels::bf16_gemv_rows(w, rows, cols, xb.data(), out);
+        return true;
+    }
+    p->run_rows(rows, /*grain=*/16, [&](std::uint64_t b, std::uint64_t e) {
+        kernels::bf16_gemv_rows(w + b * cols, e - b, cols, xb.data(), out + b);
+    });
+    return true;
+}
+
 bool expert_ffn(const LayerSpec& spec, const ExpertWeights& w, const float* x, FfnScratch& scratch,
                 float* out, std::string& err) {
     if (!spec.usable()) {
