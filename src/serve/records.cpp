@@ -30,7 +30,6 @@ std::string Records::next_id() {
 
 std::string Records::begin(const RequestBegin& b) {
     RequestRecord r;
-    r.id = next_id();
     r.path = b.path;
     r.model = b.model;
     r.stream = b.stream;
@@ -39,10 +38,14 @@ std::string Records::begin(const RequestBegin& b) {
     r.input = b.input;
     truncate_inplace(r.input, r.input_truncated);
     r.clock_ = steady_s();
-    const std::string id = r.id;   // 先留 id：move 进环后 r 已被搬空
-    std::lock_guard<std::mutex> lk(mu_);
-    ring_.push_back(std::move(r));
-    if (ring_.size() > kCap) ring_.erase(ring_.begin());
+    std::string id;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        id = next_id();        // rng_ 是共享状态，id 生成必须在锁内
+        r.id = id;
+        ring_.push_back(std::move(r));
+        if (ring_.size() > kCap) ring_.erase(ring_.begin());
+    }
     return id;
 }
 
