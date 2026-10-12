@@ -18,6 +18,7 @@
 #include "kernels/fp16.hpp"
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -329,9 +330,98 @@ dense::StepConfig two_layer_config() {
     return cfg;
 }
 
+// 真权重手工入口（环境2 线下跑，CI 不跑）：`--model <模型分片> --table <PLE 分片2> --kv-slots N`。
+// 基座用 FacadeConfig 缺省几何（48 层那组）open；generate 跑 {1,2,3,4} 贪心、max_tokens 8。
+// GenResult 不暴露 logits，「logits 有限」转成可观测口径：生成成功、n_gen == 8、文本非空。
+// 给了 ple_table：open 须成功（真表上 PLE 登记存在），配与不配同一条 generate 比——step_loop 那条
+// 的 logits 相对偏离 > 1e-3 判据，在门面口落在「生成序列出现分歧」（logits 不外露，比的是贪心产物）。
+// kv_slots > 0：窗口那台与不挂那台同配置逐 token 一致，且窗口侧有驱逐与未命中。
+int manual_model_entry(const char* model, const char* ple_table, std::uint64_t kv_slots) {
+    FacadeConfig cfg;
+    cfg.model_path = model;
+    Engine eng;
+    std::string err;
+    CHECK(Engine::open(cfg, eng, err));
+    GenOptions g;
+    g.temperature = 0.0f;
+    g.seed = 7;
+    g.max_tokens = 8;
+    GenResult base;
+    CHECK(eng.generate({1, 2, 3, 4}, g, nullptr, base, err));
+    CHECK(base.n_gen == 8);
+    CHECK(!base.text.empty());
+    std::printf("门面基座：%s（词表 %zu）；{1,2,3,4} 贪心 8 token：text %zu 字节\n",
+                eng.model_name().c_str(), eng.tokenizer().vocab_size(), base.text.size());
+    if (ple_table == nullptr) return 0;
+
+    // PLE 那台：真表上登记存在则 open 须成功；同一条 generate 与基座比。
+    FacadeConfig cp = cfg;
+    cp.ple_table = ple_table;
+    Engine ep;
+    std::string errp;
+    CHECK(Engine::open(cp, ep, errp));
+    GenResult ple;
+    CHECK(ep.generate({1, 2, 3, 4}, g, nullptr, ple, err));
+    CHECK(ple.n_gen == 8);
+    CHECK(!ple.text.empty());
+    std::size_t same = 0;
+    while (same < ple.tokens.size() && same < base.tokens.size() &&
+           ple.tokens[same] == base.tokens[same]) {
+        ++same;
+    }
+    std::printf("  PLE 开/关（同一条 {1,2,3,4} 贪心）：前 %zu 位一致，随后分歧（对应 logits 相对偏离）\n",
+                same);
+    CHECK(same < ple.tokens.size());
+    if (kv_slots <= 0) return 0;
+
+    // KV 窗口那台 vs 不挂那台：与合成夹具同一套配方——idx_top_k 取 8 让选择稀疏（真模型的稀疏阈值在
+    // 主机参考路径上跑不到，见 step_loop 真权重入口的说明），两条路同一份配置；生成放长把写页顶过配额，
+    // 驱逐才有意义。页数账：68 个 cell（4 + 64）→ ceil(68/4) = 17 页；单步钉住 ≤ 1 + 11 个聚集页 =
+    // 12 页 → 配额给到 [12, 16] 必有驱逐且永不拒绝（实际值由运行一方按 n_gen 落定）。
+    FacadeConfig ck = cfg;
+    ck.idx_top_k = 8;
+    Engine kp;
+    CHECK(Engine::open(ck, kp, err));
+    FacadeConfig cw = ck;
+    cw.kv_slots = kv_slots;
+    Engine kw;
+    std::string errw;
+    CHECK(Engine::open(cw, kw, errw));
+    GenOptions gk = g;
+    gk.max_tokens = 64;
+    GenResult rp, rw;
+    CHECK(kp.generate({1, 2, 3, 4}, gk, nullptr, rp, err));
+    CHECK(kw.generate({1, 2, 3, 4}, gk, nullptr, rw, errw));
+    CHECK(rp.tokens == rw.tokens);
+    CHECK(rp.text == rw.text);
+    CHECK(kw.kv_evictions() > 0);
+    CHECK(kw.kv_misses() > 0);
+    std::printf("  KV 窗口：%llu token 生成与不挂窗口逐 token 一致；驱逐 %llu、未命中 %llu、搬入 %llu 字节\n",
+                (unsigned long long) rw.n_gen, (unsigned long long) kw.kv_evictions(),
+                (unsigned long long) kw.kv_misses(), (unsigned long long) kw.kv_bytes_moved());
+    return 0;
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    // 真权重手工入口：`--model <模型分片> --table <PLE 分片2> --kv-slots N`（环境2 线下跑，CI 不带参数）。
+    if (argc >= 3 && std::string(argv[1]) == "--model") {
+        const char* ple_table = nullptr;
+        std::uint64_t kv_slots = 0;
+        for (int i = 3; i < argc; ++i) {
+            const std::string a = argv[i];
+            if (a == "--table" && i + 1 < argc) {
+                ple_table = argv[++i];
+            } else if (a == "--kv-slots" && i + 1 < argc) {
+                kv_slots = static_cast<std::uint64_t>(std::atoi(argv[++i]));
+            } else {
+                std::printf("不认识的参数：%s\n", a.c_str());
+                return 2;
+            }
+        }
+        return manual_model_entry(argv[2], ple_table, kv_slots);
+    }
     const std::filesystem::path p = write_gguf("qinfer_facade.gguf", model_tensors(), serve_metas());
     // 打不开的文件 → 明确错误。
     {
