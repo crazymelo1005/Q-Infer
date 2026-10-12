@@ -622,6 +622,37 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
         std::printf("  主机单线程相位（%d 层、最后一步）：load %.0f / gr_read %.0f / attn %.0f / "
                     "moe %.0f / gr_write %.0f ms\n",
                     cfg.n_layers, ph.load_ms, ph.gr_read_ms, ph.attn_ms, ph.moe_ms, ph.gr_write_ms);
+        // 注意力按层型分开看：两类层的结构完全不同，混在一起的平均值没用。
+        double gdn = 0.0, qsa = 0.0;
+        int n_gdn = 0, n_qsa = 0;
+        std::vector<std::pair<double, int>> slow;
+        for (int l = 0; l < cfg.n_layers; ++l) {
+            const double a = s_ref.phases[static_cast<std::size_t>(l)].attn_ms;
+            if (m.map[static_cast<std::size_t>(l)].kind == qinfer::dense::LayerKind::kGdn) {
+                gdn += a;
+                ++n_gdn;
+            } else {
+                qsa += a;
+                ++n_qsa;
+            }
+            slow.push_back({a, l});
+        }
+        std::sort(slow.begin(), slow.end(), [](const auto& x, const auto& y) {
+            return x.first > y.first;
+        });
+        std::printf("  注意力按层型：GDN %d 层合计 %.0f ms（均 %.1f）；QSA %d 层合计 %.0f ms（均 %.1f）\n",
+                    n_gdn, gdn, n_gdn > 0 ? gdn / n_gdn : 0.0, n_qsa, qsa,
+                    n_qsa > 0 ? qsa / n_qsa : 0.0);
+        std::printf("  最慢的 6 层：");
+        for (std::size_t i = 0; i < slow.size() && i < 6; ++i) {
+            const int l = slow[i].second;
+            std::printf(" 层 %d(%s) %.1f", l,
+                        m.map[static_cast<std::size_t>(l)].kind == qinfer::dense::LayerKind::kGdn
+                            ? "GDN"
+                            : "QSA",
+                        slow[i].first);
+        }
+        std::printf("\n");
     }
 
     // 若给了 --threads：主机路径再跑一遍（换一份 scratch、开线程池），比用时与逐位结果。
