@@ -133,6 +133,8 @@ bool ExpertFfnDevice::free_all(std::string& err) {
     rel(d_x_, "激活");
     rel(d_gate_, "gate 结果");
     rel(d_up_, "up 结果");
+    rel(d_gate_w_, "gate 收集区");
+    rel(d_up_w_, "up 收集区");
     rel(d_h_, "h 的量化块");
     rel(d_out_, "输出");
     w_bytes_ = 0;
@@ -189,6 +191,7 @@ bool ExpertFfnDevice::init(int device, const LayerSpec& spec, int slots, std::st
     h_blocks_bytes_ = (spec.down.cols / kernels::kQ80BlockElems) * kernels::kQ80BlockBytes;
 
     const std::uint64_t ffn_bytes = spec.gate.rows * sizeof(float);
+    const std::uint64_t ffn_all_bytes = static_cast<std::uint64_t>(slots) * ffn_bytes;
     const std::uint64_t out_bytes = static_cast<std::uint64_t>(slots) * spec.down.rows * sizeof(float);
 
     if (!cuda_ok(cudaMalloc(&d_w_, static_cast<std::size_t>(w_bytes_)), "分配权重", err)) {
@@ -196,8 +199,12 @@ bool ExpertFfnDevice::init(int device, const LayerSpec& spec, int slots, std::st
         return false;
     }
     if (!cuda_ok(cudaMalloc(&d_x_, static_cast<std::size_t>(x_blocks_bytes_)), "分配激活", err) ||
-        !cuda_ok(cudaMalloc(&d_gate_, static_cast<std::size_t>(ffn_bytes)), "分配 gate 结果", err) ||
-        !cuda_ok(cudaMalloc(&d_up_, static_cast<std::size_t>(ffn_bytes)), "分配 up 结果", err) ||
+        !cuda_ok(cudaMalloc(&d_gate_, static_cast<std::size_t>(ffn_all_bytes)), "分配 gate 结果", err) ||
+        !cuda_ok(cudaMalloc(&d_up_, static_cast<std::size_t>(ffn_all_bytes)), "分配 up 结果", err) ||
+        !cuda_ok(cudaMalloc(&d_gate_w_, static_cast<std::size_t>(gate_bytes_ * slots)),
+                 "分配 gate 收集区", err) ||
+        !cuda_ok(cudaMalloc(&d_up_w_, static_cast<std::size_t>(up_bytes_ * slots)),
+                 "分配 up 收集区", err) ||
         !cuda_ok(cudaMalloc(&d_h_, static_cast<std::size_t>(h_blocks_bytes_)), "分配 h 的块", err) ||
         !cuda_ok(cudaMalloc(&d_out_, static_cast<std::size_t>(out_bytes)), "分配输出", err)) {
         free_all(err);
@@ -274,20 +281,47 @@ bool ExpertFfnDevice::run(const int* slots, int n, const float* x, float* out, s
     const std::uint64_t hidden = spec_.down.rows;
     const int h_blocks = static_cast<int>(spec_.down.cols / kernels::kQ80BlockElems);
     for (int e = 0; e < n; ++e) {
-        const int slot = slots[e];
-        if (slot < 0 || slot >= slots_) {
+        if (slots[e] < 0 || slots[e] >= slots_) {
             err = "槽位号超出范围";
             return false;
         }
+    }
+    // 1. 把本批用到的专家的 gate/up 从常驻区**收集**成连续的两段（每个专家一段、按 e 递增排好，
+    //    与后面结果的布局 [e·ffn, (e+1)·ffn) 一致）。D2D 拷贝，几十 KB 级。
+    for (int e = 0; e < n; ++e) {
         const std::uint8_t* base =
-            static_cast<const std::uint8_t*>(d_w_) + static_cast<std::size_t>(slot) * per_expert_;
-        if (!run_matrix_dev(spec_.gate, base, d_x_, d_gate_, err)) return false;
-        if (!run_matrix_dev(spec_.up, base + gate_bytes_, d_x_, d_up_, err)) return false;
+            static_cast<const std::uint8_t*>(d_w_) + static_cast<std::size_t>(slots[e]) * per_expert_;
+        if (!cuda_ok(cudaMemcpyAsync(static_cast<std::uint8_t*>(d_gate_w_) +
+                                         static_cast<std::size_t>(e) * gate_bytes_,
+                                     base, static_cast<std::size_t>(gate_bytes_),
+                                     cudaMemcpyDeviceToDevice),
+                     "收集 gate 权重", err) ||
+            !cuda_ok(cudaMemcpyAsync(
+                         static_cast<std::uint8_t*>(d_up_w_) + static_cast<std::size_t>(e) * up_bytes_,
+                         base + gate_bytes_, static_cast<std::size_t>(up_bytes_),
+                         cudaMemcpyDeviceToDevice),
+                     "收集 up 权重", err)) {
+            return false;
+        }
+    }
+    // 2. 对整段各启动**一次**（行数 ×n → 网格 ×n，激活是共用的那份）。
+    MatrixSpec gate_all = spec_.gate;
+    gate_all.rows = spec_.gate.rows * static_cast<std::uint64_t>(n);
+    MatrixSpec up_all = spec_.up;
+    up_all.rows = spec_.up.rows * static_cast<std::uint64_t>(n);
+    if (!run_matrix_dev(gate_all, d_gate_w_, d_x_, d_gate_, err)) return false;
+    if (!run_matrix_dev(up_all, d_up_w_, d_x_, d_up_, err)) return false;
+
+    for (int e = 0; e < n; ++e) {
+        const std::uint8_t* base =
+            static_cast<const std::uint8_t*>(d_w_) + static_cast<std::size_t>(slots[e]) * per_expert_;
+        const std::size_t ffn = static_cast<std::size_t>(spec_.gate.rows);
+        const float* d_gate_e = static_cast<const float*>(d_gate_) + static_cast<std::size_t>(e) * ffn;
+        const float* d_up_e = static_cast<const float*>(d_up_) + static_cast<std::size_t>(e) * ffn;
 
         const int threads = 128;
         const int blocks = (h_blocks + threads - 1) / threads;
-        swiglu_quant_q8_0_kernel<<<blocks, threads>>>(static_cast<const float*>(d_gate_),
-                                                      static_cast<const float*>(d_up_),
+        swiglu_quant_q8_0_kernel<<<blocks, threads>>>(d_gate_e, d_up_e,
                                                       static_cast<std::uint8_t*>(d_h_), h_blocks);
         if (!cuda_ok(cudaGetLastError(), "swiglu 量化内核启动", err)) return false;
 

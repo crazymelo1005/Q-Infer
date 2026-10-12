@@ -60,8 +60,14 @@ private:
     std::uint64_t h_blocks_bytes_ = 0;   // h 的 Q8_0 块（down 用）
     void* d_w_ = nullptr;                // slots × per_expert_
     void* d_x_ = nullptr;                // 激活块（主机量化后搬上来）
-    void* d_gate_ = nullptr;             // ffn 个 float
-    void* d_up_ = nullptr;               // ffn 个 float
+    // 按批收集的权重（gate/up 各一块，slots × 各自字节数）：一次提交先把本批用到的专家从常驻区
+    // D2D 拷成连续的一段，再对整段**一次**启动。为什么：一个专家只有 ffn 行（真模型 640 行 = 5 个
+    // 128 线程的块），网格太小、36 个 SM 大半空着；并成一次启动后网格 ×n。down 的激活是**各专家
+    // 自己的 h**，共用不了，故那一路仍逐专家（见 engine §6）。
+    void* d_gate_w_ = nullptr;
+    void* d_up_w_ = nullptr;
+    void* d_gate_ = nullptr;             // slots × ffn 个 float
+    void* d_up_ = nullptr;               // slots × ffn 个 float
     void* d_h_ = nullptr;                // down 的 Q8_0 块
     void* d_out_ = nullptr;              // slots × hidden 个 float
     FfnScratch scratch_;                 // 主机侧：复用主机的量化器
