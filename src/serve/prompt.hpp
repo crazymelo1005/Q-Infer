@@ -1,7 +1,17 @@
 // chat 模板渲染器：吃 GGUF 的 tokenizer.chat_template 原文，渲染消息列表。
-// 只支持主案例模板实际用到的结构：字符串字面量、变量替换、+ 拼接、下标访问（m['role']）、
-// if / elif / else / set / for；其余结构（macro、call、过滤器等）明确报错——静默错译等于在算另一个
-// 提示词。`{%-` / `-%}` 连字符修饰的空白削减按 Jinja 语义：语句标签贴边时吃掉相邻的一行空白。
+// 按 Jinja2 语义执行真实 text-only 模板（主案例是 Qwen3.8-Flash 的 170 行模板）：
+//   - 语句：if/elif/else/endif、for/endfor（附 loop.index0/first/last/previtem/nextitem）、
+//     set、macro/endmacro 及宏调用（参数默认值、位置实参）；
+//   - 表达式：字面量、变量、属性取用（message.reasoning_content → undefined 级联）、
+//     下标与负步长整表反转（messages[::-1]）、+ - ~、比较与 in/not in、and/or、三元、
+//     is 测试（defined/undefined/string/none/true/false/iterable/mapping/number/sequence）、
+//     过滤器（trim/default/length/safe/string）、namespace(...)、raise_exception(...)；
+//   - 空白：`{%-`/`{{-` 吃掉前一文本段尾部空白，`-%}`/`-}}` 吃掉后一段前导空白，
+//     与 Jinja 默认 keep_trailing_newline=False（模板末尾一个换行不输出）一致。
+// 未定义语义：serve 侧只注入 role/content，其余变量（tools/vision/reasoning 等）在渲染时
+// 均为 undefined——if 条件为假、length 为 0、属性访问继续级联为 undefined。
+// 不认识的过滤器、未实装的运行时语义（tojson/items）、raise_exception、未知变量落入输出
+// 位置 → 明确报错（err 带模板位置）——静默错译等于在算另一个提示词。
 #pragma once
 
 #include <string>
