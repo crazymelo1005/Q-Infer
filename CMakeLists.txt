@@ -144,6 +144,11 @@ target_link_libraries(test_prompt PRIVATE qinfer_serve)
 add_executable(test_facade tests/test_facade.cpp)
 target_link_libraries(test_facade PRIVATE qinfer_serve)
 
+# 集成测试的合成 GGUF 发生器：确定性写出 qinfer-serve-fixture.gguf（T9 起集成脚本调用）。
+# 只是数据源，不进 ctest；确定性在集成侧用两次 --out + cmp 核对。
+add_executable(serve_fixture_gen tests/serve_fixture_gen.cpp)
+target_link_libraries(serve_fixture_gen PRIVATE qinfer_dense qinfer_artifact)
+
 add_executable(test_json tests/test_json.cpp)
 target_link_libraries(test_json PRIVATE qinfer_serve)
 
