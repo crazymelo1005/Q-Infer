@@ -1,6 +1,7 @@
 #include "experts/moe_layer.hpp"
 
 #include <algorithm>
+#include <chrono>
 
 #include "experts/layer_dispatch.hpp"
 
@@ -108,7 +109,16 @@ bool build_moe_layer(const artifact::GgufFile& gguf, int layer, int top_k, MoeLa
 
 bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const float* x, float* out,
                    MoeScratch& s, std::string& err, int* ids_out, float* weights_out,
-                   const MoeOffload* offload) {
+                   const MoeOffload* offload, MoePhases* phases) {
+    // 两半互斥且穷尽：io 是取数（路由矩阵 + 各专家字节）、ffn 是算（路由 + 前馈 + 累加 + 共享专家）。
+    // 时间戳无条件取（一层几十处、每处几十纳秒），不分叉——分叉本身会把这条路径读成两套。
+    using clock = std::chrono::steady_clock;
+    const auto clk = [] { return clock::now(); };
+    const auto ms_between = [](clock::time_point a, clock::time_point b) {
+        return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    const clock::time_point t_io0 = clk();
+    double io_ms = 0.0, ffn_ms = 0.0;
     const int k = layer.top_k;
     const std::size_t hidden = static_cast<std::size_t>(layer.hidden);
 
@@ -126,6 +136,8 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
     }
     s.ids.resize(static_cast<std::size_t>(k));
     s.weights.resize(static_cast<std::size_t>(k));
+    io_ms += ms_between(t_io0, clk());  // 取数：路由矩阵那一张
+    const clock::time_point t_route0 = clk();
     const bool routed =
         router_bf16 ? route(s.router_w.data(), static_cast<int>(layer.n_expert),
                             static_cast<int>(hidden), k, x, s.router, s.ids.data(),
@@ -134,6 +146,7 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
                                 static_cast<int>(hidden), k, x, s.router, s.ids.data(),
                                 s.weights.data(), err);
     if (!routed) return false;
+    ffn_ms += ms_between(t_route0, clk());  // 算：路由（bf16/f32 点积 + softmax + top-k + 再归一）
     if (ids_out != nullptr) {
         for (int i = 0; i < k; ++i) ids_out[i] = s.ids[static_cast<std::size_t>(i)];
     }
@@ -177,9 +190,15 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
         }
         RerouteStats local_stats;
         RerouteStats& rs = offload->stats != nullptr ? *offload->stats : local_stats;
+        const clock::time_point t_off0 = clk();
         if (!dispatch_layer_batch(layer, *offload->source, *offload->candidates, s.ids.data(),
                                   s.weights.data(), k, x, out, *offload->scratch, rs, err)) {
             return false;
+        }
+        ffn_ms += ms_between(t_off0, clk());
+        if (phases != nullptr) {
+            phases->io_ms += io_ms;
+            phases->ffn_ms += ffn_ms;
         }
         return add_shared_expert(gguf, layer, x, out, s, err);
     }
@@ -188,6 +207,7 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
         const std::size_t i = static_cast<std::size_t>(s.order[static_cast<std::size_t>(t)]);
         const std::uint64_t e = static_cast<std::uint64_t>(s.ids[i]);
         ExpertWeights w;
+        const clock::time_point t_get0 = clk();
         if (s.source != nullptr) {
             ExpertBytes eb;
             if (!s.source->get(e, eb, err)) return false;
@@ -205,12 +225,22 @@ bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const 
             }
             w = ExpertWeights{s.gate.data(), s.up.data(), s.down.data()};
         }
+        io_ms += ms_between(t_get0, clk());
+        const clock::time_point t_ffn0 = clk();
         if (!expert_ffn(layer.spec, w, x, s.ffn, s.expert_out.data(), err)) return false;
         const float wt = s.weights[i];
         for (std::size_t j = 0; j < hidden; ++j) out[j] += wt * s.expert_out[j];
+        ffn_ms += ms_between(t_ffn0, clk());
     }
 
-    return add_shared_expert(gguf, layer, x, out, s, err);
+    if (phases != nullptr) {
+        phases->io_ms += io_ms;
+        phases->ffn_ms += ffn_ms;
+    }
+    const clock::time_point t_shared0 = clk();
+    const bool shared_ok = add_shared_expert(gguf, layer, x, out, s, err);
+    if (phases != nullptr) phases->ffn_ms += ms_between(t_shared0, clk());
+    return shared_ok;
 }
 
 bool add_shared_expert(const artifact::GgufFile& gguf, const MoeLayer& layer, const float* x,

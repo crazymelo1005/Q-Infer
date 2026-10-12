@@ -77,6 +77,10 @@ struct LayerPhases {
     // 之后各步的权重已在 scratch 里（按层缓存），故这一段是纯粹的算术时间。
     double attn_proj_ms = 0.0;
     double moe_ms = 0.0;
+    // moe_ms 的两半（互斥且穷尽，见 experts/moe_layer.hpp 的 MoePhases）：io 是取数（路由矩阵 + 各专家
+    // 字节），ffn 是算（路由 + 逐专家前馈 + 累加 + 共享专家）。它回答「MoE 那一段是在读还是在算」。
+    double moe_io_ms = 0.0;
+    double moe_ffn_ms = 0.0;
     double gr_write_ms = 0.0;
 };
 

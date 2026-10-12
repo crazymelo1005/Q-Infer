@@ -93,6 +93,17 @@ struct MoeOffload {
     RerouteStats* stats = nullptr;                          // 重派计数（观测用，可为空）
 };
 
+// 一层 MoE 的耗时切分（只作观测，给了才计时）。两半是互斥且穷尽的：`io_ms` 是**取数**（路由矩阵的
+// 读 + 逐专家的字节取数，走缓存时含查找与未命中时的拷入），`ffn_ms` 是**算**（路由计算 + 逐专家前馈
+// + 加权累加 + 共享专家）。
+//
+// 为什么要切这两半：整步相位图里 MoE 是最大的单段，而「它是在读还是在算」决定了下一步该动字节
+// 常驻还是动内核——实测过「读被页缓存吃掉」这种想当然的结论是错的（engine §6）。
+struct MoePhases {
+    double io_ms = 0.0;
+    double ffn_ms = 0.0;
+};
+
 // 跑一层：读路由矩阵 → 路由出 top-k → 逐个读该专家的三矩阵并前馈 → 按权重累加 → 有共享专家则再加。
 // 组合口径是 `y = Σ wᵢ·expertᵢ + shared`：路由侧按权重、共享侧**不加权**直接相加（[S-50]）。
 // out 长 hidden，覆盖写（MoE 输出本身）。若 ids 与 weights 非空则回填路由结果，便于核对。
@@ -102,7 +113,8 @@ struct MoeOffload {
 // 配置下无法逐位复现。`src/experts/layer_dispatch` 的批量路径用的就是同一顺序。
 bool run_moe_layer(const artifact::GgufFile& gguf, const MoeLayer& layer, const float* x, float* out,
                    MoeScratch& scratch, std::string& err, int* ids_out = nullptr,
-                   float* weights_out = nullptr, const MoeOffload* offload = nullptr);
+                   float* weights_out = nullptr, const MoeOffload* offload = nullptr,
+                   MoePhases* phases = nullptr);
 
 // 加上这一层的共享专家（`y += shared`）。该层没有共享专家时什么也不做、返回真。
 // 单独抽出来是因为共享专家不属于「未命中专家」那一批：批量分担走 `layer_dispatch`，共享专家在

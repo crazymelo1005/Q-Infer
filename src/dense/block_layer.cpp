@@ -222,8 +222,9 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
                        GrTensor{s.f_inject_f32.data(), GrPrecision::kF32}};
     if (!gr_read(layer.gr, fw, R, 1e-6f, s.mixed.data(), s.inject.data(), s.gr, err)) return false;
     clock::time_point t5 = clock::now();
+    experts::MoePhases mp;
     if (!run_moe_layer(gguf, layer.moe, s.mixed.data(), s.block_out.data(), s.moe, err, nullptr,
-                       nullptr, s.offload)) {
+                       nullptr, s.offload, &mp)) {
         return false;
     }
     clock::time_point t6 = clock::now();
@@ -235,6 +236,8 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
         phases->attn_ms += ms_between(t2, t3);
         phases->gr_write_ms += ms_between(t3, t4) + ms_between(t6, t7);
         phases->moe_ms += ms_between(t5, t6);
+        phases->moe_io_ms += mp.io_ms;
+        phases->moe_ffn_ms += mp.ffn_ms;
     }
     return ok;
 }
