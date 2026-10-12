@@ -16,6 +16,7 @@
 #include "check.hpp"
 #include "kernels/bf16.hpp"
 #include "kernels/fp16.hpp"
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -369,7 +370,8 @@ int manual_model_entry(const char* model, const char* ple_table, std::uint64_t k
            ple.tokens[same] == base.tokens[same]) {
         ++same;
     }
-    std::printf("  PLE 开/关（同一条 {1,2,3,4} 贪心）：前 %zu 位一致，随后分歧（对应 logits 相对偏离）\n",
+    std::printf("  PLE 开/关（同一条 {1,2,3,4} 贪心）：前 %zu 位一致，随后分歧（logits 相对偏离的代理量——"
+                "以生成序列分歧近似）\n",
                 same);
     CHECK(same < ple.tokens.size());
     if (kv_slots <= 0) return 0;
@@ -406,7 +408,11 @@ int manual_model_entry(const char* model, const char* ple_table, std::uint64_t k
 
 int main(int argc, char** argv) {
     // 真权重手工入口：`--model <模型分片> --table <PLE 分片2> --kv-slots N`（环境2 线下跑，CI 不带参数）。
-    if (argc >= 3 && std::string(argv[1]) == "--model") {
+    if (argc >= 2 && std::string(argv[1]) == "--model") {
+        if (argc < 3) {  // `--model` 缺模型分片：以往会静默掉进合成套件、exit 0，脚本拿到假绿——改显式 exit 2。
+            std::printf("--model 缺模型参数：用法 `--model <模型分片> [--table <PLE 分片2>] [--kv-slots N]`\n");
+            return 2;
+        }
         const char* ple_table = nullptr;
         std::uint64_t kv_slots = 0;
         for (int i = 3; i < argc; ++i) {
@@ -414,7 +420,18 @@ int main(int argc, char** argv) {
             if (a == "--table" && i + 1 < argc) {
                 ple_table = argv[++i];
             } else if (a == "--kv-slots" && i + 1 < argc) {
-                kv_slots = static_cast<std::uint64_t>(std::atoi(argv[++i]));
+                const char* s = argv[++i];
+                char* end = nullptr;
+                errno = 0;
+                const unsigned long long v = std::strtoull(s, &end, 10);
+                // 非数值 / 尾随垃圾 / 溢出：拒绝并 exit 2；不许落到 atoi 的 0 → `kv_slots <= 0` 静默跳过 KV 半边。
+                if (end == s || *end != '\0' || errno == ERANGE) {
+                    std::printf("非法的 --kv-slots：%s（需要非负整数）\n", s);
+                    return 2;
+                }
+                kv_slots = static_cast<std::uint64_t>(v);
+                // 配额口径见 manual_model_entry 页数账：真模型几何下配额 ∈ [12, 16] 必有驱逐且永不拒绝；
+                // 简报示例 --kv-slots 64 会保证零驱逐、kv_evictions() > 0 判据落空，跑 KV 半边请用如 14。
             } else {
                 std::printf("不认识的参数：%s\n", a.c_str());
                 return 2;
