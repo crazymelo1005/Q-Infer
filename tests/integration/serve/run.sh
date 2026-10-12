@@ -315,6 +315,21 @@ curl -s "http://$HOST:$PORT/web/app.js" > "$R"
 grep -q 'pollMetrics' "$R" && grep -q 'panel-chat' "$R" \
   && ok "/web/app.js（Chat 逻辑）" || bad "/web/app.js：$(head -c 200 "$R")"
 
+# 16. 前端二：index 带 Monitor/About 骨架，app.js 暴露 QinferRequests 与 sparkline，
+#     /api-monitor 装了壳且 monitor.js 可达（复用 loadDetail）。
+curl -s "http://$HOST:$PORT/" > "$R"
+grep -q 'id="card-state"' "$R" && grep -q 'id="req-detail"' "$R" && grep -q 'id="about-engine"' "$R" \
+  && ok "/ Monitor/About 骨架（card-state/req-detail/about-engine）" || bad "/ 骨架：$(head -c 200 "$R")"
+curl -s "http://$HOST:$PORT/web/app.js" > "$R"
+grep -q 'QinferRequests' "$R" && grep -q 'initMonitor' "$R" && grep -q 'sparkline' "$R" \
+  && ok "/web/app.js（Monitor/About/sparkline）" || bad "/web/app.js：$(head -c 200 "$R")"
+curl -s "http://$HOST:$PORT/api-monitor" > "$R"
+grep -q 'id="req-list"' "$R" && grep -q 'monitor.js' "$R" \
+  && ok "/api-monitor 壳（req-list/monitor.js）" || bad "/api-monitor：$(head -c 200 "$R")"
+curl -s "http://$HOST:$PORT/web/monitor.js" > "$R"
+grep -q 'QinferRequests.loadDetail' "$R" \
+  && ok "/web/monitor.js（检查页复用渲染层）" || bad "/web/monitor.js：$(head -c 200 "$R")"
+
 stop
 
 # ---- 503：--reject-after 1 → 第 1 个请求正常，之后一律队列满 ----

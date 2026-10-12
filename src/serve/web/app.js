@@ -54,6 +54,7 @@ function switchTab(name) {
   document.querySelectorAll(".panel").forEach(function (p) {
     p.classList.toggle("hidden", p.id !== "panel-" + name);
   });
+  if (name === "about") refreshAbout();
 }
 
 /* ---- SSE 读取：把 data: 帧逐个喂给 onEvent；[DONE] 或流结束返回 ---- */
@@ -254,6 +255,7 @@ async function pollMetrics() {
     const res = await api("/metrics");
     if (!res.ok) throw new Error("HTTP " + res.status);
     const d = await res.json();
+    window.lastMetrics = d;
     const l = d.live || {};
     const state = l.state || "?";
     const queued = l.queued === undefined ? 0 : l.queued;
@@ -286,6 +288,172 @@ function initCommon() {
   }
 }
 
+/* ---- 请求记录渲染层（Monitor tab 与 /api-monitor 共用） ---- */
+window.QinferRequests = {
+  badge: function (state) {
+    const cls = state === "completed" ? "ok" : state === "error" ? "err" : state === "queued" ? "busy" : "";
+    return '<span class="badge ' + cls + '">' + esc(state) + "</span>";
+  },
+  fmtSec: function (v) {
+    if (v === null || v === undefined) return "—";
+    return v.toFixed(2) + "s";
+  },
+  timeOf: function (unix) {
+    if (!unix) return "—";
+    return new Date(unix * 1000).toLocaleString();
+  },
+  // records：/api/requests 列表视图（剥掉 input/output/reasoning）。
+  renderList: function (records, listEl, onPick) {
+    listEl.innerHTML = "";
+    if (!records.length) {
+      const n = document.createElement("div");
+      n.className = "note";
+      n.textContent = "暂无请求记录";
+      listEl.appendChild(n);
+      return;
+    }
+    records.forEach(function (rec) {
+      const row = document.createElement("div");
+      row.className = "req-row";
+      row.dataset.id = rec.id;
+      row.innerHTML =
+        '<span class="mono">' + esc(rec.id) + "</span>" +
+        QinferRequests.badge(rec.state) +
+        "<span>" + esc(rec.path || "") + "</span>";
+      row.title = (rec.model || "") + " · " + QinferRequests.fmtSec(rec.wallclock_s);
+      row.addEventListener("click", function () {
+        listEl.querySelectorAll(".req-row").forEach(function (r) {
+          r.classList.toggle("active", r.dataset.id === rec.id);
+        });
+        onPick(rec);
+      });
+      listEl.appendChild(row);
+    });
+  },
+  apiResponseHtml: function (rec) {
+    const usage = {
+      prompt_tokens: rec.prompt_tokens || 0,
+      completion_tokens: rec.output_tokens || 0,
+      total_tokens: (rec.prompt_tokens || 0) + (rec.output_tokens || 0),
+    };
+    const resp = {
+      id: "msg_" + rec.id,
+      object: "chat.completion",
+      created: Math.floor(rec.created || 0),
+      model: rec.model,
+      choices: [{
+        index: 0,
+        message: { role: "assistant", content: rec.output || "" },
+        finish_reason: rec.state === "error" ? "error" : "stop",
+      }],
+      usage: usage,
+    };
+    return JSON.stringify(resp, null, 2);
+  },
+  renderDetail: function (rec, el) {
+    el.innerHTML = "";
+    const dl = document.createElement("dl");
+    dl.className = "kv";
+    const kv = [
+      ["id", rec.id],
+      ["path", rec.path],
+      ["model", rec.model],
+      ["state", rec.state],
+      ["created", QinferRequests.timeOf(rec.created)],
+      ["stream", rec.stream ? "是" : "否"],
+      ["response_format", rec.response_format || "—"],
+      ["queue_s", QinferRequests.fmtSec(rec.queue_s)],
+      ["first_token_s", QinferRequests.fmtSec(rec.first_token_s)],
+      ["wallclock_s", QinferRequests.fmtSec(rec.wallclock_s)],
+      ["decode_tok_s", QinferRequests.fmtSec(rec.decode_tok_s)],
+      ["prompt_tokens", rec.prompt_tokens === undefined ? "—" : rec.prompt_tokens],
+      ["output_tokens", rec.output_tokens === undefined ? "—" : rec.output_tokens],
+    ];
+    kv.forEach(function (p) {
+      const dt = document.createElement("dt");
+      dt.textContent = p[0];
+      const dd = document.createElement("dd");
+      dd.textContent = p[1];
+      dl.appendChild(dt);
+      dl.appendChild(dd);
+    });
+    el.appendChild(dl);
+    const tabs = [
+      ["input", "Input" + (rec.input_truncated ? "（已截断）" : ""), rec.input || "（空）"],
+      ["output", "Output" + (rec.output_truncated ? "（已截断）" : ""), rec.output || "（空）"],
+      ["reasoning", "Reasoning", rec.reasoning || "（无）"],
+      ["response", "API response（按记录重建）", QinferRequests.apiResponseHtml(rec)],
+    ];
+    const set = document.createElement("div");
+    set.className = "tabset";
+    const box = document.createElement("div");
+    box.className = "codebox";
+    tabs.forEach(function (t, i) {
+      const b = document.createElement("button");
+      b.className = "tab-btn" + (i === 0 ? " active" : "");
+      b.textContent = t[1];
+      b.addEventListener("click", function () {
+        set.querySelectorAll(".tab-btn").forEach(function (x) { x.classList.remove("active"); });
+        b.classList.add("active");
+        box.textContent = t[2];
+        box.dataset.text = t[2];
+      });
+      set.appendChild(b);
+    });
+    const copy = document.createElement("button");
+    copy.className = "btn ghost";
+    copy.textContent = "复制";
+    copy.addEventListener("click", function () {
+      const txt = box.dataset.text !== undefined ? box.dataset.text : box.textContent;
+      navigator.clipboard.writeText(txt).catch(function () { showBanner("复制失败", "err"); });
+    });
+    set.appendChild(copy);
+    box.dataset.text = tabs[0][2];
+    box.textContent = tabs[0][2];
+    el.appendChild(set);
+    el.appendChild(box);
+  },
+  loadDetail: function (id, el) {
+    el.innerHTML = '<div class="note">加载详情…</div>';
+    return api("/api/requests?id=" + encodeURIComponent(id)).then(function (res) {
+      if (!res.ok) {
+        el.innerHTML = '<div class="note">' + esc("请求详情不可用：HTTP " + res.status) + "</div>";
+        return;
+      }
+      return res.json().then(function (d) { QinferRequests.renderDetail(d, el); });
+    }).catch(function (e) {
+      el.innerHTML = '<div class="note">' + esc("加载失败：" + e.message) + "</div>";
+    });
+  },
+  sparkline: function (canvas, points) {
+    const w = canvas.width;
+    const h = canvas.height;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, w, h);
+    let min = Infinity;
+    let max = -Infinity;
+    let any = 0;
+    points.forEach(function (p) {
+      if (p !== null) { any++; if (p < min) min = p; if (p > max) max = p; }
+    });
+    if (!any || max === min) return;
+    const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2b6cb0";
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    let pen = false;
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      if (p === null) { pen = false; continue; }
+      const x = (i / (points.length - 1)) * w;
+      const y = h - 3 - ((p - min) / (max - min)) * (h - 6);
+      if (pen) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      pen = true;
+    }
+    ctx.stroke();
+  },
+};
+
 /* ---- Chat 初始化 ---- */
 function initChat() {
   ["s-temp", "s-top-p", "s-seed"].forEach(function (id) {
@@ -302,10 +470,180 @@ function initChat() {
   });
 }
 
+/* ---- Monitor：四卡片 + 请求列表/详情 + 10 系列 sparkline ---- */
+function kvTable(tbodyId, rows) {
+  const tb = $(tbodyId);
+  tb.innerHTML = "";
+  rows.forEach(function (r) {
+    const tr = document.createElement("tr");
+    const th = document.createElement("th");
+    th.textContent = r[0];
+    const td = document.createElement("td");
+    td.textContent = r[1];
+    tr.appendChild(th);
+    tr.appendChild(td);
+    tb.appendChild(tr);
+  });
+}
+
+async function refreshAbout() {
+  if (!$("panel-about")) return;
+  try {
+    const m = await api("/metrics").then(function (r) { return r.json(); });
+    const p = await api("/props").then(function (r) { return r.json(); });
+    const s = await api("/v1/status").then(function (r) { return r.json(); });
+    const eng = m.engine || {};
+    kvTable("about-engine", [
+      ["model", eng.model || "—"],
+      ["max_context", eng.max_context === undefined ? "—" : String(eng.max_context)],
+      ["images", eng.images !== undefined ? String(eng.images) : "—"],
+      ["engine", s.engine || "—"],
+      ["service", s.service || "—"],
+      ["started", QinferRequests.timeOf(s.started)],
+      ["uptime_s", s.uptime_s === undefined ? "—" : s.uptime_s.toFixed(0) + "s"],
+      ["slots", s.concurrency ? String(s.concurrency.serving) : "—"],
+    ]);
+    const dg = p.default_generation_settings || {};
+    const prm = dg.params || {};
+    const caps = p.chat_template_caps || {};
+    const ct = p.chat_template || "";
+    kvTable("about-props", [
+      ["model_alias", p.model_alias || "—"],
+      ["total_slots", p.total_slots === undefined ? "—" : String(p.total_slots)],
+      ["chat_template", ct.length > 120 ? ct.slice(0, 120) + "…" : ct],
+      ["templater", caps.templater || "—"],
+      ["vision", p.modalities && p.modalities.vision !== undefined ? String(p.modalities.vision) : "—"],
+      ["temperature 默认", prm.temperature === undefined ? "—" : String(prm.temperature)],
+      ["top_p 默认", prm.top_p === undefined ? "—" : String(prm.top_p)],
+      ["seed 默认", prm.seed === undefined ? "—" : String(prm.seed)],
+      ["build_info", p.build_info || "—"],
+    ]);
+    const hs = m.hardware_static || {};
+    kvTable("about-hardware", [
+      ["gpu_name", hs.gpu_name || "—"],
+      ["gpu_count", hs.gpu_count === undefined ? "—" : String(hs.gpu_count)],
+      ["gpu_note", hs.gpu_note || "—"],
+      ["cpu_name", hs.cpu_name || "—"],
+      ["cores", hs.cores === undefined ? "—" : String(hs.cores)],
+      ["threads", hs.threads === undefined ? "—" : String(hs.threads)],
+    ]);
+    $("about-ports").textContent = location.protocol + "//" + location.host;
+  } catch (e) {
+    showBanner("About 信息加载失败：" + e.message, "err");
+  }
+}
+
+const SPARK_SERIES = [
+  { key: "gpu_util", label: "GPU 利用率", fmt: function (v) { return v.toFixed(1) + "%"; } },
+  { key: "gpu_mem_used", label: "GPU 显存", fmt: function (v) { return (v / 1073741824).toFixed(2) + " GB"; } },
+  { key: "gpu_temp", label: "GPU 温度", fmt: function (v) { return v.toFixed(0) + " ℃"; } },
+  { key: "gpu_power", label: "GPU 功率", fmt: function (v) { return v.toFixed(0) + " W"; } },
+  { key: "gpu_pcie_rx_mb", label: "PCIe RX", fmt: function (v) { return v.toFixed(1) + " MB/s"; } },
+  { key: "cpu", label: "CPU", fmt: function (v) { return v.toFixed(1) + "%"; } },
+  { key: "ram_used", label: "内存", fmt: function (v) { return (v / 1073741824).toFixed(1) + " GB"; } },
+  { key: "disk_read_mb", label: "磁盘读", fmt: function (v) { return v.toFixed(1) + " MB/s"; } },
+  { key: "tok_s", label: "tok/s", fmt: function (v) { return v.toFixed(1); } },
+  { key: "prefill_tok_s_mean", label: "prefill tok/s", fmt: function (v) { return v.toFixed(1); } },
+];
+
+function renderSparklines(h) {
+  if (!$("spark-grid")) return;
+  const grid = $("spark-grid");
+  grid.innerHTML = "";
+  const hw = h.hardware || {};
+  const history = h.history || {};
+  SPARK_SERIES.forEach(function (s) {
+    const cell = document.createElement("div");
+    cell.className = "spark-cell";
+    const head = document.createElement("div");
+    head.className = "spark-head";
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = s.label;
+    const val = document.createElement("span");
+    val.className = "val";
+    const cur = hw[s.key];
+    val.textContent = cur === null || cur === undefined ? "—" : s.fmt(cur);
+    head.appendChild(name);
+    head.appendChild(val);
+    const cv = document.createElement("canvas");
+    cv.width = 120;
+    cv.height = 30;
+    QinferRequests.sparkline(cv, history[s.key] || []);
+    cell.appendChild(head);
+    cell.appendChild(cv);
+    grid.appendChild(cell);
+  });
+}
+
+let reqCache_ = [];
+let activeReqId_ = null;
+
+function renderFiltered() {
+  const q = ($("req-search").value || "").toLowerCase();
+  const f = $("req-filter").value;
+  let list = reqCache_;
+  if (q || f) {
+    list = list.filter(function (r) {
+      const hay = ((r.path || "") + " " + (r.model || "") + " " + (r.state || "") + " " + (r.id || "")).toLowerCase();
+      return (!q || hay.indexOf(q) >= 0) && (!f || r.state === f);
+    });
+  }
+  QinferRequests.renderList(list, $("req-list"), function (rec) {
+    activeReqId_ = rec.id;
+    QinferRequests.loadDetail(rec.id, $("req-detail"));
+  });
+}
+
+async function refreshRequests() {
+  try {
+    const res = await api("/api/requests");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const d = await res.json();
+    $("card-kept").textContent = d.retention === undefined ? "—" : d.retention;
+    reqCache_ = d.requests || [];
+    renderFiltered();
+  } catch (e) { /* 下一次轮询再试 */ }
+}
+
+async function refreshMonitor() {
+  if (!$("panel-monitor")) return;
+  try {
+    const res = await api("/v1/status");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const st = await res.json();
+    const lt = st.last_timings;
+    $("card-state").textContent = st.loaded ? "已加载" : "未加载";
+    $("card-state-sub").textContent = (st.model || "") +
+      (st.activity && st.activity.in_flight ? " · 进行中 " + st.activity.in_flight : "");
+    $("card-wall").textContent = lt && lt.wallclock_s !== undefined ? lt.wallclock_s.toFixed(2) + "s" : "—";
+    $("card-wall-sub").textContent = lt && lt.prompt_tokens !== undefined
+      ? lt.prompt_tokens + " prompt → " + lt.output_tokens + " out" : "尚无完成请求";
+    $("card-tok").textContent = lt && lt.decode_tok_s !== undefined ? lt.decode_tok_s.toFixed(1) + " tok/s" : "—";
+    $("card-tok-sub").textContent = "上次请求解码速度";
+    setStatusDot(true);
+  } catch (e) {
+    $("card-state").textContent = "不可达";
+    $("card-state-sub").textContent = "服务无响应";
+    setStatusDot(false);
+  }
+  if (window.lastMetrics) renderSparklines(window.lastMetrics);
+  refreshRequests();
+}
+
+function initMonitor() {
+  if (!$("panel-monitor")) return;
+  refreshMonitor();
+  window.setInterval(refreshMonitor, 2000);
+  $("req-search").addEventListener("input", renderFiltered);
+  $("req-filter").addEventListener("change", renderFiltered);
+}
+
 document.addEventListener("DOMContentLoaded", function () {
   initCommon();
   if (!$("panel-chat") || window.__apiMonitorPage) return; // api-monitor 页：只复用公共函数
   initChat();
+  initMonitor();
   loadModel();
   loadProps();
   pollMetrics();

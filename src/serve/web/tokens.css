@@ -198,6 +198,12 @@ main { height: calc(100vh - 52px); overflow: hidden; }
 .plain-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .plain-table th, .plain-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
 .plain-table th { color: var(--dim); font-weight: 500; width: 190px; }
+.spark-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--sp-2); padding: 0 var(--sp-4) var(--sp-3); }
+.spark-cell { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 8px; }
+.spark-cell canvas { display: block; width: 100%; height: 30px; }
+.spark-head { display: flex; justify-content: space-between; gap: var(--sp-2); font-size: 11px; }
+.spark-head .name { color: var(--dim); }
+.spark-head .val { font-family: var(--mono); }
 
 /* ---- 通用提示条 ---- */
 .banner { margin: var(--sp-3) var(--sp-4) 0; padding: 8px 14px; border-radius: var(--radius-sm); border: 1px solid var(--err); color: var(--err); background: var(--panel); font-size: 13px; }

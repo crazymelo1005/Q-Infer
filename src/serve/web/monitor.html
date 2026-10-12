@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Q-Infer · 请求检查</title>
+<link rel="stylesheet" href="/web/tokens.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">Q-Infer</span>
+    <span class="model">请求检查 /api-monitor</span>
+  </div>
+  <div class="tab-bar" style="flex:1"></div>
+  <div class="keybox">
+    <label for="api-key">API 密钥</label>
+    <input id="api-key" class="input key-input" type="password" autocomplete="off" placeholder="可选">
+    <button id="btn-key-toggle" class="btn ghost" type="button">显示</button>
+  </div>
+  <a class="btn ghost" href="/">返回主面板</a>
+</header>
+<main>
+  <div class="req-layout" style="height:100%">
+    <div class="req-list-pane" style="width:42%">
+      <div class="req-toolbar">
+        <input id="req-search" class="input" type="search" placeholder="搜索路径 / 模型 / 状态">
+        <select id="req-filter" class="input" title="状态过滤">
+          <option value="">全部状态</option>
+          <option value="queued">queued</option>
+          <option value="processing">processing</option>
+          <option value="completed">completed</option>
+          <option value="error">error</option>
+        </select>
+      </div>
+      <div id="req-list" class="req-list"><div class="note">暂无请求记录</div></div>
+    </div>
+    <div id="req-detail" class="req-detail-pane"><div class="note">点左侧一条记录查看详情</div></div>
+  </div>
+</main>
+<script>window.__apiMonitorPage = true;</script>
+<script src="/web/app.js"></script>
+<script src="/web/monitor.js"></script>
+</body>
+</html>
