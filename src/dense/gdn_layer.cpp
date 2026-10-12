@@ -137,6 +137,9 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
                        std::chrono::steady_clock::time_point b) {
         return std::chrono::duration<double, std::milli>(b - a).count();
     };
+    // 权重按层缓存：这一层的权重恒定，每步重读没意义（每层约 32 MB，见 engine §6 的实测）；换层则
+    // 必须重读——记账的是层号，不是「缓冲空不空」。
+    const bool reload = s.w_layer != layer.layer;
     const std::uint64_t N = layer.pre.n_embd;
     const std::uint64_t cd = layer.pre.conv_dim();
     const std::uint64_t vd = layer.pre.v_dim();
@@ -155,13 +158,14 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
         raw.resize(static_cast<std::size_t>(t->elements() * 2));
         return gguf.read_at(t->offset, raw.data(), raw.size());
     };
-    if (!load_f32(layer.t_ssm_a, s.ssm_a, s.w_conv1d) ||        // 先用 w_conv1d 当临时区
-        !load_f32(layer.t_dt, s.dt, s.w_conv1d) || !load_f32(layer.t_norm, s.ssm_norm, s.w_conv1d) ||
-        !load_bf16(layer.t_alpha, s.w_alpha) || !load_bf16(layer.t_beta, s.w_beta)) {
-        err = "读 GDN 的门/卷积/归一权重失败";
-        return false;
-    }
-    {
+    if (reload) {
+        if (!load_f32(layer.t_ssm_a, s.ssm_a, s.w_conv1d) ||  // 先用 w_conv1d 当临时区
+            !load_f32(layer.t_dt, s.dt, s.w_conv1d) ||
+            !load_f32(layer.t_norm, s.ssm_norm, s.w_conv1d) ||
+            !load_bf16(layer.t_alpha, s.w_alpha) || !load_bf16(layer.t_beta, s.w_beta)) {
+            err = "读 GDN 的门/卷积/归一权重失败";
+            return false;
+        }
         std::vector<std::uint8_t> raw;
         if (!load_f32(layer.t_conv1d, s.qkv, raw)) {  // 借 s.qkv 当临时区（下一步会覆盖它）
             err = "读 ssm_conv1d 失败";
@@ -172,10 +176,12 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
 
     // 2. qkv = attn_qkv @ x（按档分派，与专家同一份表）。
     const auto p0 = clk();
-    s.w_qkv.resize(static_cast<std::size_t>(layer.qkv.rows * layer.qkv.row_bytes()));
-    if (!gguf.read_at(layer.t_qkv->offset, s.w_qkv.data(), s.w_qkv.size())) {
-        err = "读 attn_qkv 失败";
-        return false;
+    if (reload) {
+        s.w_qkv.resize(static_cast<std::size_t>(layer.qkv.rows * layer.qkv.row_bytes()));
+        if (!gguf.read_at(layer.t_qkv->offset, s.w_qkv.data(), s.w_qkv.size())) {
+            err = "读 attn_qkv 失败";
+            return false;
+        }
     }
     s.qkv.assign(static_cast<std::size_t>(cd), 0.0f);
     if (!experts::quantize_input(layer.qkv, x, s.gemv, err) ||
@@ -194,10 +200,12 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
 
     // 4. z = attn_gate @ x（量化投影）——收尾那个 sigmoid 的输入。
     const auto p4 = clk();
-    s.w_gate.resize(static_cast<std::size_t>(layer.gate.rows * layer.gate.row_bytes()));
-    if (!gguf.read_at(layer.t_gate->offset, s.w_gate.data(), s.w_gate.size())) {
-        err = "读 attn_gate 失败";
-        return false;
+    if (reload) {
+        s.w_gate.resize(static_cast<std::size_t>(layer.gate.rows * layer.gate.row_bytes()));
+        if (!gguf.read_at(layer.t_gate->offset, s.w_gate.data(), s.w_gate.size())) {
+            err = "读 attn_gate 失败";
+            return false;
+        }
     }
     s.z.assign(static_cast<std::size_t>(vd), 0.0f);
     if (!experts::quantize_input(layer.gate, x, s.gemv, err) ||
@@ -227,10 +235,12 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
 
     // 7. out = ssm_out @ y（Q8_0 权重）。
     const auto p7 = clk();
-    s.w_out.resize(static_cast<std::size_t>(layer.out.rows * layer.out.row_bytes()));
-    if (!gguf.read_at(layer.t_out->offset, s.w_out.data(), s.w_out.size())) {
-        err = "读 ssm_out 失败";
-        return false;
+    if (reload) {
+        s.w_out.resize(static_cast<std::size_t>(layer.out.rows * layer.out.row_bytes()));
+        if (!gguf.read_at(layer.t_out->offset, s.w_out.data(), s.w_out.size())) {
+            err = "读 ssm_out 失败";
+            return false;
+        }
     }
     s.out.assign(static_cast<std::size_t>(N), 0.0f);
     if (!experts::quantize_input(layer.out, s.y.data(), s.gemv, err) ||
@@ -239,6 +249,7 @@ bool run_gdn_layer(const artifact::GgufFile& gguf, const GdnLayer& layer, const 
     }
     proj_acc += ms(p7, clk());
     for (std::uint64_t i = 0; i < N; ++i) out[i] = s.out[static_cast<std::size_t>(i)];
+    s.w_layer = layer.layer;  // 这一层的权重已全部就位（任一条提前失败都不会走到这里，故下次会重读）
     if (proj_ms != nullptr) *proj_ms += proj_acc;
     return true;
 }

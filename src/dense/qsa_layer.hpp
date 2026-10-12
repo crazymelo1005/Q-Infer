@@ -74,6 +74,9 @@ struct QsaScratch {
     std::vector<float> q_norm_w, k_norm_w, idx_q_norm_w, idx_k_norm_w;
     std::vector<std::uint16_t> idx_q_w, idx_k_w;  // 索引器两个投影的 BF16 权重
     std::vector<std::uint8_t> w_q, w_k, w_v, w_out;
+    // 上面那些权重（四个 norm、索引器两投影、四个注意力投影）按层缓存。记账的是**层号**，不是
+    // 「缓冲空不空」：同一份 scratch 跨层复用时，层号变了就必须重读，否则会把上一层的大权重当成这一层的。
+    int w_layer = -1;
     experts::FfnScratch gemv;
     std::vector<float> q_full, k_raw, v_raw, q_ready, k_ready, gate;
     std::vector<float> idx_q_out, idx_k_out, q_idx;

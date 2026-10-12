@@ -84,12 +84,14 @@ std::filesystem::path write_gguf(const char* name, const std::vector<TensorSpec>
 }
 
 // Q8_0 一行（cols 是 32 的倍数）：d = 0.5、码取 1..N 的循环。
-std::vector<std::uint8_t> q8_0_rows(std::uint64_t rows, std::uint64_t cols) {
+std::vector<std::uint8_t> q8_0_rows(std::uint64_t rows, std::uint64_t cols, int seed = 0) {
     std::vector<std::uint8_t> out;
     for (std::uint64_t r = 0; r < rows; ++r) {
         out.push_back(0x00);
         out.push_back(0x38);
-        for (std::uint64_t c = 0; c < cols; ++c) out.push_back(static_cast<std::uint8_t>(c % 5));
+        for (std::uint64_t c = 0; c < cols; ++c) {
+            out.push_back(static_cast<std::uint8_t>((c + seed) % 5));
+        }
     }
     return out;
 }
@@ -101,20 +103,20 @@ std::vector<std::uint8_t> f32_vec(std::uint64_t n, float v) {
     return out;
 }
 
-std::vector<TensorSpec> qsa_tensors(const std::string& b) {
+std::vector<TensorSpec> qsa_tensors(const std::string& b, int seed = 0) {
     std::vector<TensorSpec> ts;
-    ts.push_back({b + "attn_q.weight", {kN, 2 * kNh * kHd}, 8, q8_0_rows(2 * kNh * kHd, kN)});
-    ts.push_back({b + "attn_k.weight", {kN, kNkv * kHd}, 8, q8_0_rows(kNkv * kHd, kN)});
-    ts.push_back({b + "attn_v.weight", {kN, kNkv * kHd}, 8, q8_0_rows(kNkv * kHd, kN)});
-    ts.push_back({b + "attn_output.weight", {kNh * kHd, kN}, 8, q8_0_rows(kN, kNh * kHd)});
-    ts.push_back({b + "attn_q_norm.weight", {kHd}, 0, f32_vec(kHd, 1.0f)});
-    ts.push_back({b + "attn_k_norm.weight", {kHd}, 0, f32_vec(kHd, 1.0f)});
+    ts.push_back({b + "attn_q.weight", {kN, 2 * kNh * kHd}, 8, q8_0_rows(2 * kNh * kHd, kN, seed)});
+    ts.push_back({b + "attn_k.weight", {kN, kNkv * kHd}, 8, q8_0_rows(kNkv * kHd, kN, seed + 1)});
+    ts.push_back({b + "attn_v.weight", {kN, kNkv * kHd}, 8, q8_0_rows(kNkv * kHd, kN, seed + 2)});
+    ts.push_back({b + "attn_output.weight", {kNh * kHd, kN}, 8, q8_0_rows(kN, kNh * kHd, seed + 3)});
+    ts.push_back({b + "attn_q_norm.weight", {kHd}, 0, f32_vec(kHd, 1.0f + 0.25f * seed)});
+    ts.push_back({b + "attn_k_norm.weight", {kHd}, 0, f32_vec(kHd, 1.0f + 0.25f * seed)});
     ts.push_back({b + "indexer.q_proj.weight", {kN, kIdxH * kIdx}, 30,
-                  std::vector<std::uint8_t>(kN * kIdxH * kIdx * 2, 0)});
+                  std::vector<std::uint8_t>(kN * kIdxH * kIdx * 2, static_cast<std::uint8_t>(seed))});
     ts.push_back({b + "indexer.k_proj.weight", {kN, kIdx}, 30,
-                  std::vector<std::uint8_t>(kN * kIdx * 2, 0)});
-    ts.push_back({b + "indexer.q_norm.weight", {kIdx}, 0, f32_vec(kIdx, 1.0f)});
-    ts.push_back({b + "indexer.k_norm.weight", {kIdx}, 0, f32_vec(kIdx, 1.0f)});
+                  std::vector<std::uint8_t>(kN * kIdx * 2, static_cast<std::uint8_t>(seed))});
+    ts.push_back({b + "indexer.q_norm.weight", {kIdx}, 0, f32_vec(kIdx, 1.0f + 0.25f * seed)});
+    ts.push_back({b + "indexer.k_norm.weight", {kIdx}, 0, f32_vec(kIdx, 1.0f + 0.25f * seed)});
     return ts;
 }
 
@@ -254,6 +256,41 @@ void test_runs_a_sequence_deterministically() {
     CHECK(n_bid_seen == 1);
 }
 
+// 同一份 scratch 跨层复用：必须按层号重读权重（记账的是层号，不是「缓冲空不空」）。
+void test_reloads_weights_when_the_layer_changes() {
+    std::vector<TensorSpec> ts = qsa_tensors("blk.3.");
+    const std::vector<TensorSpec> t7 = qsa_tensors("blk.7.", /*seed=*/3);
+    ts.insert(ts.end(), t7.begin(), t7.end());
+    const std::filesystem::path p = write_gguf("qinfer_qsa_two_layers.gguf", ts);
+    artifact::GgufFile g;
+    std::string err;
+    CHECK(g.open(p.string(), err));
+    QsaLayer l3, l7;
+    CHECK(build_qsa_layer(g, 3, kN, kHd, /*n_rot=*/4, kIdx, /*idx_top_k=*/2048, /*idx_block=*/4, l3, err));
+    CHECK(build_qsa_layer(g, 7, kN, kHd, /*n_rot=*/4, kIdx, /*idx_top_k=*/2048, /*idx_block=*/4, l7, err));
+
+    const std::vector<float> x = token_x(0);
+    std::vector<float> out(kN, 0.0f);
+    QsaScratch shared, fresh;
+    configure(shared);
+    configure(fresh);
+    CHECK(run_qsa_layer(g, l3, x.data(), out.data(), shared, err));
+    const std::vector<std::uint8_t> l3_v = shared.w_v;         // 层 3 的字节
+    const std::vector<float> l3_norm = shared.q_norm_w;
+    CHECK(run_qsa_layer(g, l7, x.data(), out.data(), shared, err));  // 换层 → 必须重读
+    CHECK(run_qsa_layer(g, l7, x.data(), out.data(), fresh, err));
+    // 两层的权重确实不同（否则这条用例是空转）。
+    CHECK(l3_v != fresh.w_v);
+    CHECK(l3_norm != fresh.q_norm_w);
+    // 换层之后，缓存里放的是这一层（不是上一层）的字节。
+    CHECK(shared.w_q == fresh.w_q);
+    CHECK(shared.w_k == fresh.w_k);
+    CHECK(shared.w_v == fresh.w_v);
+    CHECK(shared.w_out == fresh.w_out);
+    CHECK(shared.q_norm_w == fresh.q_norm_w);
+    CHECK(shared.idx_q_w == fresh.idx_q_w);
+}
+
 }  // namespace
 
 // 真模型手工入口：把一层的整条链路跑几个 token，并核「GDN 层会被挡住」。
@@ -360,6 +397,7 @@ int main(int argc, char** argv) {
     test_builds_and_derives_the_geometry();
     test_failures_are_loud();
     test_runs_a_sequence_deterministically();
+    test_reloads_weights_when_the_layer_changes();
     std::puts("qsa_layer: 从张力名与形状建起一层并推出几何（n_head/n_head_kv/idx_n_head），"
               "五种接错都明确报错");
     return 0;

@@ -644,8 +644,9 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
                     n_gdn, gdn, n_gdn > 0 ? gdn / n_gdn : 0.0, n_qsa, qsa,
                     n_qsa > 0 ? qsa / n_qsa : 0.0);
         const double proj = ph.attn_proj_ms;
-        std::printf("  GDN 的三个投影（含每步重读权重）%.0f ms，其余（前段/递推/收尾）%.0f ms\n", proj,
-                    ph.attn_ms - proj);
+        std::printf("  GDN 的三个投影（首个 token 含读权重，之后权重常驻）%.0f ms，其余（前段/递推/收尾）"
+                    "%.0f ms\n",
+                    proj, ph.attn_ms - proj);
         std::printf("  最慢的 6 层：");
         for (std::size_t i = 0; i < slow.size() && i < 6; ++i) {
             const int l = slow[i].second;
@@ -709,6 +710,8 @@ int manual_step_entry(const char* model, int layers, bool fleet, int tokens, int
     std::vector<ComputeGroup> one_group;
     // 槽位要按「这几步会碰到的不同专家数」给足：一步 10 个，3 步最多 30 个。给不够不会错（按 §8.5
     // 退回 CPU），但那样量出来的就不是设备路径了。真正的答案是专家缓存那套淘汰与配额（interfaces §5）。
+    // 因此 --tokens 一旦超过 3，末步至少有一个专家走的是 CPU，末步 logits 与主机不再同口径（实测
+    // --tokens 4 时 routed=191/192、failed=1、L1 相对差 1.9e-2）——那不是回归，是槽位不够。
     constexpr int kSlots = 32;
     CudaExpertWorker single_worker(0, kSlots);
     CudaGroupFleet dev_fleet;

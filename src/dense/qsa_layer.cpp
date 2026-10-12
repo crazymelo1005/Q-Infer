@@ -186,11 +186,13 @@ bool load_bf16_2d(const artifact::GgufFile& g, const artifact::GgufTensorInfo& t
 // 读一张量化投影的字节，并按它自己的档做一次矩阵乘。
 bool project(const artifact::GgufFile& g, const artifact::GgufTensorInfo& t,
              const experts::MatrixSpec& spec, const float* x, std::vector<std::uint8_t>& w,
-             experts::FfnScratch& sc, float* out, std::string& err) {
-    w.resize(static_cast<std::size_t>(spec.rows * spec.row_bytes()));
-    if (!g.read_at(t.offset, w.data(), w.size())) {
-        err = t.name + " 读失败";
-        return false;
+             bool reload, experts::FfnScratch& sc, float* out, std::string& err) {
+    if (reload) {
+        w.resize(static_cast<std::size_t>(spec.rows * spec.row_bytes()));
+        if (!g.read_at(t.offset, w.data(), w.size())) {
+            err = t.name + " 读失败";
+            return false;
+        }
     }
     if (!experts::quantize_input(spec, x, sc, err)) return false;
     return experts::run_gemv(spec, w.data(), sc, out, err);
@@ -217,8 +219,9 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
     const std::uint64_t hd = layer.sh.head_dim;
     const std::uint64_t idx_dim = layer.idx_dim;
 
-    // 0. 一层一次：把四个 norm 与索引器的两个 BF16 投影读进来（幂等）。
-    if (s.q_norm_w.empty()) {
+    // 0. 一层一次：把四个 norm 与索引器的两个 BF16 投影读进来（按层号判，见 QsaScratch::w_layer）。
+    const bool reload = s.w_layer != layer.layer;
+    if (reload) {
         if (!load_f32_1d(gguf, *layer.t_q_norm, s.q_norm_w, err) ||
             !load_f32_1d(gguf, *layer.t_k_norm, s.k_norm_w, err) ||
             !load_f32_1d(gguf, *layer.t_idx_q_norm, s.idx_q_norm_w, err) ||
@@ -237,9 +240,9 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
     s.q_full.assign(static_cast<std::size_t>(layer.q.rows), 0.0f);
     s.k_raw.assign(static_cast<std::size_t>(layer.k.rows), 0.0f);
     s.v_raw.assign(static_cast<std::size_t>(layer.v.rows), 0.0f);
-    if (!project(gguf, *layer.t_q, layer.q, x, s.w_q, s.gemv, s.q_full.data(), err) ||
-        !project(gguf, *layer.t_k, layer.k, x, s.w_k, s.gemv, s.k_raw.data(), err) ||
-        !project(gguf, *layer.t_v, layer.v, x, s.w_v, s.gemv, s.v_raw.data(), err)) {
+    if (!project(gguf, *layer.t_q, layer.q, x, s.w_q, reload, s.gemv, s.q_full.data(), err) ||
+        !project(gguf, *layer.t_k, layer.k, x, s.w_k, reload, s.gemv, s.k_raw.data(), err) ||
+        !project(gguf, *layer.t_v, layer.v, x, s.w_v, reload, s.gemv, s.v_raw.data(), err)) {
         return false;
     }
 
@@ -331,10 +334,11 @@ bool run_qsa_layer(const artifact::GgufFile& gguf, const QsaLayer& layer, const 
     if (!qsa_gate_apply_f32(s.attn.data(), s.q_full.data(), layer.sh, s.gated.data(), err)) {
         return false;
     }
-    if (!project(gguf, *layer.t_out, layer.out, s.gated.data(), s.w_out, s.gemv, out, err)) {
+    if (!project(gguf, *layer.t_out, layer.out, s.gated.data(), s.w_out, reload, s.gemv, out, err)) {
         return false;
     }
     if (append_pinned && !s.window->unpin(append_page, err)) return false;
+    s.w_layer = layer.layer;
     ++s.pos;
     return true;
 }

@@ -57,6 +57,11 @@ struct GdnScratch {
     std::vector<std::uint8_t> w_conv1d, w_alpha, w_beta, w_qkv, w_gate, w_out;
     std::vector<float> dt, ssm_a, ssm_norm, qkv, z, y, out;
     std::vector<float> q_scaled;  // q 乘过 1/sqrt(S) 的那一份
+
+    // 上面那几份权重是**按层缓存**的：一层里它们恒定，重复读没意义（每层约 32 MB，而每一步都重读一遍，
+    // 见 engine §6 的实测）；而「换层了」必须重读——故记账的是层号，不是「缓冲空不空」。用后者在换层
+    // 复用同一份 scratch 时会静默拿错层的权重（形状一样、值不对），那种错不给调用方留自由度。
+    int w_layer = -1;
 };
 
 // 跑一层：x 长 n_embd，out 长 n_embd（覆盖写）。state 与 conv 跨 token 存活。

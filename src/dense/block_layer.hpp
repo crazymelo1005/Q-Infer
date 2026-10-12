@@ -69,11 +69,12 @@ struct BlockScratch {
 // 也含被交出去的那批）→ gr_write（两段门控残差的写回）。interfaces §7 把「每步耗时」列为必测观测，
 // 这里是它的一层粒度版本。
 struct LayerPhases {
-    double load_ms = 0.0;  // 把两组 hc_* 的六个投影解成 F32（每层每次调用都做一遍，见下面的说明）
+    double load_ms = 0.0;  // 把两组 hc_* 的六个投影解成 F32（**每层一次**：该层的 scratch 第一次调用时读，
+                           // 之后恒为 0——权重按层缓存，见 block_layer.cpp 的 load_gr_group）
     double gr_read_ms = 0.0;
     double attn_ms = 0.0;
-    // attn_ms 里属于「量化投影」的那一段（**含每步重新读这些权重**；只有 GDN 层填，QSA 记 0）。
-    // 它和 rest = attn_ms − attn_proj_ms 的比，就是「在读权重还是在算」。
+    // attn_ms 里属于「量化投影」的那一段（只有 GDN 层填，QSA 记 0）。**首个 token 含读权重**，
+    // 之后各步的权重已在 scratch 里（按层缓存），故这一段是纯粹的算术时间。
     double attn_proj_ms = 0.0;
     double moe_ms = 0.0;
     double gr_write_ms = 0.0;

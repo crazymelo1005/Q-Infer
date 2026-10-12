@@ -117,11 +117,11 @@ std::vector<std::uint8_t> bf16_vec(std::uint64_t n, float base) {
     return out;
 }
 
-std::vector<TensorSpec> gdn_tensors(const std::string& b, bool bad_conv = false) {
+std::vector<TensorSpec> gdn_tensors(const std::string& b, bool bad_conv = false, int seed0 = 1) {
     std::vector<TensorSpec> ts;
-    ts.push_back({b + "attn_qkv.weight", {kN, kCd}, 8, q8_0_rows(kCd, kN, 1)});
-    ts.push_back({b + "attn_gate.weight", {kN, kVd}, 8, q8_0_rows(kVd, kN, 2)});
-    ts.push_back({b + "ssm_out.weight", {kVd, kN}, 8, q8_0_rows(kN, kVd, 3)});
+    ts.push_back({b + "attn_qkv.weight", {kN, kCd}, 8, q8_0_rows(kCd, kN, seed0)});
+    ts.push_back({b + "attn_gate.weight", {kN, kVd}, 8, q8_0_rows(kVd, kN, seed0 + 1)});
+    ts.push_back({b + "ssm_out.weight", {kVd, kN}, 8, q8_0_rows(kN, kVd, seed0 + 2)});
     ts.push_back({b + "ssm_conv1d.weight", {bad_conv ? kDc + 1 : kDc, kCd}, 0,
                   f32_vec(std::vector<float>(static_cast<std::size_t>((bad_conv ? kDc + 1 : kDc) * kCd), 0.25f))});
     ts.push_back({b + "ssm_alpha.weight", {kN, kHv}, 30, bf16_vec(kN * kHv, 1.0f)});
@@ -254,6 +254,34 @@ int main(int argc, char** argv) {
         for (std::size_t i = 0; i < out.size(); ++i) {
             CHECK(std::bit_cast<std::uint32_t>(fresh[i]) == std::bit_cast<std::uint32_t>(out[i]));
         }
+    }
+
+    // 同一份 scratch 跨层复用：必须按层号重读权重（记账的是层号，不是「缓冲空不空」）。
+    {
+        std::vector<TensorSpec> ts = gdn_tensors("blk.0.");
+        const std::vector<TensorSpec> t1 = gdn_tensors("blk.1.", /*bad_conv=*/false, /*seed0=*/5);
+        ts.insert(ts.end(), t1.begin(), t1.end());
+        const std::filesystem::path p = write_gguf("qinfer_gdn_two_layers.gguf", ts);
+        artifact::GgufFile g;
+        std::string err;
+        CHECK(g.open(p.string(), err));
+        GdnLayer l0, l1;
+        CHECK(build_gdn_layer(g, 0, kN, kHd, kDc, l0, err));
+        CHECK(build_gdn_layer(g, 1, kN, kHd, kDc, l1, err));
+
+        const std::vector<float> x = make_x();
+        std::vector<float> out(kN, 0.0f);
+        GdnScratch shared, fresh;
+        CHECK(run_gdn_layer(g, l0, x.data(), out.data(), shared, err));
+        const std::vector<std::uint8_t> l0_qkv = shared.w_qkv;  // 层 0 的字节
+        CHECK(run_gdn_layer(g, l1, x.data(), out.data(), shared, err));  // 换层 → 必须重读
+        CHECK(run_gdn_layer(g, l1, x.data(), out.data(), fresh, err));
+        // 两层的权重确实不同（否则这条用例是空转）。
+        CHECK(l0_qkv != fresh.w_qkv);
+        // 换层之后，缓存里放的是这一层（不是上一层）的字节。
+        CHECK(shared.w_qkv == fresh.w_qkv);
+        CHECK(shared.w_gate == fresh.w_gate);
+        CHECK(shared.w_out == fresh.w_out);
     }
 
     // 三种「接错必须报错」。
