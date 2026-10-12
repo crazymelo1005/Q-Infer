@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <fstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace qinfer::artifact {
@@ -28,6 +29,19 @@ struct GgufTensorInfo {
     }
 };
 
+// 元数据段的一个值。GGUF 把整份分词器也放在这里（`tokenizer.ggml.{tokens,merges,token_type,pre}`、
+// `tokenizer.chat_template`），故读元数据不是可选项。只保留认得的那几类：整数族、浮点族、布尔、字符串，
+// 以及数组（元素落到 strs / nums / reals）。不认识的类型码整条跳过——不猜。
+struct GgufMeta {
+    std::uint32_t type = 0;            // GGUF 类型码（0 = uint8 … 12 = float64）
+    std::uint64_t num = 0;             // 整数族与布尔（布尔记 0/1）
+    double real = 0.0;                 // 浮点族
+    std::string str;                   // 字符串
+    std::vector<std::string> strs;     // 字符串数组（tokens / merges 就在这里）
+    std::vector<std::uint64_t> nums;   // 整数/布尔数组（token_type 在这里）
+    std::vector<double> reals;         // 浮点数组
+};
+
 class GgufFile {
 public:
     GgufFile() = default;
@@ -40,6 +54,14 @@ public:
 
     const std::vector<GgufTensorInfo>& tensors() const { return tensors_; }
     const GgufTensorInfo* find(const std::string& name) const;
+
+    // 元数据（键 → 值）。不存在返回 nullptr。真模型那份约 20 至 30 MB（词表与合并规则在里边）。
+    const GgufMeta* meta(const std::string& key) const;
+    const std::vector<std::string>* meta_strings(const std::string& key) const;
+    const std::vector<std::uint64_t>* meta_nums(const std::string& key) const;
+    // 整数（含布尔）标量；不是这一类或不存在返回假。
+    bool meta_u64(const std::string& key, std::uint64_t& out) const;
+    const std::string* meta_str(const std::string& key) const;
 
     std::uint64_t data_start() const { return data_start_; }
     std::uint64_t file_size() const { return file_size_; }
@@ -68,6 +90,7 @@ private:
     mutable const std::uint8_t* map_ = nullptr;   // 整个文件
     mutable std::uint64_t map_len_ = 0;
     mutable bool map_tried_ = false;
+    mutable std::unordered_map<std::string, GgufMeta> meta_;
     std::vector<GgufTensorInfo> tensors_;
     std::uint64_t data_start_ = 0;
     std::uint64_t file_size_ = 0;

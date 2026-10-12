@@ -37,20 +37,36 @@ bool read_string(std::ifstream& f, std::string& out) {
     return n == 0 || read_exact(f, out.data(), static_cast<std::size_t>(n));
 }
 
-// 只按类型跨过值；数组要递归，否则后面的张力信息会错位。
-bool skip_value(std::ifstream& f, std::uint32_t type) {
+// 读一个值（按类型）。数组要递归，否则后面的张力信息会错位。认不出的类型返回假——不猜。
+bool read_value(std::ifstream& f, std::uint32_t type, GgufMeta& out) {
+    out.type = type;
     switch (type) {
-        case kUint8: case kInt8: case kBool: { std::uint8_t v; return read_exact(f, &v, 1); }
-        case kUint16: case kInt16: { std::uint16_t v; return read_exact(f, &v, 2); }
-        case kUint32: case kInt32: case kFloat32: { std::uint32_t v; return read_exact(f, &v, 4); }
-        case kUint64: case kInt64: case kFloat64: { std::uint64_t v; return read_exact(f, &v, 8); }
-        case kString: { std::string s; return read_string(f, s); }
+        case kUint8: { std::uint8_t v = 0; if (!read_exact(f, &v, 1)) return false; out.num = v; return true; }
+        case kInt8: { std::int8_t v = 0; if (!read_exact(f, &v, 1)) return false; out.num = static_cast<std::uint64_t>(v); return true; }
+        case kUint16: { std::uint16_t v = 0; if (!read_exact(f, &v, 2)) return false; out.num = v; return true; }
+        case kInt16: { std::int16_t v = 0; if (!read_exact(f, &v, 2)) return false; out.num = static_cast<std::uint64_t>(v); return true; }
+        case kUint32: { std::uint32_t v = 0; if (!read_exact(f, &v, 4)) return false; out.num = v; return true; }
+        case kInt32: { std::int32_t v = 0; if (!read_exact(f, &v, 4)) return false; out.num = static_cast<std::uint64_t>(v); return true; }
+        case kUint64: { if (!read_u64(f, out.num)) return false; return true; }
+        case kInt64: { std::int64_t v = 0; if (!read_exact(f, &v, 8)) return false; out.num = static_cast<std::uint64_t>(v); return true; }
+        case kFloat32: { std::uint32_t v = 0; if (!read_exact(f, &v, 4)) return false; float fv = 0; std::memcpy(&fv, &v, 4); out.real = fv; return true; }
+        case kFloat64: { std::uint64_t v = 0; if (!read_u64(f, v)) return false; double dv = 0; std::memcpy(&dv, &v, 8); out.real = dv; return true; }
+        case kBool: { std::uint8_t v = 0; if (!read_exact(f, &v, 1)) return false; out.num = v ? 1 : 0; return true; }
+        case kString: return read_string(f, out.str);
         case kArray: {
             std::uint32_t elem = 0;
             std::uint64_t count = 0;
             if (!read_u32(f, elem) || !read_u64(f, count)) return false;
-            for (std::uint64_t i = 0; i < count; ++i)
-                if (!skip_value(f, elem)) return false;
+            if (count > (1ull << 32)) return false;  // 元数据里的数组不该这么大
+            for (std::uint64_t i = 0; i < count; ++i) {
+                GgufMeta one;
+                if (!read_value(f, elem, one)) return false;
+                switch (elem) {
+                    case kString: out.strs.push_back(std::move(one.str)); break;
+                    case kFloat32: case kFloat64: out.reals.push_back(one.real); break;
+                    default: out.nums.push_back(one.num); break;  // 整数族与布尔
+                }
+            }
             return true;
         }
         default: return false;
@@ -61,9 +77,10 @@ std::uint64_t align_up(std::uint64_t v, std::uint64_t a) {
     return a == 0 ? v : (v + a - 1) / a * a;
 }
 
-// 解析结果：张力表 + 对齐 + 数据区起点。两个读取类共用这一份，避免两处各写一遍头部解析。
+// 解析结果：张力表 + 元数据 + 对齐 + 数据区起点。两个读取类共用这一份，避免两处各写一遍头部解析。
 struct Parsed {
     std::vector<GgufTensorInfo> tensors;
+    std::unordered_map<std::string, GgufMeta> meta;
     std::uint64_t alignment = kDefaultAlignment;
     std::uint64_t data_start = 0;
     std::uint64_t file_size = 0;
@@ -97,16 +114,15 @@ bool parse_gguf(std::ifstream& f, const std::string& path, Parsed& out, std::str
             err = path + " 键值区截断";
             return false;
         }
-        if (key == "general.alignment" && type == kUint32) {
-            std::uint32_t a = 0;
-            if (!read_u32(f, a)) { err = path + " general.alignment 截断"; return false; }
-            if (a != 0) out.alignment = a;
-            continue;
-        }
-        if (!skip_value(f, type)) {
-            err = path + " 键 " + key + " 的值无法跨过";
+        GgufMeta value;
+        if (!read_value(f, type, value)) {
+            err = path + " 键 " + key + " 的值读不出来（类型码 " + std::to_string(type) + "）";
             return false;
         }
+        if (key == "general.alignment" && type == kUint32 && value.num != 0) {
+            out.alignment = value.num;
+        }
+        out.meta.insert_or_assign(std::move(key), std::move(value));
     }
 
     out.tensors.reserve(static_cast<std::size_t>(tensor_count > 4096 ? 4096 : tensor_count));
@@ -151,8 +167,36 @@ void GgufFile::close() {
     map_tried_ = false;
     if (file_.is_open()) file_.close();
     tensors_.clear();
+    meta_.clear();
     data_start_ = 0;
     file_size_ = 0;
+}
+
+const GgufMeta* GgufFile::meta(const std::string& key) const {
+    const auto it = meta_.find(key);
+    return it == meta_.end() ? nullptr : &it->second;
+}
+
+const std::vector<std::string>* GgufFile::meta_strings(const std::string& key) const {
+    const GgufMeta* m = meta(key);
+    return m == nullptr || m->strs.empty() ? nullptr : &m->strs;
+}
+
+const std::vector<std::uint64_t>* GgufFile::meta_nums(const std::string& key) const {
+    const GgufMeta* m = meta(key);
+    return m == nullptr || m->nums.empty() ? nullptr : &m->nums;
+}
+
+bool GgufFile::meta_u64(const std::string& key, std::uint64_t& out) const {
+    const GgufMeta* m = meta(key);
+    if (m == nullptr || m->type == 6 || m->type == 12 || m->type == 8 || m->type == 9) return false;
+    out = m->num;
+    return true;
+}
+
+const std::string* GgufFile::meta_str(const std::string& key) const {
+    const GgufMeta* m = meta(key);
+    return m == nullptr || m->type != 8 ? nullptr : &m->str;
 }
 
 bool GgufFile::ensure_mapped() const {
@@ -190,6 +234,7 @@ bool GgufFile::open(const std::string& path, std::string& err) {
         return false;
     }
     tensors_ = std::move(p.tensors);
+    meta_ = std::move(p.meta);
     data_start_ = p.data_start;
     file_size_ = p.file_size;
     return true;

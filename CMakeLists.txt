@@ -30,6 +30,12 @@ add_library(qinfer_artifact
 )
 target_include_directories(qinfer_artifact PUBLIC src)
 
+add_library(qinfer_text
+  src/text/tokenizer.cpp
+)
+target_include_directories(qinfer_text PUBLIC src)
+target_link_libraries(qinfer_text PUBLIC qinfer_artifact)
+
 add_library(qinfer_ple
   src/ple/row_path.cpp
   src/ple/block.cpp
@@ -112,6 +118,9 @@ target_link_libraries(test_step_budget PRIVATE qinfer_scheduling)
 
 add_executable(test_memory_plan tests/test_memory_plan.cpp)
 target_link_libraries(test_memory_plan PRIVATE qinfer_scheduling)
+
+add_executable(test_tokenizer tests/test_tokenizer.cpp)
+target_link_libraries(test_tokenizer PRIVATE qinfer_text)
 
 add_executable(test_iq4nl tests/test_iq4nl.cpp)
 target_link_libraries(test_iq4nl PRIVATE qinfer_kernels)
@@ -291,6 +300,7 @@ add_test(NAME page_table COMMAND test_page_table)
 add_test(NAME budget_arbiter COMMAND test_budget_arbiter)
 add_test(NAME step_budget COMMAND test_step_budget)
 add_test(NAME memory_plan COMMAND test_memory_plan)
+add_test(NAME tokenizer COMMAND test_tokenizer)
 add_test(NAME iq4nl COMMAND test_iq4nl)
 add_test(NAME iq2xs COMMAND test_iq2xs)
 add_test(NAME q8k COMMAND test_q8k)
