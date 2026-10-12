@@ -31,6 +31,8 @@ target_include_directories(qinfer_artifact PUBLIC src)
 
 add_library(qinfer_ple
   src/ple/row_path.cpp
+  src/ple/block.cpp
+  src/ple/spec.cpp
 )
 target_include_directories(qinfer_ple PUBLIC src)
 target_link_libraries(qinfer_ple PUBLIC qinfer_artifact qinfer_kernels qinfer_storage qinfer_scheduling)
@@ -177,6 +179,9 @@ target_link_libraries(thread_pool_bench PRIVATE qinfer_experts qinfer_scheduling
 add_executable(test_ple_read_path tests/test_ple_read_path.cpp)
 target_link_libraries(test_ple_read_path PRIVATE qinfer_ple)
 
+add_executable(test_ple_block tests/test_ple_block.cpp)
+target_link_libraries(test_ple_block PRIVATE qinfer_ple)
+
 add_executable(test_gguf_table tests/test_gguf_table.cpp)
 target_link_libraries(test_gguf_table PRIVATE qinfer_artifact qinfer_kernels)
 
@@ -298,6 +303,7 @@ add_test(NAME kv_pool COMMAND test_kv_pool)
 add_test(NAME row_cache COMMAND test_row_cache)
 add_test(NAME expert_cache COMMAND test_expert_cache)
 add_test(NAME ple_read_path COMMAND test_ple_read_path)
+add_test(NAME ple_block COMMAND test_ple_block)
 add_test(NAME gguf_table COMMAND test_gguf_table)
 add_test(NAME expert_formats COMMAND test_expert_formats)
 add_test(NAME ffn COMMAND test_ffn)
