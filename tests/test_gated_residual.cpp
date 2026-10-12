@@ -13,6 +13,10 @@
 #include "artifact/gguf_table.hpp"
 #include "check.hpp"
 #include "kernels/bf16.hpp"
+#include "scheduling/thread_pool.hpp"
+#include <algorithm>
+#include <atomic>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -347,6 +351,70 @@ void test_f32_tensor_is_read_by_its_declared_precision() {
     CHECK(dw > 1e-4);
 }
 
+// 按行并行（池子）与单线程**逐位相同**：GR 的那两个投影都是「一行一个独立点积」，故只切行、
+// 不动归约维，累加顺序一字不变。夹具必须够大：N=8 / lr=5 那种规模切不出第二块，用例会空转——
+// 故这里用真模型的几何（N 2560 / hc 4 / lr 320）。权重是伪随机的，不存在块级周期性那种巧合。
+void test_row_parallel_is_bitwise_identical() {
+    constexpr std::uint64_t N = 2560, H = 4, L = 320;
+    Lcg g{};
+    const std::vector<std::uint16_t> wn = rand_weights(N * H, g);
+    const std::vector<std::uint16_t> wd = rand_weights(L * N * H, g);
+    const std::vector<std::uint16_t> wu = rand_weights(N * H * L, g);
+    const std::vector<std::uint16_t> wi = rand_weights(H * N * H, g);
+    std::vector<float> R(static_cast<std::size_t>(N * H));
+    for (std::size_t i = 0; i < R.size(); ++i) R[i] = g.next();
+    const GrShapes s{N, H, L};
+    const GrWeights w{GrTensor{wn.data()}, GrTensor{wd.data()}, GrTensor{wu.data()},
+                      GrTensor{wi.data()}};
+
+    const int nt = 8;
+    // 非空转：这个几何下切块确实多于一块（否则池子有没有都一样，这条用例证明不了什么）。
+    {
+        std::atomic<int> chunks{0};
+        qinfer::scheduling::ThreadPool probe(nt);
+        probe.run_rows(L, /*grain=*/8, [&](std::uint64_t, std::uint64_t) { chunks.fetch_add(1); });
+        probe.run_rows(N, /*grain=*/8, [&](std::uint64_t, std::uint64_t) { chunks.fetch_add(1); });
+        CHECK(chunks.load() > 2);
+    }
+
+    std::vector<float> m1(N, 0.0f), i1(H, 0.0f), m2(N, 0.0f), i2(H, 0.0f);
+    GrScratch sc1, sc2;
+    std::string err;
+    qinfer::scheduling::set_pool_threads(0);
+    CHECK(gr_read(s, w, R.data(), kEps, m1.data(), i1.data(), sc1, err));
+    CHECK(err.empty());
+    bool nonzero = false;
+    for (const float v : m1) {
+        if (v != 0.0f) nonzero = true;
+    }
+    CHECK(nonzero);
+
+    qinfer::scheduling::set_pool_threads(nt);
+    for (int rep = 0; rep < 3; ++rep) {
+        std::fill(m2.begin(), m2.end(), 0.0f);
+        CHECK(gr_read(s, w, R.data(), kEps, m2.data(), i2.data(), sc2, err));
+    }
+    qinfer::scheduling::set_pool_threads(0);
+
+    int same_m = 0, same_i = 0;
+    for (std::uint64_t d = 0; d < N; ++d) {
+        if (std::bit_cast<std::uint32_t>(m1[static_cast<std::size_t>(d)]) ==
+            std::bit_cast<std::uint32_t>(m2[static_cast<std::size_t>(d)])) {
+            ++same_m;
+        }
+    }
+    for (std::uint64_t c = 0; c < H; ++c) {
+        if (std::bit_cast<std::uint32_t>(i1[static_cast<std::size_t>(c)]) ==
+            std::bit_cast<std::uint32_t>(i2[static_cast<std::size_t>(c)])) {
+            ++same_i;
+        }
+    }
+    std::printf("  gr_read：单线程 对 %d 线程，mixed 位相同 %d/%llu、inject %d/%llu\n", nt, same_m,
+                (unsigned long long) N, same_i, (unsigned long long) H);
+    CHECK(same_m == static_cast<int>(N));
+    CHECK(same_i == static_cast<int>(H));
+}
+
 void test_bad_inputs_fail_loudly() {
     const Fixture fx;
     std::vector<float> mixed(kN, 0.0f), inject(kHc, 0.0f), out(kN * kHc, 0.0f);
@@ -577,6 +645,7 @@ int main(int argc, char** argv) {
     test_write_weight_is_per_stream_and_centred_on_one();
     test_null_inject_leaves_the_buffer_untouched();
     test_f32_tensor_is_read_by_its_declared_precision();
+    test_row_parallel_is_bitwise_identical();
     test_bad_inputs_fail_loudly();
     std::puts("gated_residual: 超连接的两半——按流归一与门控平均、以及把块输出按流权重加回——"
               "与主机参考一致，且六处错读法都被拒");

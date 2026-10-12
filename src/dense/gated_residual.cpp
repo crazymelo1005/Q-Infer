@@ -1,6 +1,7 @@
 #include "dense/gated_residual.hpp"
 
 #include "kernels/bf16.hpp"
+#include "scheduling/thread_pool.hpp"
 
 #include <cmath>
 
@@ -84,8 +85,11 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
     }
 
     // lo = silu((bf16(xn) · w_downᵀ) / hc)：除 hc 在 silu 里面。
+    // 两个投影都按**行**并行（与 experts/ffn 的 run_gemv 同一条口径）：一行一个独立的点积、行间无依赖，
+    // 故只切行不改任何一个输出元素的累加顺序——并行版与单线程逐位相同（tests/test_gated_residual）。
+    // 它们是这一层里最后两块没走池子的稠密算术（每层两次 gr_read，实测占 20 线程步长的约四分之一）。
     scratch.lo.assign(static_cast<std::size_t>(lr), 0.0f);
-    for (std::uint64_t k = 0; k < lr; ++k) {
+    const auto lo_row = [&](std::uint64_t k) {
         const GrTensor wrow = row_view(w.w_down, k, hc_dim);
         double acc = 0.0;
         for (std::uint64_t i = 0; i < hc_dim; ++i) {
@@ -94,6 +98,13 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
         }
         const float p = static_cast<float>(acc);
         scratch.lo[static_cast<std::size_t>(k)] = siluf(p / static_cast<float>(hc));
+    };
+    if (scheduling::ThreadPool* p = scheduling::pool(); p != nullptr && lr > 1) {
+        p->run_rows(lr, 8, [&](std::uint64_t b, std::uint64_t e) {
+            for (std::uint64_t k = b; k < e; ++k) lo_row(k);
+        });
+    } else {
+        for (std::uint64_t k = 0; k < lr; ++k) lo_row(k);
     }
     scratch.lq.resize(static_cast<std::size_t>(lr));
     for (std::uint64_t k = 0; k < lr; ++k) {
@@ -101,8 +112,8 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
     }
 
     // mixed[d] = (1/hc) Σ_c xn[c,d] · sigmoid(bf16(lo) · w_up[c,d]ᵀ)：按流求平均，不是求和；
-    // 被门乘的是**未舍入**的 xn（gated 平均要的是未舍入值）。
-    for (std::uint64_t d = 0; d < n; ++d) {
+    // 被门乘的是**未舍入**的 xn（gated 平均要的是未舍入值）。同样按 d 并行。
+    const auto mixed_row = [&](std::uint64_t d) {
         float m = 0.0f;
         for (std::uint64_t c = 0; c < hc; ++c) {
             const std::uint64_t i = c * n + d;
@@ -116,6 +127,13 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
             m += scratch.xn[static_cast<std::size_t>(i)] * sigmoidf(g);
         }
         mixed[d] = m / static_cast<float>(hc);
+    };
+    if (scheduling::ThreadPool* p = scheduling::pool(); p != nullptr && n > 1) {
+        p->run_rows(n, 8, [&](std::uint64_t b, std::uint64_t e) {
+            for (std::uint64_t d = b; d < e; ++d) mixed_row(d);
+        });
+    } else {
+        for (std::uint64_t d = 0; d < n; ++d) mixed_row(d);
     }
 
     // inject[c] = bf16(xn)[c] · w_inject[c]ᵀ。w_inject 缺席时（最后那个 mixer）原样不动。
