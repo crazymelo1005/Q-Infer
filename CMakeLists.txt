@@ -479,6 +479,11 @@ if(QINFER_ENABLE_CUDA)
   target_link_libraries(test_gdn_qsa_cuda PRIVATE qinfer_kernels_cuda qinfer_dense_cuda qinfer_experts)
   add_test(NAME gdn_qsa_cuda COMMAND test_gdn_qsa_cuda)
 
+  # 阶段 B：设备 KV 池（对照主机 KvPageCache 字节；8K 夹具在 task 5 扩展）。
+  add_executable(test_kv_device_cuda tests/test_kv_device_cuda.cpp)
+  target_link_libraries(test_kv_device_cuda PRIVATE qinfer_kernels_cuda qinfer_dense_cuda)
+  add_test(NAME kv_device_cuda COMMAND test_kv_device_cuda)
+
   # 设备侧的专家前馈（权重常驻）住在 experts 一侧：它要按档分派、并复用主机的激活量化器，
   # 故不能塞进只依赖 kernels 的那个库里。
   add_library(qinfer_experts_cuda
@@ -497,6 +502,7 @@ if(QINFER_ENABLE_CUDA)
     src/dense/qsa_qk_prep_cuda.cu
     src/dense/qsa_index_attend_cuda.cu
     src/dense/qsa_layer_cuda.cu
+    src/dense/kv_device_cache.cu
     src/dense/dense_exec_cuda.cu
   )
   target_include_directories(qinfer_dense_cuda PUBLIC src)
