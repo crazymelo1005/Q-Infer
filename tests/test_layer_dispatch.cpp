@@ -443,7 +443,7 @@ void test_unavailable_group_is_skipped() {
 
     ExpertSource src = fx.source(8, 1, 0);
     src.begin_token();
-    IgpuExpertWorker igpu(/*device_usable=*/false);
+    IgpuExpertWorker igpu(/*force_unavailable=*/true);  // 模拟不可用（本机可能有核显）
     CpuExpertWorker cpu;
     qinfer::scheduling::BusShareLimiter bus(0);  // 份额为 0 即关闭
     std::vector<float> got(static_cast<std::size_t>(kHidden), 0.0f);
@@ -459,6 +459,23 @@ void test_unavailable_group_is_skipped() {
     CHECK(same_bits(got, direct_reference(fx.g, fx.ml, ids, w, x.data(), 0.0f), "跳过不可用的组"));
 }
 
+// A worker that claims to be available and always fails on submit: pins the
+// reroute-refund path independently of any real backend (the iGPU worker now
+// succeeds for its supported formats, so it cannot play this role).
+struct FailingWorker : qinfer::experts::ExpertWorker {
+    const char* name() const override { return "failing"; }
+    bool available() const override { return true; }
+    bool submit(const qinfer::experts::ExpertJob&, std::string& err) override {
+        ++failed;
+        err = "injected failure";
+        return false;
+    }
+    bool wait(std::string&) override { return true; }
+    const Stats& stats() const override { return st_; }
+    Stats st_;
+    int failed = 0;
+};
+
 void test_selected_group_failure_reroutes_and_refunds_share() {
     // 一个「可用、档也齐、份额也够」的组被选中后提交失败：这一批改派给 CPU 组，且选组时记进本步
     // 份额的字节要原额退回——不退的话，被白吃的尝试会把本步的份额耗掉（interfaces §8.3）。
@@ -469,11 +486,13 @@ void test_selected_group_failure_reroutes_and_refunds_share() {
 
     ExpertSource src = fx.source(8, 1, 0);
     src.begin_token();
-    IgpuExpertWorker igpu(/*device_usable=*/true);  // 可用，但内核还没接入 -> submit 必定失败
+    FailingWorker failer;
+    IgpuExpertWorker igpu(/*force_unavailable=*/true);  // 现在有真内核；本用例改用注入失败的工人
     CpuExpertWorker cpu;
     qinfer::scheduling::BusShareLimiter bus(64ull * 1024 * 1024);  // 份额给足，选组会选中它
     ComputeGroup lazy = igpu_group(igpu, bus);
     lazy.caps.formats = supported_format_mask();  // 刻意做成「档齐、但算不了」的组
+    lazy.worker = &failer;
     std::vector<ComputeGroup> groups{lazy, cpu_group(cpu)};
 
     std::vector<float> got(static_cast<std::size_t>(kHidden), 0.0f);
@@ -484,7 +503,7 @@ void test_selected_group_failure_reroutes_and_refunds_share() {
                                rs, err));
     CHECK(err.empty());
     CHECK(rs.rerouted == 1 && rs.routed == 0);
-    CHECK(igpu.stats().failed == 1);  // 它被调过，且失败了
+    CHECK(failer.failed == 1);  // 它被调过，且失败了
     CHECK(cpu.stats().jobs == 1);     // 结果由兜底组给出
     CHECK(bus.used() == 0);           // 份额退了回去
     CHECK(bus.refusals() == 0);       // 选组时是受理，不是被拒

@@ -331,10 +331,12 @@ bool VulkanRuntime::upload(const void* src, std::uint64_t bytes, void* dst, std:
         err = "upload: size exceeds the buffer";
         return false;
     }
-    if (it->second.mapped != nullptr) {
-        std::memcpy(it->second.mapped, src, static_cast<std::size_t>(bytes));
-        return true;
-    }
+    // Always go through a staged vkCmdCopyBuffer: writing device-local memory
+    // from the host (even HOST_COHERENT) proved unreliable on this iGPU — the
+    // compute read intermittently consumed stale bytes (an expert batch lost
+    // its second expert's weights). A copy command carries a proper memory
+    // dependency, which is the same class of fix the Intel SYCL notes needed
+    // for host<->device flag traffic.
     return copy_via_staging(it->second.buf, bytes, const_cast<void*>(src), /*to_device=*/true, err);
 }
 
@@ -348,10 +350,6 @@ bool VulkanRuntime::download(const void* src, std::uint64_t bytes, void* dst, st
     if (bytes > it->second.bytes) {
         err = "download: size exceeds the buffer";
         return false;
-    }
-    if (it->second.mapped != nullptr) {
-        std::memcpy(dst, it->second.mapped, static_cast<std::size_t>(bytes));
-        return true;
     }
     return copy_via_staging(it->second.buf, bytes, dst, /*to_device=*/false, err);
 }
@@ -624,6 +622,16 @@ bool VulkanRuntime::dispatch(vk::Pipeline pipeline, vk::PipelineLayout layout,
     bi.sType = vk::ST_COMMAND_BUFFER_BEGIN_INFO;
     bi.flags = vk::CB_ONE_TIME;
     BeginCommandBuffer_(cmd_, &bi);
+    // Uploads go through vkCmdCopyBuffer (see upload()), so the compute pass must
+    // observe the staged transfer writes: a transfer->compute memory dependency.
+    // (Without it, and with a host-direct write path, the shader intermittently
+    // consumed stale bytes on this iGPU.)
+    vk::MemoryBarrier hb{};
+    hb.sType = vk::ST_MEMORY_BARRIER;
+    hb.srcAccessMask = vk::ACCESS_TRANSFER_WRITE | vk::ACCESS_HOST_WRITE;
+    hb.dstAccessMask = vk::ACCESS_SHADER_READ;
+    CmdPipelineBarrier(cmd_, vk::STAGE_TRANSFER | vk::STAGE_HOST, vk::STAGE_COMPUTE, 0, 1, &hb, 0,
+                       nullptr, 0, nullptr);
     CmdBindPipeline_(cmd_, vk::PIPELINE_BIND_POINT_COMPUTE, pipeline);
     CmdBindDescriptorSets_(cmd_, vk::PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &set, 0, nullptr);
     if (push != nullptr && push_size > 0) {

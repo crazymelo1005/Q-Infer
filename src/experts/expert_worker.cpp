@@ -1,5 +1,7 @@
 #include "experts/expert_worker.hpp"
 
+#include "experts/igpu/igpu_expert.hpp"
+
 namespace qinfer::experts {
 
 namespace {
@@ -46,21 +48,54 @@ bool CpuExpertWorker::wait(std::string& err) {
     return true;
 }
 
+// Stage C: the real iGPU worker. Device probing is lazy (first available() or
+// submit()); the batch runs synchronously, matching the CPU worker's contract.
+IgpuExpertWorker::IgpuExpertWorker(bool force_unavailable)
+    : force_unavailable_(force_unavailable) {}
+
+IgpuExpertWorker::~IgpuExpertWorker() = default;
+
+bool IgpuExpertWorker::available() const {
+    if (force_unavailable_) {
+        reason_ = "forced unavailable (test switch)";
+        return false;
+    }
+    if (dev_ == nullptr) {
+        dev_ = std::make_unique<igpu::IgpuExpertDevice>();
+    }
+    if (dev_->ready()) return true;
+    std::string err;
+    if (!dev_->init(err)) {
+        reason_ = err.empty() ? "iGPU unavailable (no reason reported)" : err;
+        return false;
+    }
+    reason_.clear();
+    return true;
+}
+
 bool IgpuExpertWorker::submit(const ExpertJob& job, std::string& err) {
-    (void) job;
-    ++stats_.failed;
-    err = device_usable_ ? "核显内核尚未接入（interfaces §8.7）"
-                         : "核显不可用：本机无计算运行时（无 Level Zero；OpenCL 只注册了 nvidia.icd），"
-                           "且该设备在 Vulkan 的 192 项扩展里没有 integer_dot_product";
-    return false;
+    err.clear();
+    if (!available()) {
+        ++stats_.failed;
+        err = "iGPU unavailable: " + reason_;
+        return false;
+    }
+    if (!job_sane(job, err)) {
+        ++stats_.failed;
+        return false;
+    }
+    if (!dev_->run_batch(*job.spec, job.experts, job.n, job.x, job.hidden, job.out, err)) {
+        ++stats_.failed;
+        return false;
+    }
+    ++stats_.jobs;
+    stats_.experts += static_cast<std::uint64_t>(job.n);
+    return true;
 }
 
 bool IgpuExpertWorker::wait(std::string& err) {
-    if (!device_usable_) {
-        err = "核显不可用，没有待等的作业";
-        return false;
-    }
-    return true;
+    err.clear();
+    return true;  // synchronous implementation: submit has already finished
 }
 
 bool run_job_with_fallback(ExpertWorker& worker, ExpertWorker& fallback, const ExpertJob& job,

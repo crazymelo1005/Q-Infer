@@ -6,6 +6,7 @@
 // formats must be an explicit error.
 #include "experts/igpu/igpu_expert.hpp"
 
+#include "experts/expert_worker.hpp"
 #include "experts/ffn.hpp"
 #include "kernels/q2_0.hpp"
 
@@ -55,40 +56,53 @@ int compare(const std::vector<float>& a, const std::vector<float>& b) {
     return (ratio >= 0.99 && l1 <= 1e-4) ? 0 : 1;
 }
 
-int test_batch() {
-    experts::LayerSpec spec;
-    spec.gate.format = experts::Format::kQ2_0;
-    spec.gate.experts = 1;
-    spec.gate.rows = kFfn;
-    spec.gate.cols = kHidden;
-    spec.up = spec.gate;
-    spec.down.format = experts::Format::kQ2_0;
-    spec.down.experts = 1;
-    spec.down.rows = kHidden;
-    spec.down.cols = kFfn;
+constexpr int kN = 2;
 
-    constexpr int kN = 2;
-    std::vector<std::vector<std::uint8_t>> gw(kN), uw(kN), dw(kN);
+// Shared synthetic fixture: spec + per-expert Q2_0 weights + activation.
+struct Fixture {
+    experts::LayerSpec spec;
+    std::vector<std::vector<std::uint8_t>> gw, uw, dw;
     experts::ExpertWeights ws[kN];
+    std::vector<float> x;
+};
+
+Fixture build_fixture() {
+    Fixture f;
+    f.spec.gate.format = experts::Format::kQ2_0;
+    f.spec.gate.experts = 1;
+    f.spec.gate.rows = kFfn;
+    f.spec.gate.cols = kHidden;
+    f.spec.up = f.spec.gate;
+    f.spec.down.format = experts::Format::kQ2_0;
+    f.spec.down.experts = 1;
+    f.spec.down.rows = kHidden;
+    f.spec.down.cols = kFfn;
+    f.gw.resize(kN);
+    f.uw.resize(kN);
+    f.dw.resize(kN);
     for (int e = 0; e < kN; ++e) {
-        gw[e] = make_q2_0(kFfn * kGateBlocks, e + 1);
-        uw[e] = make_q2_0(kFfn * kGateBlocks, e + 11);
-        dw[e] = make_q2_0(kHidden * kDownBlocks, e + 21);
-        ws[e].gate = gw[e].data();
-        ws[e].up = uw[e].data();
-        ws[e].down = dw[e].data();
+        f.gw[static_cast<std::size_t>(e)] = make_q2_0(kFfn * kGateBlocks, e + 1);
+        f.uw[static_cast<std::size_t>(e)] = make_q2_0(kFfn * kGateBlocks, e + 11);
+        f.dw[static_cast<std::size_t>(e)] = make_q2_0(kHidden * kDownBlocks, e + 21);
+        f.ws[e].gate = f.gw[static_cast<std::size_t>(e)].data();
+        f.ws[e].up = f.uw[static_cast<std::size_t>(e)].data();
+        f.ws[e].down = f.dw[static_cast<std::size_t>(e)].data();
     }
-    std::vector<float> x(kHidden);
+    f.x.resize(kHidden);
     for (std::size_t i = 0; i < kHidden; ++i) {
-        x[i] = 0.5f + 0.02f * static_cast<float>((i * 5 + 1) % 13) *
+        f.x[i] = 0.5f + 0.02f * static_cast<float>((i * 5 + 1) % 13) *
                            (static_cast<float>(i % 2) * 2.0f - 1.0f);
     }
-    // Host reference: expert_ffn per expert into out + e*hidden.
+    return f;
+}
+
+int test_batch() {
+    Fixture f = build_fixture();
+    std::string err;
     std::vector<float> host_out(kN * kHidden, 0.0f);
     experts::FfnScratch scratch;
-    std::string err;
     for (int e = 0; e < kN; ++e) {
-        if (!experts::expert_ffn(spec, ws[e], x.data(), scratch,
+        if (!experts::expert_ffn(f.spec, f.ws[e], f.x.data(), scratch,
                                  host_out.data() + static_cast<std::size_t>(e) * kHidden, err)) {
             std::printf("FAIL host expert_ffn: %s\n", err.c_str());
             return 1;
@@ -101,17 +115,17 @@ int test_batch() {
         return 0;
     }
     std::vector<float> dev_out(kN * kHidden, 0.0f);
-    if (!dev.run_batch(spec, ws, kN, x.data(), kHidden, dev_out.data(), err)) {
+    if (!dev.run_batch(f.spec, f.ws, kN, f.x.data(), kHidden, dev_out.data(), err)) {
         std::printf("FAIL run_batch: %s\n", err.c_str());
         return 1;
     }
     const int bad = compare(host_out, dev_out);
 
     // Negative: an unsupported format must be an explicit error.
-    experts::LayerSpec bad_spec = spec;
+    experts::LayerSpec bad_spec = f.spec;
     bad_spec.gate.format = experts::Format::kIq2S;
     std::string e2;
-    if (dev.run_batch(bad_spec, ws, kN, x.data(), kHidden, dev_out.data(), e2)) {
+    if (dev.run_batch(bad_spec, f.ws, kN, f.x.data(), kHidden, dev_out.data(), e2)) {
         std::printf("FAIL unsupported format accepted\n");
         return 1;
     }
@@ -119,10 +133,65 @@ int test_batch() {
     return bad;
 }
 
+// Stage C task 5: the worker's submit surface, cross-checked against the CPU
+// worker on the same fixture; the forced-unavailable switch pins the failure
+// contract used by the reroute path.
+int test_worker_backend() {
+    Fixture f = build_fixture();
+    const int ids[kN] = {0, 1};
+    std::string err;
+
+    experts::IgpuExpertWorker igpu;
+    if (!igpu.available()) {
+        std::printf("  worker skipped (no iGPU): %s\n", "<unavailable>");
+    } else {
+        experts::CpuExpertWorker cpu;
+        std::vector<float> got_igpu(kN * kHidden, 0.0f);
+        std::vector<float> got_cpu(kN * kHidden, 0.0f);
+        experts::ExpertJob ji{&f.spec, f.ws, ids, kN, f.x.data(), kHidden, got_igpu.data()};
+        experts::ExpertJob jc{&f.spec, f.ws, ids, kN, f.x.data(), kHidden, got_cpu.data()};
+        if (!igpu.submit(ji, err) || !igpu.wait(err)) {
+            std::printf("FAIL igpu submit: %s\n", err.c_str());
+            return 1;
+        }
+        if (!cpu.submit(jc, err) || !cpu.wait(err)) {
+            std::printf("FAIL cpu submit: %s\n", err.c_str());
+            return 1;
+        }
+        if (igpu.stats().jobs != 1 || igpu.stats().experts != kN) {
+            std::printf("FAIL igpu stats: jobs %llu experts %llu\n",
+                        (unsigned long long) igpu.stats().jobs,
+                        (unsigned long long) igpu.stats().experts);
+            return 1;
+        }
+        if (compare(got_cpu, got_igpu) != 0) {
+            std::printf("FAIL worker outputs differ\n");
+            return 1;
+        }
+    }
+
+    experts::IgpuExpertWorker forced(/*force_unavailable=*/true);
+    if (forced.available()) {
+        std::printf("FAIL forced-unavailable worker reports available\n");
+        return 1;
+    }
+    std::vector<float> sink(kN * kHidden, 0.0f);
+    experts::ExpertJob jf{&f.spec, f.ws, ids, kN, f.x.data(), kHidden, sink.data()};
+    std::string e2;
+    if (forced.submit(jf, e2) || e2.empty() || forced.stats().failed != 1) {
+        std::printf("FAIL forced-unavailable submit contract\n");
+        return 1;
+    }
+    std::printf("  forced-unavailable submit rejected: %s\n", e2.c_str());
+    return 0;
+}
+
 }  // namespace
 
 int main() {
-    int rc = test_batch();
-    if (rc == 0) std::puts("igpu_expert: batch matches expert_ffn; formats gated");
+    int rc = 0;
+    rc += test_batch();
+    rc += test_worker_backend();
+    if (rc == 0) std::puts("igpu_expert: batch matches expert_ffn; worker contract pinned");
     return rc;
 }

@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 #include "experts/ffn.hpp"
@@ -65,19 +66,27 @@ private:
     bool pending_ = false;
 };
 
-// 核显占位：本仓库还没有核显内核，故 available() 恒假，err 里带实测原因。它的存在是为了让接口
-// 与失败路径现在就可测，而不是等到有内核时才发现接口不对。
+// 核显工人（阶段 C）：真实实现。设备探测惰性发生在第一次 available()/submit()；能力的档集合
+// 目前是 Q2_0（着色器集见 src/experts/igpu/shaders）。`force_unavailable` 供测试在「确实有核显」
+// 的机器上走不可用分支（错误重派路径的用例）。
+namespace igpu {
+struct IgpuExpertDevice;
+}
+
 class IgpuExpertWorker : public ExpertWorker {
 public:
-    explicit IgpuExpertWorker(bool device_usable) : device_usable_(device_usable) {}
+    explicit IgpuExpertWorker(bool force_unavailable = false);
+    ~IgpuExpertWorker() override;
     const char* name() const override { return "igpu"; }
-    bool available() const override { return device_usable_; }
+    bool available() const override;
     bool submit(const ExpertJob& job, std::string& err) override;
     bool wait(std::string& err) override;
     const Stats& stats() const override { return stats_; }
 
 private:
-    bool device_usable_ = false;
+    bool force_unavailable_ = false;
+    mutable std::unique_ptr<igpu::IgpuExpertDevice> dev_;
+    mutable std::string reason_;
     Stats stats_;
 };
 

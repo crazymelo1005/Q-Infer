@@ -13,6 +13,23 @@
 using namespace qinfer::experts;
 
 namespace {
+// Test double: availability comes from the argument, not from a real probe
+// (the live iGPU probe is covered by test_igpu_expert). These cases only need
+// some worker behind the group.
+struct StubWorker : qinfer::experts::ExpertWorker {
+    explicit StubWorker(bool avail) : avail_(avail) {}
+    const char* name() const override { return "stub"; }
+    bool available() const override { return avail_; }
+    bool submit(const qinfer::experts::ExpertJob&, std::string& err) override {
+        err = "stub worker";
+        return false;
+    }
+    bool wait(std::string&) override { return true; }
+    const Stats& stats() const override { return st_; }
+    qinfer::experts::ExpertWorker::Stats st_;
+    bool avail_;
+};
+
 
 constexpr int kHidden = 256;
 constexpr int kFfn = 64;
@@ -83,7 +100,7 @@ void test_unknown_format_is_taken_by_nobody() {
     spec.gate = mat(Format::kUnknown, kFfn, kHidden);
     const ExpertJob job = make_job(spec);
     CpuExpertWorker cpu;
-    IgpuExpertWorker any(/*device_usable=*/true);
+    StubWorker any(/*avail=*/true);
     std::vector<ComputeGroup> groups{other_group(any, ~0u, nullptr), cpu_group(cpu)};
 
     std::string why;
@@ -117,7 +134,7 @@ void test_skips_unavailable_group() {
     const LayerSpec spec = make_spec();
     const ExpertJob job = make_job(spec);
     CpuExpertWorker cpu;
-    IgpuExpertWorker igpu(/*device_usable=*/false);
+    StubWorker igpu(/*avail=*/false);
     qinfer::scheduling::BusShareLimiter bus(64ull * 1024 * 1024);
     std::vector<ComputeGroup> groups{other_group(igpu, supported_format_mask(), &bus), cpu_group(cpu)};
 
@@ -135,7 +152,7 @@ void test_skips_group_without_the_format() {
     const LayerSpec spec = make_spec();
     const ExpertJob job = make_job(spec);
     CpuExpertWorker cpu;
-    IgpuExpertWorker partial(/*device_usable=*/true);
+    StubWorker partial(/*avail=*/true);
     const std::uint32_t only_gate_up = format_bit(Format::kIq2S);
     std::vector<ComputeGroup> groups{other_group(partial, only_gate_up, nullptr), cpu_group(cpu)};
 
@@ -151,7 +168,7 @@ void test_share_refuses_and_books() {
     const LayerSpec spec = make_spec();
     const ExpertJob job = make_job(spec);
     CpuExpertWorker cpu;
-    IgpuExpertWorker igpu(/*device_usable=*/true);
+    StubWorker igpu(/*avail=*/true);
 
     qinfer::scheduling::BusShareLimiter tight(kBatchBytes - 1);
     std::vector<ComputeGroup> g1{other_group(igpu, supported_format_mask(), &tight), cpu_group(cpu)};
@@ -173,7 +190,7 @@ void test_fallback_is_last_resort() {
     const LayerSpec spec = make_spec();
     const ExpertJob job = make_job(spec);
     CpuExpertWorker cpu;
-    IgpuExpertWorker igpu(/*device_usable=*/true);
+    StubWorker igpu(/*avail=*/true);
     std::vector<ComputeGroup> groups{cpu_group(cpu), other_group(igpu, supported_format_mask(), nullptr)};
 
     std::string why;
@@ -187,7 +204,7 @@ void test_fallback_is_last_resort() {
     CHECK(p2.group != nullptr && p2.group->kind == GroupKind::kCpu);
 
     // 一组都接不住：返回空，且理由非空（不静默）。
-    IgpuExpertWorker no_kernel(/*device_usable=*/true);
+    StubWorker no_kernel(/*avail=*/true);
     std::vector<ComputeGroup> nothing{other_group(no_kernel, 0, nullptr)};
     const GroupPick p3 = select_group(nothing, job, why);
     CHECK(p3.group == nullptr);
@@ -203,13 +220,13 @@ void test_cpu_and_igpu_group_defaults() {
     CHECK(c.bus == nullptr);  // 那条总线上的余量是它的，不需要限自己
     CHECK(c.caps.formats == supported_format_mask());
 
-    IgpuExpertWorker igpu(true);
+    StubWorker igpu(true);
     qinfer::scheduling::BusShareLimiter bus(1024);
     const ComputeGroup g = igpu_group(igpu, bus);
     CHECK(g.kind == GroupKind::kIgpu);
     CHECK(!g.fallback);
     CHECK(g.bus == &bus);
-    CHECK(g.caps.formats == 0);      // 核显内核尚未接入
+    CHECK(g.caps.formats == (1u << static_cast<int>(Format::kQ2_0)));  // 着色器集：现阶段只覆盖 Q2_0
     CHECK(!g.caps.integer_dot);      // 192 项扩展里没有整数点积指令
     // 份额为 0 即不启用：这一个不进候选（可用性也据此返回假）。
     qinfer::scheduling::BusShareLimiter off(0);

@@ -65,6 +65,7 @@ constexpr std::uint32_t ST_COMMAND_POOL_CREATE_INFO = 39;
 constexpr std::uint32_t ST_COMMAND_BUFFER_ALLOCATE_INFO = 40;
 constexpr std::uint32_t ST_COMMAND_BUFFER_BEGIN_INFO = 42;
 constexpr std::uint32_t ST_BUFFER_MEMORY_BARRIER = 44;
+constexpr std::uint32_t ST_MEMORY_BARRIER = 46;
 
 // ---- values ----
 constexpr std::uint32_t VK_SUCCESS = 0;
@@ -87,8 +88,10 @@ constexpr Flags ACCESS_SHADER_READ = 0x20;
 constexpr Flags ACCESS_SHADER_WRITE = 0x40;
 constexpr Flags ACCESS_TRANSFER_READ = 0x800;
 constexpr Flags ACCESS_TRANSFER_WRITE = 0x1000;
+constexpr Flags ACCESS_HOST_WRITE = 0x2000;
 constexpr Flags STAGE_COMPUTE = 0x800;
 constexpr Flags STAGE_TRANSFER = 0x1000;
+constexpr Flags STAGE_HOST = 0x4000;
 constexpr std::uint32_t DEVICE_TYPE_INTEGRATED_GPU = 1;
 constexpr std::uint32_t DEVICE_TYPE_DISCRETE_GPU = 2;
 constexpr std::uint32_t DEVICE_TYPE_CPU = 4;
@@ -326,6 +329,12 @@ struct BufferMemoryBarrier {
     Buffer buffer;
     DeviceSize offset;
     DeviceSize size;
+};
+struct MemoryBarrier {
+    std::uint32_t sType;
+    const void* pNext;
+    Flags srcAccessMask;
+    Flags dstAccessMask;
 };
 
 // ---- entry points ----

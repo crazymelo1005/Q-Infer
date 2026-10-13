@@ -389,7 +389,7 @@ void test_worker_computes_a_job_and_stays_resident() {
 void test_select_group_prefers_the_cuda_group() {
     const LayerSpec spec = make_spec();
     CudaExpertWorker worker(0, 4);
-    IgpuExpertWorker igpu(/*device_usable=*/false);
+    IgpuExpertWorker igpu(/*force_unavailable=*/true);
     qinfer::scheduling::BusShareLimiter off(0);
     CpuExpertWorker cpu;
     std::vector<ComputeGroup> groups{igpu_group(igpu, off), cuda_group(worker), cpu_group(cpu)};

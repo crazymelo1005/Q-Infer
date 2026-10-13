@@ -140,7 +140,10 @@ ComputeGroup igpu_group(ExpertWorker& worker, scheduling::BusShareLimiter& bus) 
     ComputeGroup g;
     g.kind = GroupKind::kIgpu;
     g.tier = MemoryTier::kSharedDdr;
-    g.caps.formats = 0;         // 核显内核尚未接入（interfaces §8.7）
+    // Stage C: the shader set covers Q2_0 (NVIDIA-style codebook GEMV on Vulkan);
+    // the mask grows with the shader set, like supported_format_mask() does for
+    // the CPU group.
+    g.caps.formats = format_bit(Format::kQ2_0);
     g.caps.integer_dot = false;  // 192 项扩展里没有 VK_KHR_shader_integer_dot_product
     g.worker = &worker;
     g.bus = &bus;
