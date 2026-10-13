@@ -108,10 +108,14 @@ add_library(qinfer_experts
   src/experts/expert_source.cpp
   src/experts/layer_dispatch.cpp
   src/experts/step_record.cpp
+  # Stage C: the iGPU path is dlopen-only (hand-written Vulkan ABI), so it
+  # compiles in the plain host build and activates only when a GPU is present.
+  src/experts/igpu/vulkan_runtime.cpp
 )
 target_include_directories(qinfer_experts PUBLIC src)
 target_link_libraries(qinfer_experts PUBLIC qinfer_artifact qinfer_kernels qinfer_storage
-                                           qinfer_scheduling)
+                                           qinfer_scheduling
+                       PRIVATE ${CMAKE_DL_LIBS})
 
 add_library(qinfer_kernels
   src/kernels/iq4nl.cpp
@@ -283,6 +287,12 @@ target_link_libraries(test_bus_share PRIVATE qinfer_scheduling)
 
 add_executable(test_expert_worker tests/test_expert_worker.cpp)
 target_link_libraries(test_expert_worker PRIVATE qinfer_experts)
+
+# Stage C: the iGPU Vulkan runtime (dlopen + hand-written ABI). Runs on every
+# machine: without a GPU it asserts the unavailable+reason contract.
+add_executable(test_igpu_runtime tests/test_igpu_runtime.cpp)
+target_link_libraries(test_igpu_runtime PRIVATE qinfer_experts)
+add_test(NAME igpu_runtime COMMAND test_igpu_runtime)
 
 add_executable(test_thread_pool tests/test_thread_pool.cpp)
 target_link_libraries(test_thread_pool PRIVATE qinfer_experts)

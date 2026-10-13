@@ -1,0 +1,469 @@
+// Vulkan runtime implementation (stage C task 1). See vulkan_runtime.hpp.
+#include "experts/igpu/vulkan_runtime.hpp"
+
+#include <dlfcn.h>
+
+#include <cstring>
+#include <vector>
+
+namespace qinfer::experts::igpu {
+
+namespace {
+
+constexpr std::uint32_t kApiVersion10 = (1u << 22);  // VK_MAKE_VERSION(1,0,0)
+
+bool has_llvmpipe(const char* name) {
+    return name != nullptr && std::strstr(name, "llvmpipe") != nullptr;
+}
+
+}  // namespace
+
+bool VulkanRuntime::load(std::string& err) {
+    err.clear();
+    if (device_ != nullptr) return true;
+    if (lib_ == nullptr) {
+        lib_ = dlopen("libvulkan.so.1", RTLD_NOW);
+        if (lib_ == nullptr) {
+            const char* d = dlerror();
+            err = std::string("cannot dlopen libvulkan.so.1: ") + (d != nullptr ? d : "?");
+            reason_ = err;
+            return false;
+        }
+    }
+    using GipaFn = void* (*)(vk::Instance, const char*);
+    auto gipa = reinterpret_cast<GipaFn>(dlsym(lib_, "vkGetInstanceProcAddr"));
+    if (gipa == nullptr) {
+        err = "libvulkan.so.1 exposes no vkGetInstanceProcAddr";
+        reason_ = err;
+        return false;
+    }
+    CreateInstance_ =
+        reinterpret_cast<vk::PfnCreateInstance>(gipa(nullptr, "vkCreateInstance"));
+    if (CreateInstance_ == nullptr) {
+        err = "vkCreateInstance not resolvable";
+        reason_ = err;
+        return false;
+    }
+    return true;
+}
+
+bool VulkanRuntime::init_device(std::string& err) {
+    err.clear();
+    if (device_ != nullptr) return true;
+    if (!load(err)) return false;
+    using GipaFn = void* (*)(vk::Instance, const char*);
+    auto gipa = reinterpret_cast<GipaFn>(dlsym(lib_, "vkGetInstanceProcAddr"));
+
+    vk::ApplicationInfo app{};
+    app.sType = vk::ST_APPLICATION_INFO;
+    app.pApplicationName = "qinfer";
+    app.pEngineName = "qinfer";
+    app.apiVersion = kApiVersion10;
+    vk::InstanceCreateInfo ici{};
+    ici.sType = vk::ST_INSTANCE_CREATE_INFO;
+    ici.pApplicationInfo = &app;
+    if (CreateInstance_(&ici, nullptr, &instance_) != vk::VK_SUCCESS) {
+        err = "vkCreateInstance failed";
+        reason_ = err;
+        instance_ = nullptr;
+        return false;
+    }
+    EnumeratePhysicalDevices_ = reinterpret_cast<vk::PfnEnumeratePhysicalDevices>(
+        gipa(instance_, "vkEnumeratePhysicalDevices"));
+    GetPhysicalDeviceProperties_ = reinterpret_cast<vk::PfnGetPhysicalDeviceProperties>(
+        gipa(instance_, "vkGetPhysicalDeviceProperties"));
+    GetPhysicalDeviceQueueFamilyProperties_ =
+        reinterpret_cast<vk::PfnGetPhysicalDeviceQueueFamilyProperties>(
+            gipa(instance_, "vkGetPhysicalDeviceQueueFamilyProperties"));
+    GetPhysicalDeviceMemoryProperties_ = reinterpret_cast<vk::PfnGetPhysicalDeviceMemoryProperties>(
+        gipa(instance_, "vkGetPhysicalDeviceMemoryProperties"));
+    CreateDevice_ =
+        reinterpret_cast<vk::PfnCreateDevice>(gipa(instance_, "vkCreateDevice"));
+    GetDeviceQueue_ =
+        reinterpret_cast<vk::PfnGetDeviceQueue>(gipa(instance_, "vkGetDeviceQueue"));
+    if (EnumeratePhysicalDevices_ == nullptr || GetPhysicalDeviceProperties_ == nullptr) {
+        err = "core instance entry points missing";
+        reason_ = err;
+        return false;
+    }
+
+    std::uint32_t n = 0;
+    if (EnumeratePhysicalDevices_(instance_, &n, nullptr) != vk::VK_SUCCESS || n == 0) {
+        err = "no Vulkan physical devices";
+        reason_ = err;
+        return false;
+    }
+    if (n > 32) n = 32;
+    std::vector<vk::PhysicalDevice> devs(n, nullptr);
+    if (EnumeratePhysicalDevices_(instance_, &n, devs.data()) != vk::VK_SUCCESS) {
+        err = "vkEnumeratePhysicalDevices (second call) failed";
+        reason_ = err;
+        return false;
+    }
+
+    // Pick the integrated GPU only: llvmpipe/CPU and discrete GPUs are never
+    // used by this path (discrete belongs to CUDA; llvmpipe is a software
+    // rasterizer, and picking it silently is exactly the trap the probe hit).
+    vk::PhysicalDevice picked = nullptr;
+    std::string picked_note;
+    for (vk::PhysicalDevice d : devs) {
+        if (d == nullptr) continue;
+        vk::DevProps props{};
+        GetPhysicalDeviceProperties_(d, &props);
+        if (props.deviceType == vk::DEVICE_TYPE_CPU || has_llvmpipe(props.deviceName)) continue;
+        if (props.deviceType == vk::DEVICE_TYPE_INTEGRATED_GPU) {
+            picked = d;
+            picked_note = props.deviceName;
+            break;
+        }
+    }
+    if (picked == nullptr) {
+        err = "no integrated GPU found (llvmpipe/CPU and discrete devices are skipped)";
+        reason_ = err;
+        return false;
+    }
+    phys_ = picked;
+    device_name_ = picked_note;
+
+    std::uint32_t fam_n = 0;
+    GetPhysicalDeviceQueueFamilyProperties_(phys_, &fam_n, nullptr);
+    std::vector<vk::QueueFamilyProps> fams(fam_n);
+    GetPhysicalDeviceQueueFamilyProperties_(phys_, &fam_n, fams.data());
+    queue_family_ = UINT32_MAX;
+    for (std::uint32_t i = 0; i < fam_n; ++i) {
+        if ((fams[i].queueFlags & vk::QUEUE_COMPUTE_BIT) != 0u && fams[i].queueCount > 0) {
+            queue_family_ = i;
+            break;
+        }
+    }
+    if (queue_family_ == UINT32_MAX) {
+        err = "the iGPU exposes no compute queue family";
+        reason_ = err;
+        return false;
+    }
+
+    const float prio = 1.0f;
+    vk::DeviceQueueCreateInfo qci{};
+    qci.sType = vk::ST_DEVICE_QUEUE_CREATE_INFO;
+    qci.queueFamilyIndex = queue_family_;
+    qci.queueCount = 1;
+    qci.pQueuePriorities = &prio;
+    vk::DeviceCreateInfo dci{};
+    dci.sType = vk::ST_DEVICE_CREATE_INFO;
+    dci.queueCreateInfoCount = 1;
+    dci.pQueueCreateInfos = &qci;
+    if (CreateDevice_(phys_, &dci, nullptr, &device_) != vk::VK_SUCCESS) {
+        err = "vkCreateDevice failed";
+        reason_ = err;
+        device_ = nullptr;
+        return false;
+    }
+    GetDeviceQueue_(device_, queue_family_, 0, &queue_);
+    GetPhysicalDeviceMemoryProperties_(phys_, &mem_props_);
+
+    using GdpaFn = void* (*)(vk::Device, const char*);
+    auto gdpa =
+        reinterpret_cast<GdpaFn>(gipa(instance_, "vkGetDeviceProcAddr"));
+    const auto dev_fn = [&](const char* name) -> void* {
+        return gdpa != nullptr ? gdpa(device_, name) : gipa(instance_, name);
+    };
+    DeviceWaitIdle_ = reinterpret_cast<vk::PfnDeviceWaitIdle>(dev_fn("vkDeviceWaitIdle"));
+    CreateBuffer_ = reinterpret_cast<vk::PfnCreateBuffer>(dev_fn("vkCreateBuffer"));
+    DestroyBuffer_ = reinterpret_cast<vk::PfnDestroyBuffer>(dev_fn("vkDestroyBuffer"));
+    GetBufferMemoryRequirements_ = reinterpret_cast<vk::PfnGetBufferMemoryRequirements>(
+        dev_fn("vkGetBufferMemoryRequirements"));
+    AllocateMemory_ = reinterpret_cast<vk::PfnAllocateMemory>(dev_fn("vkAllocateMemory"));
+    FreeMemory_ = reinterpret_cast<vk::PfnFreeMemory>(dev_fn("vkFreeMemory"));
+    BindBufferMemory_ = reinterpret_cast<vk::PfnBindBufferMemory>(dev_fn("vkBindBufferMemory"));
+    MapMemory_ = reinterpret_cast<vk::PfnMapMemory>(dev_fn("vkMapMemory"));
+    UnmapMemory_ = reinterpret_cast<vk::PfnUnmapMemory>(dev_fn("vkUnmapMemory"));
+    CreateCommandPool_ =
+        reinterpret_cast<vk::PfnCreateCommandPool>(dev_fn("vkCreateCommandPool"));
+    AllocateCommandBuffers_ = reinterpret_cast<vk::PfnAllocateCommandBuffers>(
+        dev_fn("vkAllocateCommandBuffers"));
+    BeginCommandBuffer_ =
+        reinterpret_cast<vk::PfnBeginCommandBuffer>(dev_fn("vkBeginCommandBuffer"));
+    CmdCopyBuffer_ = reinterpret_cast<vk::PfnCmdCopyBuffer>(dev_fn("vkCmdCopyBuffer"));
+    CmdBindPipeline_ = reinterpret_cast<vk::PfnCmdBindPipeline>(dev_fn("vkCmdBindPipeline"));
+    CmdBindDescriptorSets_ = reinterpret_cast<vk::PfnCmdBindDescriptorSets>(
+        dev_fn("vkCmdBindDescriptorSets"));
+    CmdDispatch_ = reinterpret_cast<vk::PfnCmdDispatch>(dev_fn("vkCmdDispatch"));
+    CmdPipelineBarrier =
+        reinterpret_cast<vk::PfnCmdPipelineBarrier>(dev_fn("vkCmdPipelineBarrier"));
+    EndCommandBuffer_ =
+        reinterpret_cast<vk::PfnEndCommandBuffer>(dev_fn("vkEndCommandBuffer"));
+    QueueSubmit_ = reinterpret_cast<vk::PfnQueueSubmit>(dev_fn("vkQueueSubmit"));
+    CreateFence_ = reinterpret_cast<vk::PfnCreateFence>(dev_fn("vkCreateFence"));
+    WaitForFences_ = reinterpret_cast<vk::PfnWaitForFences>(dev_fn("vkWaitForFences"));
+    ResetFences_ = reinterpret_cast<vk::PfnResetFences>(dev_fn("vkResetFences"));
+    ResetCommandPool_ = reinterpret_cast<vk::PfnResetCommandPool>(dev_fn("vkResetCommandPool"));
+    CreateShaderModule_ =
+        reinterpret_cast<vk::PfnCreateShaderModule>(dev_fn("vkCreateShaderModule"));
+    CreatePipelineLayout_ =
+        reinterpret_cast<vk::PfnCreatePipelineLayout>(dev_fn("vkCreatePipelineLayout"));
+    CreateComputePipelines_ =
+        reinterpret_cast<vk::PfnCreateComputePipelines>(dev_fn("vkCreateComputePipelines"));
+    CreateDescriptorSetLayout_ = reinterpret_cast<vk::PfnCreateDescriptorSetLayout>(
+        dev_fn("vkCreateDescriptorSetLayout"));
+    CreateDescriptorPool_ =
+        reinterpret_cast<vk::PfnCreateDescriptorPool>(dev_fn("vkCreateDescriptorPool"));
+    AllocateDescriptorSets_ =
+        reinterpret_cast<vk::PfnAllocateDescriptorSets>(dev_fn("vkAllocateDescriptorSets"));
+    UpdateDescriptorSets_ =
+        reinterpret_cast<vk::PfnUpdateDescriptorSets>(dev_fn("vkUpdateDescriptorSets"));
+    reason_.clear();
+    return true;
+}
+
+std::uint32_t VulkanRuntime::find_memory_type(std::uint32_t type_bits,
+                                              bool want_host_visible) const {
+    // Prefer a type that is both device-local and host-visible/coherent: on a
+    // shared-memory iGPU that is the zero-staging path.
+    for (std::uint32_t i = 0; i < mem_props_.memoryTypeCount; ++i) {
+        if ((type_bits & (1u << i)) == 0) continue;
+        const vk::Flags f = mem_props_.memoryTypes[i].propertyFlags;
+        if (want_host_visible) {
+            if ((f & (vk::MEM_DEVICE_LOCAL | vk::MEM_HOST_VISIBLE | vk::MEM_HOST_COHERENT)) ==
+                (vk::MEM_DEVICE_LOCAL | vk::MEM_HOST_VISIBLE | vk::MEM_HOST_COHERENT)) {
+                return i;
+            }
+        } else if ((f & vk::MEM_DEVICE_LOCAL) != 0) {
+            return i;
+        }
+    }
+    if (want_host_visible) {
+        for (std::uint32_t i = 0; i < mem_props_.memoryTypeCount; ++i) {
+            if ((type_bits & (1u << i)) == 0) continue;
+            const vk::Flags f = mem_props_.memoryTypes[i].propertyFlags;
+            if ((f & (vk::MEM_HOST_VISIBLE | vk::MEM_HOST_COHERENT)) ==
+                (vk::MEM_HOST_VISIBLE | vk::MEM_HOST_COHERENT)) {
+                return i;
+            }
+        }
+        return UINT32_MAX;
+    }
+    for (std::uint32_t i = 0; i < mem_props_.memoryTypeCount; ++i) {
+        if ((type_bits & (1u << i)) != 0) return i;
+    }
+    return UINT32_MAX;
+}
+
+bool VulkanRuntime::alloc_device(std::uint64_t bytes, void*& out, std::string& err) {
+    err.clear();
+    out = nullptr;
+    if (device_ == nullptr) {
+        err = "alloc_device before init_device";
+        return false;
+    }
+    vk::BufferCreateInfo bci{};
+    bci.sType = vk::ST_BUFFER_CREATE_INFO;
+    bci.size = bytes;
+    bci.usage = vk::BUF_STORAGE | vk::BUF_TRANSFER_SRC | vk::BUF_TRANSFER_DST;
+    bci.sharingMode = vk::SHARING_EXCLUSIVE;
+    vk::Buffer buf = nullptr;
+    if (CreateBuffer_(device_, &bci, nullptr, &buf) != vk::VK_SUCCESS) {
+        err = "vkCreateBuffer failed";
+        return false;
+    }
+    vk::BufferMemoryReq req{};
+    GetBufferMemoryRequirements_(device_, buf, &req);
+    std::uint32_t type = find_memory_type(req.memoryTypeBits, /*want_host_visible=*/true);
+    const bool host_visible = type != UINT32_MAX;
+    if (!host_visible) type = find_memory_type(req.memoryTypeBits, false);
+    if (type == UINT32_MAX) {
+        DestroyBuffer_(device_, buf, nullptr);
+        err = "no usable memory type for the buffer";
+        return false;
+    }
+    vk::MemoryAllocateInfo mai{};
+    mai.sType = vk::ST_MEMORY_ALLOCATE_INFO;
+    mai.allocationSize = req.size;
+    mai.memoryTypeIndex = type;
+    vk::DeviceMemory mem = nullptr;
+    if (AllocateMemory_(device_, &mai, nullptr, &mem) != vk::VK_SUCCESS) {
+        DestroyBuffer_(device_, buf, nullptr);
+        err = "vkAllocateMemory failed";
+        return false;
+    }
+    if (BindBufferMemory_(device_, buf, mem, 0) != vk::VK_SUCCESS) {
+        FreeMemory_(device_, mem, nullptr);
+        DestroyBuffer_(device_, buf, nullptr);
+        err = "vkBindBufferMemory failed";
+        return false;
+    }
+    Alloc a{};
+    a.buf = buf;
+    a.mem = mem;
+    a.bytes = bytes;
+    if (host_visible) {
+        void* p = nullptr;
+        if (MapMemory_(device_, mem, 0, vk::WHOLE_SIZE, 0, &p) == vk::VK_SUCCESS) a.mapped = p;
+    }
+    allocs_.emplace(buf, a);
+    out = buf;
+    return true;
+}
+
+bool VulkanRuntime::free_buf(void* buf_p, std::string& err) {
+    err.clear();
+    vk::Buffer buf = static_cast<vk::Buffer>(buf_p);
+    auto it = allocs_.find(buf);
+    if (it == allocs_.end()) {
+        err = "free_buf: unknown buffer";
+        return false;
+    }
+    if (it->second.mapped != nullptr) UnmapMemory_(device_, it->second.mem);
+    DestroyBuffer_(device_, buf, nullptr);
+    FreeMemory_(device_, it->second.mem, nullptr);
+    allocs_.erase(it);
+    return true;
+}
+
+bool VulkanRuntime::upload(const void* src, std::uint64_t bytes, void* dst, std::string& err) {
+    err.clear();
+    auto it = allocs_.find(static_cast<vk::Buffer>(dst));
+    if (it == allocs_.end()) {
+        err = "upload: unknown buffer";
+        return false;
+    }
+    if (bytes > it->second.bytes) {
+        err = "upload: size exceeds the buffer";
+        return false;
+    }
+    if (it->second.mapped != nullptr) {
+        std::memcpy(it->second.mapped, src, static_cast<std::size_t>(bytes));
+        return true;
+    }
+    return copy_via_staging(it->second.buf, bytes, const_cast<void*>(src), /*to_device=*/true, err);
+}
+
+bool VulkanRuntime::download(const void* src, std::uint64_t bytes, void* dst, std::string& err) {
+    err.clear();
+    auto it = allocs_.find(static_cast<vk::Buffer>(const_cast<void*>(src)));
+    if (it == allocs_.end()) {
+        err = "download: unknown buffer";
+        return false;
+    }
+    if (bytes > it->second.bytes) {
+        err = "download: size exceeds the buffer";
+        return false;
+    }
+    if (it->second.mapped != nullptr) {
+        std::memcpy(dst, it->second.mapped, static_cast<std::size_t>(bytes));
+        return true;
+    }
+    return copy_via_staging(it->second.buf, bytes, dst, /*to_device=*/false, err);
+}
+
+bool VulkanRuntime::ensure_cmd(std::string& err) {
+    if (cmd_ != nullptr) return true;
+    vk::CommandPoolCreateInfo pci{};
+    pci.sType = vk::ST_COMMAND_POOL_CREATE_INFO;
+    pci.queueFamilyIndex = queue_family_;
+    if (CreateCommandPool_(device_, &pci, nullptr, &cmd_pool_) != vk::VK_SUCCESS) {
+        err = "vkCreateCommandPool failed";
+        return false;
+    }
+    vk::CommandBufferAllocateInfo cba{};
+    cba.sType = vk::ST_COMMAND_BUFFER_ALLOCATE_INFO;
+    cba.commandPool = cmd_pool_;
+    cba.level = vk::CB_LEVEL_PRIMARY;
+    cba.commandBufferCount = 1;
+    if (AllocateCommandBuffers_(device_, &cba, &cmd_) != vk::VK_SUCCESS) {
+        err = "vkAllocateCommandBuffers failed";
+        return false;
+    }
+    vk::FenceCreateInfo fci{};
+    fci.sType = vk::ST_FENCE_CREATE_INFO;
+    if (CreateFence_(device_, &fci, nullptr, &fence_) != vk::VK_SUCCESS) {
+        err = "vkCreateFence failed";
+        return false;
+    }
+    return true;
+}
+
+// One buffer copy through a host-visible staging buffer (the fallback when the
+// device-local memory type is not mappable).
+bool VulkanRuntime::copy_via_staging(vk::Buffer side, std::uint64_t bytes, void* host,
+                                     bool to_device, std::string& err) {
+    if (!ensure_cmd(err)) return false;
+    vk::Buffer stage_buf = nullptr;
+    vk::DeviceMemory stage_mem = nullptr;
+    vk::BufferCreateInfo bci{};
+    bci.sType = vk::ST_BUFFER_CREATE_INFO;
+    bci.size = bytes;
+    bci.usage = vk::BUF_TRANSFER_SRC | vk::BUF_TRANSFER_DST;
+    bci.sharingMode = vk::SHARING_EXCLUSIVE;
+    if (CreateBuffer_(device_, &bci, nullptr, &stage_buf) != vk::VK_SUCCESS) {
+        err = "staging buffer creation failed";
+        return false;
+    }
+    vk::BufferMemoryReq req{};
+    GetBufferMemoryRequirements_(device_, stage_buf, &req);
+    const std::uint32_t type = find_memory_type(req.memoryTypeBits, /*want_host_visible=*/true);
+    if (type == UINT32_MAX) {
+        DestroyBuffer_(device_, stage_buf, nullptr);
+        err = "no host-visible memory type for staging";
+        return false;
+    }
+    vk::MemoryAllocateInfo mai{};
+    mai.sType = vk::ST_MEMORY_ALLOCATE_INFO;
+    mai.allocationSize = req.size;
+    mai.memoryTypeIndex = type;
+    if (AllocateMemory_(device_, &mai, nullptr, &stage_mem) != vk::VK_SUCCESS ||
+        BindBufferMemory_(device_, stage_buf, stage_mem, 0) != vk::VK_SUCCESS) {
+        if (stage_mem != nullptr) FreeMemory_(device_, stage_mem, nullptr);
+        DestroyBuffer_(device_, stage_buf, nullptr);
+        err = "staging memory allocation failed";
+        return false;
+    }
+    void* mapped = nullptr;
+    if (MapMemory_(device_, stage_mem, 0, vk::WHOLE_SIZE, 0, &mapped) != vk::VK_SUCCESS) {
+        FreeMemory_(device_, stage_mem, nullptr);
+        DestroyBuffer_(device_, stage_buf, nullptr);
+        err = "staging map failed";
+        return false;
+    }
+    if (to_device) {
+        std::memcpy(mapped, host, static_cast<std::size_t>(bytes));
+    }
+    ResetCommandPool_(device_, cmd_pool_, 0);
+    vk::CommandBufferBeginInfo bi{};
+    bi.sType = vk::ST_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = vk::CB_ONE_TIME;
+    BeginCommandBuffer_(cmd_, &bi);
+    vk::BufferCopy c{};
+    c.size = bytes;
+    if (to_device) {
+        CmdCopyBuffer_(cmd_, stage_buf, side, 1, &c);
+    } else {
+        CmdCopyBuffer_(cmd_, side, stage_buf, 1, &c);
+    }
+    EndCommandBuffer_(cmd_);
+    vk::SubmitInfo si{};
+    si.sType = vk::ST_SUBMIT_INFO;
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cmd_;
+    if (QueueSubmit_(queue_, 1, &si, fence_) != vk::VK_SUCCESS) {
+        err = "vkQueueSubmit failed";
+    } else if (WaitForFences_(device_, 1, &fence_, 1, ~0ull) != vk::VK_SUCCESS) {
+        err = "vkWaitForFences failed";
+    } else {
+        err.clear();
+    }
+    if (!to_device && err.empty()) {
+        std::memcpy(host, mapped, static_cast<std::size_t>(bytes));
+    }
+    ResetFences_(device_, 1, &fence_);
+    UnmapMemory_(device_, stage_mem);
+    FreeMemory_(device_, stage_mem, nullptr);
+    DestroyBuffer_(device_, stage_buf, nullptr);
+    return err.empty();
+}
+
+VulkanRuntime& igpu_runtime() {
+    static VulkanRuntime rt;
+    return rt;
+}
+
+}  // namespace qinfer::experts::igpu
