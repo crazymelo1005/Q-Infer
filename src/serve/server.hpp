@@ -44,6 +44,8 @@ struct ServeConfig {
     std::size_t slots = 8;
     std::size_t queue_capacity = 0;      // 0 = 2 × slots（规格 §4 第 1 条）
     int threads = 0;                     // httplib HTTP 线程池；0 = 2 × slots + 2
+    int compute_threads = 0;             // 引擎推理线程池（scheduling::set_pool_threads）；0 = 默认
+                                         // （物理并发数的一半、封顶 8——默认不满载，用户要求）；1 或负 = 关
     std::size_t conversation_cache = 64; // token 前缀缓存条数；0 = 关（/metrics 的 conversation_cache 实读）
     std::uint64_t reject_after = 0;      // 0 = 关；>0 = 第 N 个请求起一律 503（集成测试用，注释见 main）
     // 门面几何直通（默认 = 真模型推导值；集成测试覆写成夹具值）。

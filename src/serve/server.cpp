@@ -1443,6 +1443,7 @@ void Serve::register_routes() {
         Json r = Json::objv();
         r.set("default_generation_settings", std::move(dg));
         r.set("total_slots", Json::numv(static_cast<double>(cfg_.slots)));
+        r.set("compute_threads", Json::numv(static_cast<double>(cfg_.compute_threads)));
         r.set("model_alias", Json::strv(eng_->model_name()));
         r.set("chat_template", Json::strv(eng_->chat_template()));
         Json caps = Json::objv();

@@ -1,14 +1,17 @@
 // 服务入口：命令行解析（自写键值扫描，零依赖）→ 装载门面 → 起 Serve。
 #include "httplib.h"
+#include "scheduling/thread_pool.hpp"
 #include "serve/facade.hpp"
 #include "serve/server.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <string>
+#include <thread>
 
 using namespace qinfer::serve;
 
@@ -79,6 +82,12 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     c.slots = static_cast<std::size_t>(arg_int(a, "--slots", 8, err));
     c.queue_capacity = static_cast<std::size_t>(arg_int(a, "--queue", 0, err));
     c.threads = static_cast<int>(arg_int(a, "--threads", 0, err));
+    // 推理线程池：默认取物理并发数的一半、封顶 8（不满载——用户要求；HTTP 池与之无关）。
+    {
+        unsigned hw = std::thread::hardware_concurrency();
+        const int dflt = hw > 0 ? static_cast<int>(std::min<unsigned>(hw / 2, 8)) : 2;
+        c.compute_threads = static_cast<int>(arg_int(a, "--compute-threads", dflt, err));
+    }
     c.conversation_cache = static_cast<std::size_t>(arg_int(a, "--conversation-cache", 64, err));
     c.reject_after = static_cast<std::uint64_t>(arg_int(a, "--reject-after", 0, err));
     FacadeConfig& f = c.facade;
@@ -111,12 +120,13 @@ int main(int argc, char** argv) {
     if (!err.empty()) {
         std::fprintf(stderr, "%s\n", err.c_str());
         std::fprintf(stderr, "用法：qinfer-server --model <gguf> [--host H] [--port P] [--api-key K] "
-                             "[--slots N] [--queue N] [--threads N] [--reject-after N] "
+                             "[--slots N] [--queue N] [--threads N] [--compute-threads N] [--reject-after N] "
                              "[--n-embd N] [--hc N] [--hc-lr N] [--layers N] [--top-k N] "
                              "[--gdn-head-dim N] [--qsa-head-dim N] [--n-rot N] [--idx-dim N] "
                              "[--idx-top-k N] [--idx-block N] [--max-context N] [--cache-slots N] "
                              "[--cache-byte-budget N] [--ple-table P] [--ple-budget-bytes N] [--kv-slots N] "
-                             "[--conversation-cache N]\n");
+                             "[--conversation-cache N]\n        --threads N 是 HTTP 线程池；"
+                             "--compute-threads N 是推理线程池（默认物理核数一半、封顶 8，1 或负 = 单线程）\n");
         return 2;
     }
     // --reject-after：仅供集成测试制造确定性 503（第 N 个请求起一律拒绝入队），生产不用。
@@ -129,6 +139,11 @@ int main(int argc, char** argv) {
     std::printf("模型 %s（词表 %llu、n_embd %llu、%d 层）就绪\n", eng->model_name().c_str(),
                 (unsigned long long) eng->tokenizer().vocab_size(),
                 (unsigned long long) cfg.facade.n_embd, cfg.facade.n_layers);
+    // 推理线程池：显式 --compute-threads N 生效；默认 = 物理核数一半封顶 8（不满载，用户要求）。
+    // 1 或负 = 关池子（单线程，与 engine §6 的 set_pool_threads 语义一致）。HTTP 池由 cfg.threads
+    // 单独管理（2*slots+2），两者互不影响。
+    qinfer::scheduling::set_pool_threads(cfg.compute_threads);
+    std::printf("推理线程池：%d 线程（--compute-threads）\n", cfg.compute_threads);
     Serve serve(cfg, eng);
     g_serve = &serve;
     std::signal(SIGINT, on_signal);

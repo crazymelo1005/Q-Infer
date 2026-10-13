@@ -583,6 +583,25 @@ PYEOF
   && ok "27 chunked 终止块（严格解析完整读到 [DONE]）" \
   || bad "27 chunked 终止块：缺 0 长度终止块 → IncompleteRead/流不完整：$out27"
 
+# 28. 推理线程池可配置且默认不满载：--compute-threads 4 → /props 的 compute_threads=4；
+#     不带参数 → 默认值 = 物理并发数的一半、封顶 8（用户要求默认不能吃满整个 CPU）。
+stop
+start --api-key testkey --compute-threads 4 || exit 1
+curl -s -H "$H" "http://$HOST:$PORT/props" > "$R"
+ct=$(jget "$R" "d['compute_threads']")
+[ "$ct" = 4 ] && ok "28 --compute-threads 4 → /props compute_threads=4" \
+  || bad "28 compute_threads：应 4 得 $ct"
+stop
+start --api-key testkey || exit 1
+curl -s -H "$H" "http://$HOST:$PORT/props" > "$R"
+ct=$(jget "$R" "d['compute_threads']")
+cores="$(getconf _NPROCESSORS_ONLN)"
+half=$(( cores / 2 )); [ "$half" -gt 8 ] && half=8
+[ -n "$ct" ] && [ "$ct" -ge 1 ] && [ "$ct" -le "$half" ] \
+  && ok "28 默认 compute_threads=$ct（≤ 物理核数一半 $half，不满载）" \
+  || bad "28 默认 compute_threads：得 $ct，期望 1..$half（cores=$cores）"
+stop
+
 stop
 
 # ---- 503：--reject-after 1 → 第 1 个请求正常，之后一律队列满 ----
