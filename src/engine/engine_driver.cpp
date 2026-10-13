@@ -1,6 +1,7 @@
 #include "engine/engine_driver.hpp"
 
 #include <chrono>
+#include <cstdlib>
 #include <utility>
 
 namespace qinfer::engine {
@@ -56,6 +57,8 @@ bool EngineDriver::start(const DriverConfig& cfg, EngineDriver& out, std::string
         }
         if (e.kind == EventKind::kReady) {
             out.max_context_ = e.u;
+            out.cfg_ = cfg;
+            out.init_slots_();
             return true;
         }
         if (e.kind == EventKind::kErr || e.kind == EventKind::kFatal) {
@@ -113,6 +116,117 @@ void EngineDriver::shutdown() {
     std::string err;
     proc_.write_line(build_quit(), err);
     if (proc_.wait_timeout(2000) < 0) proc_.kill();  // ignored QUIT: SIGKILL
+}
+
+void EngineDriver::init_slots_() {
+    // Conservative default (do not assume 8): grow only when the engine advertises batch_slots.
+    int n = 2;
+    const auto it = info_fields_.find("batch_slots");
+    if (it != info_fields_.end()) {
+        const int v = std::atoi(it->second.c_str());
+        if (v > 0) n = v;
+    }
+    slots_.assign(static_cast<std::size_t>(n), SlotState::kFree);
+    slot_cb_.assign(static_cast<std::size_t>(n), nullptr);
+}
+
+int EngineDriver::acquire_slot() {
+    for (std::size_t i = 0; i < slots_.size(); ++i) {
+        if (slots_[i] == SlotState::kFree) {
+            slots_[i] = SlotState::kBusy;
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+bool EngineDriver::generate_batch(int slot, const GenRequest& req,
+                                  const std::function<bool(int32_t)>& on_token, GenSummary& out,
+                                  std::string& err) {
+    out = GenSummary{};
+    err.clear();
+    if (slot < 0 || slot >= static_cast<int>(slots_.size()) || slots_[slot] != SlotState::kBusy) {
+        err = "generate_batch: slot is not acquired";
+        return false;
+    }
+    slot_cb_[slot] = on_token;
+    auto release = [&]() {
+        slots_[slot] = SlotState::kFree;
+        slot_cb_[slot] = nullptr;
+    };
+
+    if (!proc_.write_line(build_bgen(slot, req.max_new, req.sampling, req.prompt), err)) {
+        release();
+        return false;
+    }
+
+    std::string line;
+    for (;;) {
+        if (!proc_.read_line(line, err)) {
+            if (err.empty()) err = "engine closed stdout during generation";
+            release();
+            return false;
+        }
+        const EngineEvent e = parse_event(line);
+        switch (e.kind) {
+            case EventKind::kBatchToken:
+                if (e.slot == slot) {
+                    if (slot_cb_[slot] && !slot_cb_[slot](e.token) &&
+                        slots_[slot] != SlotState::kCancelling) {
+                        if (!proc_.write_line(build_bstop(slot), err)) {
+                            release();
+                            return false;
+                        }
+                        slots_[slot] = SlotState::kCancelling;
+                    }
+                } else if (e.slot >= 0 && e.slot < static_cast<int>(slot_cb_.size()) &&
+                           slot_cb_[e.slot]) {
+                    slot_cb_[e.slot](e.token);  // re-dispatch to the owning slot's callback
+                } else {
+                    err = "BT for an unowned slot " + std::to_string(e.slot);
+                    release();
+                    return false;
+                }
+                break;
+            case EventKind::kBatchDone:
+                if (e.slot == slot) {
+                    out.finish = e.done.finish;
+                    out.generated = e.done.generated;
+                    out.decode_ms = e.d;
+                    out.cancelled =
+                        e.done.finish == "cancel" || slots_[slot] == SlotState::kCancelling;
+                    release();
+                    return true;
+                }
+                break;  // another slot's BDONE belongs to its own call
+            case EventKind::kErr:
+            case EventKind::kFatal:
+                // A refusal arrives as ERR with no BDONE: free the slot and report.
+                err = "engine " + line;
+                release();
+                return false;
+            default:
+                break;
+        }
+    }
+}
+
+void EngineDriver::cancel_slot(int slot) {
+    if (slot < 0 || slot >= static_cast<int>(slots_.size()) || slots_[slot] != SlotState::kBusy) {
+        return;
+    }
+    std::string err;
+    proc_.write_line(build_bstop(slot), err);
+    slots_[slot] = SlotState::kCancelling;  // its BDONE ... cancel ends the owning call
+}
+
+bool EngineDriver::stop_and_recover(std::string& err) {
+    err.clear();
+    proc_.kill();  // make sure the old child is gone before respawning
+    EngineDriver fresh;
+    if (!EngineDriver::start(cfg_, fresh, err)) return false;
+    *this = std::move(fresh);  // proc_, info fields and a fresh (all-free) slot table
+    return true;
 }
 
 }  // namespace qinfer::engine

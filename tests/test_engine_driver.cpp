@@ -94,5 +94,73 @@ int main() {
         CHECK(!d.generate(r, [](int32_t) { return true; }, s, err));
         CHECK(!d.alive());
     }
+
+    // 6. batch: BADM then BT ids for the slot, BDONE closes it.
+    {
+        EngineDriver d;
+        std::string err;
+        CHECK(EngineDriver::start(mock_cfg("basic"), d, err));
+        const int slot = d.acquire_slot();
+        CHECK(slot >= 0);
+        GenRequest r;
+        r.prompt = {1, 2, 3};
+        r.max_new = 4;
+        std::vector<int32_t> got;
+        GenSummary s;
+        CHECK(d.generate_batch(slot, r, [&](int32_t t) { got.push_back(t); return true; }, s, err));
+        CHECK(got.size() == 4 && s.finish == "stop");
+    }
+
+    // 7. refusal: ERR on BGEN -> false, err non-empty, slot returns to the pool.
+    {
+        EngineDriver d;
+        std::string err;
+        CHECK(EngineDriver::start(mock_cfg("refuse"), d, err));
+        const int slot = d.acquire_slot();
+        GenRequest r;
+        r.prompt = {1};
+        r.max_new = 2;
+        GenSummary s;
+        CHECK(!d.generate_batch(slot, r, [](int32_t) { return true; }, s, err));
+        CHECK(!err.empty());
+        CHECK(d.acquire_slot() == slot);  // freed, not leaked
+    }
+
+    // 8. cancel_slot mid-batch yields BDONE cancel.
+    {
+        EngineDriver d;
+        std::string err;
+        CHECK(EngineDriver::start(mock_cfg("cancel"), d, err));
+        const int slot = d.acquire_slot();
+        GenRequest r;
+        r.prompt = {1};
+        r.max_new = 4;
+        int seen = 0;
+        GenSummary s;
+        const bool ok = d.generate_batch(
+            slot, r,
+            [&](int32_t) {
+                if (++seen == 1) d.cancel_slot(slot);
+                return true;
+            },
+            s, err);
+        CHECK(ok && s.cancelled);
+    }
+
+    // 9. A dead engine is detected and a restart restores a usable driver.
+    {
+        EngineDriver d;
+        std::string err;
+        CHECK(EngineDriver::start(mock_cfg("crash"), d, err));
+        GenRequest r;
+        r.prompt = {1};
+        r.max_new = 4;
+        GenSummary s;
+        CHECK(!d.generate(r, [](int32_t) { return true; }, s, err));
+        CHECK(!d.alive());
+        CHECK(d.stop_and_recover(err));  // respawn + READY
+        CHECK(d.alive());
+        CHECK(d.acquire_slot() >= 0);    // slots reset to free
+    }
     return 0;
 }

@@ -56,11 +56,31 @@ public:
     bool generate(const GenRequest&, const std::function<bool(int32_t)>& on_token,
                   GenSummary& out, std::string& err);
 
+    // ---- batch path: one slot per concurrent request ------------------------------------------
+    // Slot ids are ours (0..n-1), allocated by the driver; the engine only sees what we send it.
+    // Table size comes from INFO batch_slots when advertised, else a conservative default.
+    int acquire_slot();                       // -1 when exhausted
+    bool generate_batch(int slot, const GenRequest&,
+                        const std::function<bool(int32_t)>& on_token, GenSummary& out,
+                        std::string& err);
+    void cancel_slot(int slot);               // BSTOP <slot>; the owning call ends at its BDONE
+
+    // QUIT, reap, respawn the same DriverConfig, redo the READY handshake, reset slots to free.
+    // Any generation in flight at that moment is lost -- the caller decides what to do (P2).
+    bool stop_and_recover(std::string& err);
+
 private:
+    enum class SlotState { kFree, kBusy, kCancelling };
+    bool spawn_(const DriverConfig&, std::string& err);
+    void init_slots_();
     void shutdown();
+
+    DriverConfig cfg_;
     EngineProcess proc_;
     uint64_t max_context_ = 0;
     std::map<std::string, std::string> info_fields_;
+    std::vector<SlotState> slots_;
+    std::vector<std::function<bool(int32_t)>> slot_cb_;   // owning callback while a slot is busy
 };
 
 }  // namespace qinfer::engine
