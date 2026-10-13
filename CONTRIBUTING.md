@@ -211,7 +211,7 @@ S-<n> | 等级 | 复核状态 | 来源（URL 或文档路径） | 引用日期
 
 ## 8. 许可与第三方内容
 
-代码与文档采用 Apache-2.0，全文见 [LICENSE](LICENSE)。
+代码与文档采用 MIT，全文见 [LICENSE](LICENSE)。
 
 引用第三方数据、图表、代码片段时，在 [research/references.md](docs/research/references.md) 标注来源与许可状态。
 

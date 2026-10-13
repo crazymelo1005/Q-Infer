@@ -134,7 +134,7 @@ Qwen3.8-Flash-Next 的官方 vLLM 部署配方：<https://recipes.vllm.ai/Qwen/Q
 
 ## 许可
 
-采用 Apache-2.0，全文见 [LICENSE](LICENSE)。
+采用 MIT，全文见 [LICENSE](LICENSE)。
 
 ## 引用
 
@@ -160,4 +160,4 @@ The premise is that the weights never fit in VRAM, so the engine is built around
 
 The host-side engine skeleton is implemented under `src/` and is built and tested in CI (65 ctest suites), including the quantized-kernel set, the expert path (format dispatch, gated FFN, router, one MoE layer), the n-gram table-row path, the step loop with KV windowing, and the serve layer (OpenAI/Anthropic HTTP endpoints, telemetry, request records, and the web frontend); the table-row and expert paths have been run against the real model shards and cross-checked against independent implementations. The GPU side (batched forward and device-side KV swap) is not yet in place, so there is no code-version tag or Release yet.
 
-License: Apache-2.0 — see [LICENSE](LICENSE).
+License: MIT — see [LICENSE](LICENSE).

@@ -16,7 +16,7 @@
 1. 语言 C++20。构建用 CMake（3.28 及以上），不引入包管理器。
 2. GPU 侧用 CUDA（nvcc），但骨架的第一片不依赖 CUDA：三层存储与页表是纯主机侧代码，这样 CI 能在没有 GPU 的 runner 上编译并跑测试。CUDA 内核、图捕获等在序 3 之后引入。
 3. 内核复用口径：不把 ggml 当外部依赖链接，改为在仓库内维护一份裁剪后的内核子集（vendored subset）。每个这样的文件顶部登记上游路径、提交号与许可；升级等于重新裁剪加复核差异，不做 submodule 指针漂移。理由是本设计要插桩的位置正是内核边界（三类流量的字节预算），而「与上游逐位可比」这条判据需要一个冻结的数值行为。
-4. 许可：本仓库 Apache-2.0；vendored 的 ggml / llama.cpp 内核为 MIT，两者兼容。来源与许可登记到 [research/references.md](../../research/references.md)，vendored 文件内保留原始版权头。不复制上游的测试向量：oracle 向量留在测量工具里、由脚本从被测环境读取，不把第三方数据混进仓库。
+4. 许可：本仓库 MIT；vendored 的 ggml / llama.cpp 内核同为 MIT（2026-10-13 由 Apache-2.0 改为 MIT，两边同为宽松许可，合并兼容）。来源与许可登记到 [research/references.md](../../research/references.md)，vendored 文件内保留原始版权头。不复制上游的测试向量：oracle 向量留在测量工具里、由脚本从被测环境读取，不把第三方数据混进仓库。
 5. 测试：不引第三方测试框架。`tests/` 下的可执行文件用 `assert`，由 `ctest` 驱动；CI 增加一个构建与测试作业，与文档自检并列。
 
 ## 备选方案
