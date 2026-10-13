@@ -252,6 +252,9 @@ int main(int argc, char** argv) {
         sc.driver.exe = cfg.engine_exe;
         sc.driver.engine_args = cfg.engine_args;
         sc.driver.ready_timeout_ms = 180000;  // a real engine loads weights for seconds
+        // The engine's stderr carries its load diagnostics and warnings; without this it goes to
+        // /dev/null and a startup death (or a WARN) is invisible to the operator.
+        sc.driver.stderr_path = "/dev/stderr";
         if (!qinfer::text::Tokenizer::from_gguf(g, sc.tokenizer, err) ||
             !chat_template_from_gguf(g, sc.chat_template, err)) {
             std::fprintf(stderr, "Load failed: %s\n", err.c_str());
