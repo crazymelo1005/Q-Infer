@@ -59,3 +59,17 @@ rule intact — see `docs/design/adr/ADR-016-vendored-strata-backend.md`, and
 
 Q-Infer's own code is MIT (c) 2026 crazymelo1005, which is compatible with the
 upstream terms above.
+
+Build note
+----------
+
+`tools/build_engine.sh` does not configure `third_party/strata/` in place. It copies the tree to
+`build-engine/src/` and configures from there, because the CUDA section of the upstream
+CMakeLists.txt registers one target (`dma_batch_parity`, line 807) from `tests/core/` without a
+`STRATA_BUILD_TESTS` guard, and CMake resolves every `add_executable` while configuring — so a
+partial source tree cannot be configured as it stands. Upstream guards eight other partial-tree
+cases the same way with `AND EXISTS` (lines 482, 492, 499, 526, 534, 544, 549, 554); line 807 reads
+as an oversight. The copy receives a placeholder at that path which fails loudly if anything ever
+tries to compile it, so the vendored tree itself is never edited and stays byte-identical to
+`a0116b27`. The script prints a confirmation of that at the end of every build.
+
