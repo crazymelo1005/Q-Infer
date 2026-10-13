@@ -182,6 +182,8 @@ CUDA 组已经成形（见 [engine.md](engine.md) §6）：`src/experts/cuda/` �
 
 dense 那一段不走作业队列（阶段 A 落法，[ADR-014](adr/ADR-014-gpu-igpu-serve.md) 决策 3）：它每 token 必算、步内只有一个汇合点，做成异步 job 反而多一次归并。入口是函数指针结构 `DenseExec`（`run_gdn` / `run_qsa` 两个整层入口，`src/dense/dense_exec.hpp`）——`StepConfig.dense_exec` 由调用方在 `--gpu` 时填 CUDA 侧 `dense_exec_cuda()`（`QINFER_ENABLE_CUDA=ON` 构建才有这个符号），`run_block_layer` 在给定时按层类型分派到 `*_cuda` 整层入口，否则全走主机 `run_gdn_layer` / `run_qsa_layer`。主机构建恒空（不引用 CUDA 符号，ADR-008 口径）；`--gpu` 语义 = 指定设备（`auto` = 全部，`0,1` = 索引列表），无 CUDA 构建给 `--gpu` 明确拒绝启动。dense 档覆盖下限为「合成模型也能跑」：阶段 A 补了 Q8_0 权重档的设备内核（`src/kernels/cuda/q8_0_gemv`，32 值块对 32 值块），真字节对照逐位相同、4 条变异全致死；覆盖不到的档明确报错而不是猜。
 
+KV 的设备侧同样走这条缝（阶段 B 落法）：`DenseExec.kv`（`KvDeviceExec`，`src/dense/kv_device_cache.hpp`）给出 `reserve / append / gather / evict / admit_block / resident / release` 七个设备入口，`QsaScratch` 持 exec 指针与池句柄（主机构建恒空），页缓存的几何仍是权威（`n_pages` 为 0 时不启用设备路径）。池的生存期 = `StepScratch`（析构里 `release`）。`--kv-resident N` 只改「哪些页留在设备」：0 = 全常驻；N > 0 时越界页逐出（设备表 → -1）、按需从主机 store 准入——数值上两条路径同源，故输出逐位一致（真机 `--kv-resident 0` 对 `4` 的生成流相同）。
+
 能力表只是**必要**条件：能不能算还取决于角色——gate/up 与 down 的激活搭档不同（前者 Q8_K、后者 Q8_0）。角色不对时档掩码会放它进来，由工人自己的 init 挡住，再按 §8.5 改派给兜底组。
 
 ## 9. 尚未定义

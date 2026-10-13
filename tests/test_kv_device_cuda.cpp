@@ -333,13 +333,15 @@ int test_8k_timing_probe() {
     sh.n_head_kv = nk;
 
     using clock = std::chrono::steady_clock;
+    constexpr int kReps = 10;  // average: a single gather+attend is sub-millisecond
     const auto t0 = clock::now();
-    kv_gather(hc, ids.data(), n_ids, hk.data(), hv.data(), err);
+    for (int r = 0; r < kReps; ++r) {
+        kv_gather(hc, ids.data(), n_ids, hk.data(), hv.data(), err);
+        qsa_attend_cuda(q.data(), hk.data(), hv.data(), n_ids, sh, qf.data(), attn.data(),
+                        w.data(), nullptr, err);
+    }
     const auto t1 = clock::now();
-    qsa_attend_cuda(q.data(), hk.data(), hv.data(), n_ids, sh, qf.data(), attn.data(), w.data(),
-                    nullptr, err);
-    const auto t2 = clock::now();
-    const double host_ms = std::chrono::duration<double, std::milli>(t2 - t0).count();
+    const double host_ms = std::chrono::duration<double, std::milli>(t1 - t0).count() / kReps;
 
     std::uint16_t* dk = nullptr;
     std::uint16_t* dv = nullptr;
@@ -359,10 +361,19 @@ int test_8k_timing_probe() {
     cudaMemcpy(d_q, q.data(), q.size() * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_qf, qf.data(), qf.size() * sizeof(float), cudaMemcpyHostToDevice);
     const auto t3 = clock::now();
-    const bool ok = exec.gather(dp, ids.data(), n_ids, dk, dv, err) &&
-                    qsa_attend_cuda_dev(d_q, d_qf, dk, dv, n_ids, sh, d_attn, d_w, nullptr, err);
+    bool ok = true;
+    for (int r = 0; r < kReps && ok; ++r) {
+        ok = exec.gather(dp, ids.data(), n_ids, dk, dv, err) &&
+             qsa_attend_cuda_dev(d_q, d_qf, dk, dv, n_ids, sh, d_attn, d_w, nullptr, err);
+    }
     const auto t4 = clock::now();
-    const double dev_ms = std::chrono::duration<double, std::milli>(t4 - t3).count();
+    const double dev_ms = std::chrono::duration<double, std::milli>(t4 - t3).count() / kReps;
+    // Output equivalence at the 8K scale (ADR-009): the device path must agree
+    // with the host path it replaces, not just be faster.
+    std::vector<float> attn_d(attn.size());
+    if (ok) {
+        cudaMemcpy(attn_d.data(), d_attn, attn.size() * sizeof(float), cudaMemcpyDeviceToHost);
+    }
     cudaFree(dk);
     cudaFree(dv);
     cudaFree(d_q);
@@ -374,9 +385,21 @@ int test_8k_timing_probe() {
         std::printf("FAIL 8K device path: %s\n", err.c_str());
         return 1;
     }
-    std::printf("  8K attn-segment (n_ids %llu): host %.1f ms vs device %.1f ms (%.1fx)\n",
-                (unsigned long long) n_ids, host_ms, dev_ms, host_ms / dev_ms);
-    return 0;
+    std::uint64_t same = 0;
+    double diff = 0.0, abs = 0.0;
+    for (std::size_t i = 0; i < attn.size(); ++i) {
+        if (std::bit_cast<std::uint32_t>(attn[i]) == std::bit_cast<std::uint32_t>(attn_d[i])) {
+            ++same;
+        }
+        diff += std::abs(static_cast<double>(attn[i]) - static_cast<double>(attn_d[i]));
+        abs += std::abs(static_cast<double>(attn[i]));
+    }
+    const double l1 = abs > 0.0 ? diff / abs : 0.0;
+    const double ratio = static_cast<double>(same) / static_cast<double>(attn.size());
+    std::printf("  8K attn-segment (n_ids %llu): host %.1f ms vs device %.1f ms (%.1fx), "
+                "bit-same %.3f, L1 rel %.3e\n",
+                (unsigned long long) n_ids, host_ms, dev_ms, host_ms / dev_ms, ratio, l1);
+    return (ratio >= 0.99 && l1 <= 1e-4) ? 0 : 1;
 }
 
 // Stage B task 4: evict / resident / admit primitives. Evict page 0, confirm
