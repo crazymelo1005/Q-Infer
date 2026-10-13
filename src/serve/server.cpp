@@ -786,6 +786,7 @@ void Serve::record_request(const std::shared_ptr<Job>& job, int http_status, boo
         last_ = lt;
         totals_.prompt_tokens += job->n_prompt;
         totals_.completion_tokens += job->n_gen;
+        totals_.requests += 1;   // 完成计数（Strata 口径的 totals.requests：每次完成时刻 +1）
         // 计时口径：prefill ≈ first_at- leased_at，decode ≈ done_at - first_at。
         const auto ms = [](std::chrono::steady_clock::duration d) {
             return std::chrono::duration<double, std::milli>(d).count();
@@ -809,6 +810,17 @@ void Serve::record_request(const std::shared_ptr<Job>& job, int http_status, boo
             }
         }
     }
+    // ---- 延迟直方图（Prometheus text 端口的 ttft/itl/e2e 家族）----
+    // 与 totals 同口径只在完成时刻计一次；起止统一为 enq（入队）→ 首 token → done_at，与 e2e
+    // 同一起点。无首 token 的失败请求 ttft 传 0，Latencies 端 >0 守卫跳过，不污染桶。
+    const auto start_of_decode = job->first_at != std::chrono::steady_clock::time_point{}
+                                     ? job->first_at : job->leased_at;
+    lat_.observe(job->first_at != std::chrono::steady_clock::time_point{}
+                     ? std::chrono::duration<double>(job->first_at - enq).count() : 0.0,
+                 job->n_gen,
+                 job->done_at > start_of_decode
+                     ? std::chrono::duration<double>(job->done_at - start_of_decode).count() : 0.0,
+                 wall);
     // ---- T14：Records 环（同一 job 只建一条；断开/错误都收尾成 error 态）----
     if (job->record_id.empty()) {
         RequestBegin b;
@@ -1076,7 +1088,7 @@ void Serve::register_routes() {
         }
         send_json(res, 200, list);
     });
-    svr.Get("/metrics", [this](const httplib::Request&, httplib::Response& res) {
+    svr.Get("/metrics", [this](const httplib::Request& req, httplib::Response& res) {
         const auto now = std::time(nullptr);
         const std::uint64_t ctx = cfg_.facade.max_context;
         const bool busy = sched_.any_busy();
@@ -1154,6 +1166,7 @@ void Serve::register_routes() {
         Json total = Json::objv();
         {
             std::lock_guard<std::mutex> lk(last_mu_);
+            total.set("requests", Json::numv(static_cast<double>(totals_.requests)));
             total.set("prompt_tokens", Json::numv(static_cast<double>(totals_.prompt_tokens)));
             total.set("reused", Json::numv(static_cast<double>(reused_.load())));
             total.set("completion_tokens", Json::numv(static_cast<double>(totals_.completion_tokens)));
@@ -1192,6 +1205,16 @@ void Serve::register_routes() {
         for (const auto& [k, vec] : ts.history) hist.set(k, series_json(vec));
         r.set("history", std::move(hist));
         r.set("time", Json::numv(static_cast<double>(now)));
+        // 内容协商（Strata 契约，serve/prometheus.py 的 wants_prometheus）：Accept 带 text/plain
+        // 或 openmetrics，或 ?format=prometheus → Prometheus text；前端 fetch 与无头 curl
+        // （Accept 缺省 */*）保持 JSON。text 与 JSON 同源——渲染只读刚构建的 r，单一事实源。
+        // 谓词按 Strata 的「query 含 format=prometheus」口径写，故传回完整的 k=v 片段而非裸值。
+        const std::string fmt = "format=" + req.get_param_value("format");
+        if (wants_prometheus(req.get_header_value("Accept"), fmt)) {
+            res.set_content(render_prometheus(r, lat_.snapshot(), eng_->model_name()),
+                            "text/plain; version=0.0.4; charset=utf-8");
+            return;
+        }
         send_json(res, 200, r);
     });
     svr.Get("/api/requests", [this](const httplib::Request& req, httplib::Response& res) {

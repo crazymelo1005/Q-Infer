@@ -12,7 +12,7 @@
 
 - 模型热装载与卸载（`/load`、`/unload`、`/v1/load`、`/v1/unload`、`/v1/vram`）：模型随进程装载，Strata 的这四个路由在 v0 返回 404。
 - `/v1/responses` 存储式 API：Strata 自身也未实现（无状态 404），v0 同样 404。
-- Prometheus 文本格式（Strata 的 `/metrics/prometheus`）：监控只做页面用的 JSON，留到 M2。
+- Prometheus 文本格式：已落地为 `/metrics` 的内容协商输出（§6），不再单开 `/metrics/prometheus` 路径（契约对照 Strata 的 `serve/prometheus.py`；vLLM 家族名 + `qinfer:` 前缀家族）。
 - `/settings` 与 `/config`、会话落盘（Strata 的会话保存）、`/mcp` 端点、多模态推理：M2/M3。
 - 并发吞吐达标（engine.md §12 说并发不超过 8 就够）：v0 只保证正确性与多个请求互不饿死，吞吐优化属 M2。
 
@@ -74,7 +74,7 @@ v0 支持可选 `--api-key`。设了之后，`/v1/*`、`/api/*`、`/metrics` 全
 
 ### 静态域
 
-`/web/*` 映射到 `src/serve/web/`。其余未列路径一律 404；`POST /v1/responses`、`/load`、`/unload`、`/v1/load`、`/v1/unload`、`/v1/vram`、`/settings`、`/config`、`/mcp`、`/metrics/prometheus` 在 v0 返回 404 与明确错误体。
+`/web/*` 映射到 `src/serve/web/`。其余未列路径一律 404；`POST /v1/responses`、`/load`、`/unload`、`/v1/load`、`/v1/unload`、`/v1/vram`、`/settings`、`/config`、`/mcp` 在 v0 返回 404 与明确错误体（`/metrics` 的 Prometheus text 按 §6 的内容协商在 `/metrics` 上输出）。
 
 ## 4. 并发与调度
 
@@ -97,7 +97,7 @@ Strata 的并发延迟来自全局锁与 GIL 以及 solo 路径的换槽机制�
 
 ## 6. 监控契约
 
-`GET /metrics` 返回的 JSON 顶层键与 Strata 1.43 逐键一致：
+`GET /metrics` 返回的 JSON 顶层键与 Strata 1.43 逐键一致；另按内容协商输出 Prometheus text（契约同 Strata 的 `serve/prometheus.py`）：Accept 含 `text/plain`/`openmetrics` 或 `?format=prometheus` → `text/plain; version=0.0.4`，否则 JSON（前端与无头 curl 缺省 `*/*` 保持 JSON）。text 的指标名取 vLLM 家族（`num_requests_running/waiting`、`kv_cache_usage_perc`、`prompt/generation_tokens_total`、`request_success_total`、`prefix_cache_queries/hits_total`、`ttft/itl/e2e` 三直方图 22 桶）+ `qinfer:` 前缀家族（`live_state`、`live_*`、`totals_*_seconds_total`、`conversation_cache_*`、`engine_max_context`、`gpu_*`、`ram_*`），模型名做标签转义；渲染只读本节的同一份 JSON 快照（单一事实源），null/缺键字段不出样本。
 
 | 键 | 内容 |
 |----|------|
@@ -106,7 +106,7 @@ Strata 的并发延迟来自全局锁与 GIL 以及 solo 路径的换槽机制�
 | `requests` | 最近 12 条请求记录（详细走 `/api/requests`） |
 | `conversation_cache` | 前缀缓存视图；已由服务层 token 前缀缓存填实（精确匹配 LRU：enabled/capacity/hits/misses/entries/tokens 实读，命中计入 totals.reused） |
 | `requests_kept` | 保留条数（默认 100） |
-| `totals` | `{prompt_tokens, reused(0), completion_tokens, prompt_ms, decode_ms}` 累计 |
+| `totals` | `{requests, prompt_tokens, reused(0), completion_tokens, prompt_ms, decode_ms}` 累计（requests 为完成计数，Prometheus 的 request_success_total 同源） |
 | `hardware` | 每秒采样一次的最新读数 |
 | `hardware_static` | `{gpu_name, gpu_count, gpu_note, cpu_name, cores, threads}` |
 | `history` | 各系列最近 60 点（sparkline 数据） |

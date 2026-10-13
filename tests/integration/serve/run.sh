@@ -396,6 +396,62 @@ else
   bad "18 重复请求未命中：hits ${h0}→${h1}、reused ${r0}→${r1}、$(head -c 200 "$R")"
 fi
 
+# 19. Prometheus text 端口：Accept: text/plain → text/plain 内容类型，vLLM 家族样本与直方图在
+#     （本实例至此已完成多次请求：request_success_total ≥ 1、e2e count ≥ 1、缓存命中 ≥ 1 均确定）。
+curl -s -D "$R.hdr" -o "$R.body" -H "$H" -H 'Accept: text/plain' "http://$HOST:$PORT/metrics"
+if grep -qi '^Content-Type: text/plain' "$R.hdr" \
+   && python3 - "$R.body" <<'PY'
+import sys
+text = open(sys.argv[1]).read()
+assert text.startswith("# HELP vllm:num_requests_running"), text[:80]
+def last_int(prefix):
+    ls = [l for l in text.splitlines() if l.startswith(prefix) and "{" in l]
+    assert ls, f"缺家族 {prefix}"
+    return int(ls[0].rsplit(" ", 1)[1])
+assert last_int("vllm:request_success_total") >= 1
+assert last_int("vllm:e2e_request_latency_seconds_count") >= 1
+assert last_int("vllm:time_to_first_token_seconds_count") >= 1
+assert last_int("vllm:prefix_cache_hits_total") >= 1
+assert "vllm:num_preemptions_total" in text
+PY
+then
+  ok "19 /metrics Prometheus text（Accept 协商 + vLLM 家族 + 直方图）"
+else
+  bad "19 /metrics Prometheus text：头 $(head -c 120 "$R.hdr") 体 $(head -c 200 "$R.body")"
+fi
+
+# 19b. ?format=prometheus 无 Accept 也出 text；无 Accept 无参数保持 JSON（前端与 curl 缺省不破）。
+curl -s -D "$R.hdr" -o "$R.body" -H "$H" "http://$HOST:$PORT/metrics?format=prometheus"
+grep -qi '^Content-Type: text/plain' "$R.hdr" \
+  && ok "19b ?format=prometheus → text" \
+  || bad "19b ?format=prometheus：头 $(head -c 120 "$R.hdr")"
+curl -s -D "$R.hdr" -o "$R" -H "$H" "http://$HOST:$PORT/metrics"
+if grep -qi '^Content-Type: application/json' "$R.hdr" \
+   && [ "$(jget "$R" "d['totals']['requests'] >= 1")" = True ]; then
+  ok "19b 无 Accept 保持 JSON（totals.requests 存在）"
+else
+  bad "19b 无 Accept 应 JSON：头 $(head -c 120 "$R.hdr") 体 $(head -c 200 "$R")"
+fi
+
+# 20. qinfer: 家族（JSON 自有事实，模型标签在各样本上）：与 19 同一快照源、模型名标签转义正确。
+curl -s -D "$R.hdr" -o "$R.body" -H "$H" -H 'Accept: text/plain' "http://$HOST:$PORT/metrics"
+if python3 - "$R.body" <<'PY'
+import sys
+text = open(sys.argv[1]).read()
+need = {"qinfer:live_state", "qinfer:totals_decode_seconds_total", "qinfer:conversation_cache_capacity",
+        "qinfer:conversation_cache_hits_total", "qinfer:cpu", "qinfer:engine_max_context",
+        "qinfer:gpu_util"}
+assert need <= set(l.split("{", 1)[0] for l in text.splitlines() if not l.startswith("#")), "缺 qinfer 家族"
+lab = 'model_name="qinfer-serve-fixture"'
+assert ("qinfer:live_state{" + lab + ',state="idle"}') in text, "模型标签样本缺失"
+PY
+then
+  ok "20 qinfer: 家族齐备且带模型标签"
+else
+  bad "20 qinfer 家族：$(head -c 200 "$R.body")"
+fi
+rm -f "$R.hdr" "$R.body"
+
 stop
 
 # ---- 503：--reject-after 1 → 第 1 个请求正常，之后一律队列满 ----

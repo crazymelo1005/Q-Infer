@@ -19,6 +19,7 @@
 
 #include "serve/facade.hpp"
 #include "serve/prompt_cache.hpp"
+#include "serve/prometheus.hpp"
 #include "serve/records.hpp"
 #include "serve/scheduler.hpp"
 #include "serve/telemetry.hpp"
@@ -98,10 +99,13 @@ private:
     std::atomic<std::uint64_t> reused_{0};   // 缓存命中的 prompt token 累计（totals.reused；worker 线程写）
     // 请求记录环（/metrics 的 requests/totals 与 /api/requests 的数据源，T14 起 record_request 填）。
     Records records_;
+    // 延迟三直方图（/metrics 的 Prometheus text 端口的 ttft/itl/e2e 家族；record_request 落完成时刻时
+    // observe，自带锁，HTTP 线程 snapshot——与 last_ 的临界区无关）。
+    Latencies lat_;
     // /metrics 的 totals 累计（与 last_ 同临界区更新——record_request 是 HTTP 线程调用的唯一写入者；
     // /metrics 读时也持 last_mu_，无竞态）。
     struct Totals {
-        std::uint64_t prompt_tokens = 0, completion_tokens = 0;
+        std::uint64_t prompt_tokens = 0, completion_tokens = 0, requests = 0;
         double prompt_ms = 0.0, decode_ms = 0.0;
     };
     Totals totals_;

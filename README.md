@@ -53,7 +53,7 @@ API / 调度层        OpenAI 兼容接口 · 批调度 · 前缀缓存 · 指�
 
 其中 G-04 不通过：记忆表行在去重后无顺序性、亦无近邻复用，故表行预取子系统已砍，退守按需读加有界行缓存（[ADR-007](docs/design/adr/ADR-007-ngram-table-on-demand-read.md)）。G-07 判定未命中专家路径为算力瓶颈，核显分担的前提满足。
 
-下一步：序 2 的验收标准是「单请求正确跑通」。主机侧大半已闭环——门控残差、步循环、KV 窗口与换入换出、PLE、内存池配平（`docs/design/engine.md §17 序 2`）；尚缺设备侧那半（批式前向与 KV 的设备实现）与 MTP 真草稿头。服务层（序 7）的 M1 切片已随本仓库落地：OpenAI 与 Anthropic 兼容的 HTTP 推理域、遥测与三页前端 + 请求检查页（`docs/design/engine.md §12.1`）；/metrics 的 conversation_cache 已由服务层 token 前缀缓存填实（精确匹配 LRU，`--conversation-cache N`，命中计入 totals.reused），Prometheus 完整对接排到 M2。此外还有未实现的专家档（部署那份的 IQ1_M 3 层、另一档的 IQ3_S / IQ3_XXS 等）、共享专家与专家缓存。门禁方面 G-14 仍未判定。代码版本标签 `v<主>.<次>.<修订>` 按 `CONTRIBUTING §6.2` 的约定留到「单请求跑通」之后，故尚无代码版本标签，也没有 Release（现有 15 个标签都是设计里程碑与实测快照）。
+下一步：序 2 的验收标准是「单请求正确跑通」。主机侧大半已闭环——门控残差、步循环、KV 窗口与换入换出、PLE、内存池配平（`docs/design/engine.md §17 序 2`）；尚缺设备侧那半（批式前向与 KV 的设备实现）与 MTP 真草稿头。服务层（序 7）的 M1 切片已随本仓库落地：OpenAI 与 Anthropic 兼容的 HTTP 推理域、遥测与三页前端 + 请求检查页（`docs/design/engine.md §12.1`）；/metrics 的 conversation_cache 已由服务层 token 前缀缓存填实（精确匹配 LRU，`--conversation-cache N`，命中计入 totals.reused），Prometheus text 端口也已落地（同一 `/metrics` 按 Accept/`?format=prometheus` 内容协商，vLLM 家族名 + `qinfer:` 前缀家族）。此外还有未实现的专家档（部署那份的 IQ1_M 3 层、另一档的 IQ3_S / IQ3_XXS 等）、共享专家与专家缓存。门禁方面 G-14 仍未判定。代码版本标签 `v<主>.<次>.<修订>` 按 `CONTRIBUTING §6.2` 的约定留到「单请求跑通」之后，故尚无代码版本标签，也没有 Release（现有 15 个标签都是设计里程碑与实测快照）。
 
 门禁指必须先测量的假设，测量不通过即砍掉对应子系统并记录负结果，不得保留。清单与测量方法见 [design/gates.md](docs/design/gates.md)。
 
