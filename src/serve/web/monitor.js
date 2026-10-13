@@ -1,5 +1,6 @@
 "use strict";
-/* 请求检查页（/api-monitor）：复用 app.js 的 $_api_esc_showBanner_initCommon_QinferRequests。 */
+/* Request-monitor page (/api-monitor): reuses the shared app.js helpers
+   ($, $_, esc, showBanner, initCommon, QinferRequests). */
 (function () {
   let cache = [];
   let activeId = null;
@@ -27,7 +28,7 @@
       const d = await res.json();
       cache = d.requests || [];
       renderFiltered();
-    } catch (e) { /* 下一次轮询再试 */ }
+    } catch (e) { /* retry on the next poll */ }
   }
 
   document.addEventListener("DOMContentLoaded", function () {

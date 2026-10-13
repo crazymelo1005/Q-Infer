@@ -1,49 +1,55 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="light">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Q-Infer · 请求检查</title>
+<title>Q-Infer · Request monitor</title>
 <link rel="stylesheet" href="/web/tokens.css">
 <link rel="stylesheet" href="/web/components.css">
 <link rel="stylesheet" href="/web/app.css">
 <script>
+  // First-frame theme and language: saved choices win, otherwise browser
+  // defaults (see index.html for the same inline logic).
   try {
     var t = localStorage.getItem("qinfer.theme") ||
       (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
     document.documentElement.dataset.theme = t;
+    var ql = localStorage.getItem("qinfer.lang");
+    var nav = (navigator.language || "").toLowerCase();
+    var lang = (ql === "zh" || ql === "en") ? ql : (nav.indexOf("zh") === 0 ? "zh" : "en");
+    document.documentElement.lang = lang === "en" ? "en" : "zh-CN";
   } catch (e) {}
 </script>
 </head>
 <body>
 <header class="st-header topbar">
-  <span class="st-header__brand logo">Q-Infer <small>请求检查 /api-monitor</small></span>
+  <span class="st-header__brand logo">Q-Infer <small data-i18n="apiMon.title">Request monitor /api-monitor</small></span>
   <span class="st-header__spacer"></span>
   <div class="keybox">
-    <label for="api-key">API 密钥</label>
-    <input id="api-key" class="input key-input" type="password" autocomplete="off" placeholder="可选">
-    <button id="btn-key-toggle" class="btn ghost" type="button">显示</button>
+    <label for="api-key" data-i18n="apiMon.keyLabel">API key</label>
+    <input id="api-key" class="input key-input" type="password" autocomplete="off" data-i18n-ph="apiMon.keyPh" placeholder="optional">
+    <button id="btn-key-toggle" class="btn ghost" type="button" data-i18n="about.show">Show</button>
   </div>
-  <a class="btn ghost" href="/">返回主面板</a>
-  <button class="st-btn st-btn--icon" id="btn-lang" type="button" title="中 / EN" aria-label="Language" data-i18n-aria="lang.title">EN</button>
-  <button class="st-btn st-btn--icon" id="btn-theme" type="button" title="浅色 / 深色" aria-label="切换浅色与深色主题">
+  <a class="btn ghost" href="/" data-i18n="apiMon.back">Back to main panel</a>
+  <button class="st-btn st-btn--icon" id="btn-lang" type="button" data-i18n-title="lang.title">EN</button>
+  <button class="st-btn st-btn--icon" id="btn-theme" type="button" data-i18n-title="theme.title">
     <svg class="st-icon"><use id="theme-icon" href="/web/sprite.svg#i-moon"/></svg></button>
 </header>
 <main>
   <div class="req-layout" style="height:100%">
     <div class="req-list-pane" style="width:42%">
       <div class="req-toolbar">
-        <input id="req-search" class="input" type="search" placeholder="搜索路径 / 模型 / 状态">
-        <select id="req-filter" class="input" title="状态过滤">
-          <option value="">全部状态</option>
+        <input id="req-search" class="input" type="search" data-i18n-ph="mon.searchPh" placeholder="Search path / model / state">
+        <select id="req-filter" class="input" data-i18n-title="mon.filterTitle">
+          <option value="" data-i18n="mon.all">All states</option>
           <option value="queued">queued</option>
           <option value="completed">completed</option>
           <option value="error">error</option>
         </select>
       </div>
-      <div id="req-list" class="req-list"><div class="note">暂无请求记录</div></div>
+      <div id="req-list" class="req-list"><div class="note" data-i18n="mon.noReq">No requests yet</div></div>
     </div>
-    <div id="req-detail" class="req-detail-pane"><div class="note">点左侧一条记录查看详情</div></div>
+    <div id="req-detail" class="req-detail-pane"><div class="note" data-i18n="mon.pickHint">Pick a request on the left to inspect it</div></div>
   </div>
 </main>
 <div class="st-toasts" id="toasts" aria-live="polite"></div>

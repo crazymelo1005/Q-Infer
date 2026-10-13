@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# M1 服务层集成测试（T9 段：非流式 OpenAI 域 + 错误体 + 并发 + 503 形态）。
-# 用法：run.sh <构建目录> [端口]
+# M1 service-layer integration tests (T9 segment: non-streaming OpenAI domain + error bodies + concurrency + 503 shape).
+# Usage: run.sh <build dir> [port]
 set -u
-cd "$(dirname "$0")/../../.."                  # 仓库根
+cd "$(dirname "$0")/../../.."                  # repo root
 
 BUILD="${1:-build}"
 PORT="${2:-18080}"
@@ -19,8 +19,8 @@ trap cleanup EXIT
 ok()   { PASS=$((PASS+1)); echo "  ok  $1"; }
 bad()  { FAIL=$((FAIL+1)); echo "FAIL  $1"; }
 
-# 起服务；等 /health。
-start() {   # start <额外参数...>
+# Start the server; wait for /health.
+start() {   # start <extra args...>
   "$SERVER" --model "$FIX" --host "$HOST" --port "$PORT" --n-embd 256 --hc 2 --hc-lr 3 \
             --layers 2 --top-k 2 --gdn-head-dim 32 --qsa-head-dim 32 --n-rot 4 \
             --idx-dim 4 --idx-top-k 2048 --idx-block 4 --max-context 4096 "$@" >"$LOG" 2>&1 &
@@ -29,78 +29,80 @@ start() {   # start <额外参数...>
     curl -sf "http://$HOST:$PORT/health" >/dev/null 2>&1 && return 0
     sleep 0.25
   done
-  echo "服务没起来：$(tail -5 "$LOG")" >&2
+  echo "server failed to start: $(tail -5 "$LOG")" >&2
   return 1
 }
 
 stop() { [ -n "$PID" ] && kill "$PID" 2>/dev/null; wait "$PID" 2>/dev/null; PID=""; }
 
-# JSON 取值：jget <json文件> <python路径表达式> → 标准输出
+# JSON getter: jget <json-file> <python path expression> → stdout
 jget() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$1" "$2" 2>/dev/null; }
 
-# 生成夹具（父目录 build/tests 未必存在，先建好——cli 的 --out 不建父目录）
+# Generate the fixture (the parent dir build/tests may not exist, create it first — cli --out does not create parent dirs)
 mkdir -p "$(dirname "$FIX")"
 "$BUILD/serve_fixture_gen" --out "$FIX"
 
-# ---- 带 key 的主实例 ----
+# ---- main instance with key ----
 start --api-key testkey || exit 1
 
 R="$(mktemp)"; H="Authorization: Bearer testkey"
 
-# 1. chat 补全：内容非空、usage 字段齐、finish 合法、id 前缀对。
-# 提示词只用夹具词表内的字母（a..e，且避开唯一合并规则 "a b"）：夹具词表就 8 个 token，
-# 中文/字母 x/h 会真实触发词表外 BPE → 500 分词失败，不能在这种夹具上用真语言文本。
+# 1. chat completion: content non-empty, usage fields present, finish valid, id prefix correct.
+# Prompt uses only letters inside the fixture vocabulary (a..e, avoiding the sole merge rule "a b"): the fixture
+# vocabulary has just 8 tokens, and Chinese/letters x/h truly trigger out-of-vocabulary BPE → 500 tokenization
+# failure, so real-language text cannot be used on this fixture.
 code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
   -X POST "http://$HOST:$PORT/v1/chat/completions" \
   -d '{"model":"x","messages":[{"role":"system","content":"c"},{"role":"user","content":"d"}],"max_tokens":16,"temperature":0}')
-# 贪心并列取小索引 → 恒 token 0（<|im_start|>），撞不到 eos，必然吃到 max_tokens → finish 恒 length。
+# Greedy ties pick the smaller index → always token 0 (<|im_start|>), never hits eos, necessarily hits max_tokens → finish is always length.
 if [ "$code" = 200 ] \
    && [ -n "$(jget "$R" "d['choices'][0]['message']['content']")" ] \
    && [ "$(jget "$R" "d['usage']['prompt_tokens']")" -ge 1 ] \
    && [ "$(jget "$R" "d['choices'][0]['finish_reason']")" = length ] \
    && [ "$(jget "$R" "d['id'][:9]")" = chatcmpl- ]; then
-  ok "chat 补全（HTTP 200、content/usage/finish/id）"
+  ok "chat completion (HTTP 200, content/usage/finish/id)"
 else
-  bad "chat 补全：状态 $code，体 $(head -c 200 "$R")"
+  bad "chat completion: status $code, body $(head -c 200 "$R")"
 fi
 
-# 2. 文本补全。
+# 2. Text completion.
 code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
   -X POST "http://$HOST:$PORT/v1/completions" -d '{"prompt":"cd","max_tokens":8,"temperature":0}')
 if [ "$code" = 200 ] && [ -n "$(jget "$R" "d['choices'][0]['text']")" ]; then
-  ok "文本补全"
+  ok "text completion"
 else
-  bad "文本补全：状态 $code，体 $(head -c 200 "$R")"
+  bad "text completion: status $code, body $(head -c 200 "$R")"
 fi
 
-# 3. 模型清单。
+# 3. Model list.
 code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" "http://$HOST:$PORT/v1/models")
 if [ "$code" = 200 ] && [ "$(jget "$R" "d['data'][0]['id']")" = qinfer-serve-fixture ]; then
-  ok "/v1/models 单元素、id 正确"
+  ok "/v1/models single element, id correct"
 else
-  bad "/v1/models：状态 $code，体 $(head -c 200 "$R")"
+  bad "/v1/models: status $code, body $(head -c 200 "$R")"
 fi
 
-# 4. 非法参数 → 400 且 error.type = invalid_request_error。
+# 4. Invalid parameters → 400 and error.type = invalid_request_error.
 code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
   -X POST "http://$HOST:$PORT/v1/chat/completions" \
   -d '{"messages":[{"role":"user","content":"x"}],"temperature":-1}')
 if [ "$code" = 400 ] && [ "$(jget "$R" "d['error']['type']")" = invalid_request_error ]; then
-  ok "400 错误体（OpenAI 形状）"
+  ok "400 error body (OpenAI shape)"
 else
-  bad "400：状态 $code，体 $(head -c 200 "$R")"
+  bad "400: status $code, body $(head -c 200 "$R")"
 fi
 
-# 5. 缺 key → 401 且错误形状正确（OpenAI 域）。
+# 5. Missing key → 401 with correct error shape (OpenAI domain).
 code=$(curl -s -o "$R" -w '%{http_code}' "http://$HOST:$PORT/v1/models")
 if [ "$code" = 401 ] && [ "$(jget "$R" "d['error']['type']")" = authentication_error ]; then
-  ok "401 错误体（缺 key）"
+  ok "401 error body (missing key)"
 else
-  bad "401：状态 $code，体 $(head -c 200 "$R")"
+  bad "401: status $code, body $(head -c 200 "$R")"
 fi
 
-# 6. 并发 8：8 个请求同时打，全部 200 且响应是合法 JSON；服务在结束后仍存活。
-# 注意只 wait 这批 curl 的 PID：服务进程也是本 shell 的后台子进程，裸 wait 会连它一起等（永不返回）。
+# 6. Concurrency 8: fire 8 requests at once, all 200 with valid JSON responses; the server stays alive afterwards.
+# Note: wait only on this batch of curl PIDs — the server process is also a background child of this shell, and a
+# bare wait would wait on it too (never returning).
 allok=1
 CURLPIDS=""
 for i in $(seq 1 8); do
@@ -118,14 +120,17 @@ done
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "$H" "http://$HOST:$PORT/health")
 [ "$code" = 200 ] || allok=0
 if [ "$allok" = 1 ]; then
-  ok "并发 8：全 200、响应全为合法 JSON、服务存活"
+  ok "concurrency 8: all 200, responses valid JSON, server alive"
 else
-  bad "并发 8 后有失败（服务存活检查与 8 份响应逐一核过）"
+  bad "concurrency 8 had failures (server-alive check and the 8 responses verified one by one)"
 fi
 
-# 7. SSE：先非流式取参考文本，再流式取同款请求，逐 delta 拼出来必须与参考逐字节相同。
-# 提示词只用夹具词表内字母 c（词表外字符会触发 encode 失败 → 500）；贪心 + seed 5 下输出确定。
-# 参考侧用 sys.stdout.write 取精确 content——print 会多吃一个换行，与流式拼文（无尾换行）cmp 必败。
+# 7. SSE: first fetch the reference text non-streaming, then stream the same request; the concatenated deltas
+#    must equal the reference byte for byte.
+# The prompt uses only in-vocabulary letter c (out-of-vocabulary characters trigger encode failure → 500);
+# output is deterministic under greedy + seed 5.
+# The reference side uses sys.stdout.write for exact content — print would add an extra newline, and cmp against
+# the streamed text (no trailing newline) would always fail.
 curl -s -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/v1/chat/completions" \
   -d '{"messages":[{"role":"user","content":"c"}],"max_tokens":24,"temperature":0,"seed":5}' \
   | python3 -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["choices"][0]["message"]["content"])' >/tmp/qinfer_ref.txt
@@ -134,7 +139,8 @@ HDRS="$R.hdrs"; BODY="$R.body"
 curl -sN -D "$HDRS" -o "$BODY" -H "$H" -H 'Content-Type: application/json' \
   -X POST "http://$HOST:$PORT/v1/chat/completions" \
   -d '{"messages":[{"role":"user","content":"c"}],"max_tokens":24,"temperature":0,"seed":5,"stream":true}'
-# 帧序列检查：第一帧带 role、中间帧带 content、末帧带 finish_reason、收尾 [DONE]；逐 delta 拼文本。
+# Frame-sequence check: first frame carries role, middle frames carry content, last frame carries finish_reason,
+# closing [DONE]; concatenate the text delta by delta.
 python3 - "$BODY" >/tmp/qinfer_sse.txt <<'PY'
 import json, sys
 raw = open(sys.argv[1]).read()
@@ -149,13 +155,13 @@ sys.stdout.write(text)
 PY
 if grep -q "data: \[DONE\]" "$BODY" && grep -qi "text/event-stream" "$HDRS" \
    && cmp -s /tmp/qinfer_ref.txt /tmp/qinfer_sse.txt; then
-  ok "SSE：事件流、[DONE]、流式拼文与非流式逐字节一致"
+  ok "SSE: event stream, [DONE], streamed text byte-identical to non-streaming"
 else
-  bad "SSE：头部 $(grep -i event-stream "$HDRS" | head -1)，正文行数 $(wc -l < "$BODY")"
+  bad "SSE: header $(grep -i event-stream "$HDRS" | head -1), body lines $(wc -l < "$BODY")"
 fi
 rm -f "$HDRS" "$BODY"
 
-# 8. stream_options.include_usage：数据帧里带 usage，且 completion_tokens ≥ 1。
+# 8. stream_options.include_usage: data frames carry usage, and completion_tokens ≥ 1.
 curl -sN -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/v1/chat/completions" \
   -d '{"messages":[{"role":"user","content":"d"}],"max_tokens":8,"temperature":0,"stream":true,"stream_options":{"include_usage":true}}' \
   | python3 -c '
@@ -165,11 +171,11 @@ frames = [l[6:] for l in raw.splitlines() if l.startswith("data: ") and l != "da
 usage = [json.loads(f) for f in frames if json.loads(f).get("usage")]
 assert usage, "usage 帧缺失"
 assert usage[-1]["usage"]["completion_tokens"] >= 1
-print("usage-ok")' | grep -q usage-ok && ok "include_usage 末位 usage 帧" || bad "include_usage"
+print("usage-ok")' | grep -q usage-ok && ok "include_usage trailing usage frame" || bad "include_usage"
 
-# 9. Anthropic 非流式：同一请求与 OpenAI chat 域产出同一 token 序列（text 逐字节相同）。
-# 提示词用词表内字母 c（词表外字符 → 分词失败 500）；贪心下 seed 不影响输出。
-# 参考侧用 sys.stdout.write 取精确 content——print 尾换行会破坏逐字节比较。
+# 9. Anthropic non-streaming: the same request must produce the same token sequence as the OpenAI chat domain (text byte-identical).
+# The prompt uses in-vocabulary letter c (out-of-vocabulary characters → tokenization failure 500); under greedy, seed does not affect output.
+# The reference side uses sys.stdout.write for exact content — print's trailing newline would break the byte-for-byte comparison.
 curl -s -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/v1/chat/completions" \
   -d '{"messages":[{"role":"user","content":"c"}],"max_tokens":16,"temperature":0,"seed":3}' \
   | python3 -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["choices"][0]["message"]["content"])' >/tmp/qinfer_c.txt
@@ -178,13 +184,13 @@ curl -s -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/
   > "$R"
 STOP=$(jget "$R" "d['content'][0]['type']")
 SR=$(jget "$R" "d['stop_reason']")
-# stop_reason 两者皆合法：夹具贪心恒吃满 max_tokens → max_tokens；真模型自然停 → end_turn。
+# Both stop_reason values are valid: greedy on the fixture always consumes max_tokens → max_tokens; a real model stops naturally → end_turn.
 if [ "$(jget "$R" "d['type']")" = message ] && [ "$STOP" = text ] \
    && [ "$(jget "$R" "d['usage']['input_tokens']")" -ge 1 ] \
    && { [ "$SR" = end_turn ] || [ "$SR" = max_tokens ]; }; then
-  ok "Anthropic 消息补全（type/内容块/stop_reason/usage）"
+  ok "Anthropic message completion (type/content block/stop_reason/usage)"
 else
-  bad "Anthropic 补全：体 $(head -c 300 "$R")"
+  bad "Anthropic completion: body $(head -c 300 "$R")"
 fi
 if python3 - "$R" <<'PY'
 import json, sys
@@ -194,12 +200,13 @@ b = "".join(c["text"] for c in r["content"] if c["type"] == "text")
 assert a == b, f"两个域产出不同：chat={a!r} anthropic={b!r}"
 PY
 then
-  ok "两个兼容域同一请求 → 相同 token 序列（逐字节）"
+  ok "both compatible domains, same request → identical token sequence (byte-for-byte)"
 else
-  bad "两个域产出不同"
+  bad "the two domains produced different output"
 fi
 
-# 10. count_tokens：与分词器逐 id 对照（独立数一遍：渲染后 encode）。urllib 必须带 key。
+# 10. count_tokens: cross-check id by id against the tokenizer (count once independently: encode the rendered
+#     prompt). urllib must send the key.
 if python3 - "$PORT" "$H" <<'PY'
 import json, sys, urllib.request
 h, _, v = sys.argv[2].partition(": ")
@@ -211,14 +218,16 @@ n = json.load(urllib.request.urlopen(req))["input_tokens"]
 assert isinstance(n, int) and n >= 1, n
 PY
 then
-  ok "count_tokens 返回正整数"
+  ok "count_tokens returns a positive integer"
 else
   bad "count_tokens"
 fi
 
-# 11. Anthropic 流式：事件序 message_start → content_block_start → content_block_delta… →
-#     content_block_stop → message_delta → message_stop；delta 拼文与非流式逐字节相同。
-# 解析与对照包进 if：解析失败（端点没实现时的事件流为空）不能再被 cmp 空文件 vs 空文件假绿。
+# 11. Anthropic streaming: event order message_start → content_block_start → content_block_delta… →
+#     content_block_stop → message_delta → message_stop; the delta-concatenated text matches the non-streaming
+#     text byte for byte.
+# Parse and cross-check are wrapped in if: a parse failure (the event stream is empty when the endpoint is not
+# implemented) must not be faked green by cmp of an empty file vs an empty file.
 curl -sN -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/v1/messages" \
   -d '{"model":"x","messages":[{"role":"user","content":"c"}],"max_tokens":16,"temperature":0,"stream":true}' \
   > "$R.body"
@@ -241,47 +250,50 @@ text = "".join(e["delta"]["text"] for t, e in evs if t == "content_block_delta" 
 sys.stdout.write(text)
 PY
 then
-  # 对照：非流式 Anthropic 的最小文本（同 body）
+  # Cross-check: minimal text from non-streaming Anthropic (same body)
   curl -s -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/v1/messages" \
     -d '{"model":"x","messages":[{"role":"user","content":"c"}],"max_tokens":16,"temperature":0}' \
     | python3 -c 'import json,sys; sys.stdout.write("".join(c["text"] for c in json.load(sys.stdin)["content"]))' >/tmp/qinfer_an.txt
   if cmp -s /tmp/qinfer_a.txt /tmp/qinfer_an.txt; then
-    ok "Anthropic SSE 事件序与拼文正确"
+    ok "Anthropic SSE event order and concatenated text correct"
   else
-    bad "Anthropic SSE：流式拼文与非流式不一致"
+    bad "Anthropic SSE: streamed text differs from non-streaming"
   fi
 else
-  bad "Anthropic SSE：事件序或拼文解析失败"
+  bad "Anthropic SSE: event-order or concatenation parse failed"
 fi
 
-# 12. 状态族：/v1/status 与服务自述、/status 探针、/props 能力、/slots 槽位数。
+# 12. Status family: /v1/status with service self-description, /status probe, /props capabilities, /slots slot count.
 curl -s -H "$H" "http://$HOST:$PORT/v1/status" > "$R"
 [ "$(jget "$R" "d['service']")" = qinfer ] && [ "$(jget "$R" "d['loaded']")" = True ] \
   && [ "$(jget "$R" "d['context']['native']")" -ge 1 ] \
-  && ok "/v1/status（service/loaded/context）" || bad "/v1/status：$(head -c 200 "$R")"
+  && ok "/v1/status (service/loaded/context)" || bad "/v1/status: $(head -c 200 "$R")"
 
 curl -s -H "$H" "http://$HOST:$PORT/status" > "$R"
 [ "$(jget "$R" "d['busy']")" = False ] && [ "$(jget "$R" "d['queued']")" = 0 ] \
-  && ok "/status 探针（busy/queued）" || bad "/status：$(head -c 200 "$R")"
+  && ok "/status probe (busy/queued)" || bad "/status: $(head -c 200 "$R")"
 
 curl -s -H "$H" "http://$HOST:$PORT/props" > "$R"
 [ "$(jget "$R" "d['total_slots']")" -ge 1 ] \
   && [ "$(jget "$R" "d['chat_template']")" ] \
-  && ok "/props（total_slots/chat_template）" || bad "/props：$(head -c 200 "$R")"
+  && ok "/props (total_slots/chat_template)" || bad "/props: $(head -c 200 "$R")"
 
 curl -s -H "$H" "http://$HOST:$PORT/slots" > "$R"
 [ "$(jget "$R" "len(d)")" -ge 1 ] && [ "$(jget "$R" "d[0]['is_processing']")" = False ] \
-  && ok "/slots 数组与空闲" || bad "/slots：$(head -c 200 "$R")"
+  && ok "/slots array and idle" || bad "/slots: $(head -c 200 "$R")"
 
-# 12b. /v1/status 的 machine：at 恒在；无 GPU 的 CI 上 gpu/ram 为 null，有卡时是对象——只钉形状。
-# at 是 JSON 浮点（T6 %.9g 序列化），bash -gt 对非整数恒假——断言走 python 侧布尔。
+# 12b. /v1/status machine: at is always present; on GPU-less CI gpu/ram are null, with a GPU they are
+#      objects — pin the shape only.
+# at is a JSON float (T6 %.9g serialization), so bash -gt is always false for non-integers — the assert goes
+# through a python-side boolean.
 curl -s -H "$H" "http://$HOST:$PORT/v1/status" > "$R"
 [ "$(jget "$R" "d['machine']['at'] > 0")" = True ] \
-  && ok "/v1/status machine.at" || bad "/v1/status machine：$(head -c 200 "$R")"
+  && ok "/v1/status machine.at" || bad "/v1/status machine: $(head -c 200 "$R")"
 
-# 13. /metrics：全键类型、10 系列、历史有数据、totals/conversation_cache/time 形状。
-# conversation_cache 自 token 前缀缓存（--conversation-cache 默认 64）落地后为实况；本用例之前
-# 已有顺序重复请求（case 129→136 同 content "c"），故 hits ≥ 1、totals.reused ≥ 1 是确定性的。
+# 13. /metrics: all key types, 10 series, history has data, totals/conversation_cache/time shapes.
+# conversation_cache reflects the real state once the token-prefix cache (--conversation-cache default 64) lands;
+# before this case there are already sequential duplicate requests (case 129→136, same content "c"), so
+# hits ≥ 1 and totals.reused ≥ 1 are deterministic.
 curl -s -H "$H" "http://$HOST:$PORT/metrics" > "$R"
 [ "$(jget "$R" "d['engine']['model']")" ] && [ "$(jget "$R" "d['live']['state']")" ] \
   && [ "$(jget "$R" "len(d['history'])")" = 10 ] \
@@ -292,77 +304,80 @@ curl -s -H "$H" "http://$HOST:$PORT/metrics" > "$R"
   && [ "$(jget "$R" "d['conversation_cache']['hits'] >= 1")" = True ] \
   && [ "$(jget "$R" "d['conversation_cache']['capacity']")" = 64 ] \
   && [ "$(jget "$R" "d['time'] > 0")" = True ] \
-  && ok "/metrics 全键" || bad "/metrics：$(head -c 300 "$R")"
+  && ok "/metrics all keys" || bad "/metrics: $(head -c 300 "$R")"
 
-# 14. /api/requests：列表（retention=100、最新在前）与 ?id= 详情；缺 id → 404 错误体。
+# 14. /api/requests: list (retention=100, newest first) and ?id= detail; missing id → 404 error body.
 curl -s -H "$H" "http://$HOST:$PORT/api/requests" > "$R"
 [ "$(jget "$R" "d['retention']")" = 100 ] && [ "$(jget "$R" "len(d['requests']) >= 1")" = True ] \
   && [ "$(jget "$R" "d['requests'][0]['wallclock_s'] >= 0")" = True ] \
-  && ok "/api/requests 列表" || bad "/api/requests：$(head -c 300 "$R")"
+  && ok "/api/requests list" || bad "/api/requests: $(head -c 300 "$R")"
 RID=$(jget "$R" "d['requests'][0]['id']" | tr -d '"')
 curl -s -H "$H" "http://$HOST:$PORT/api/requests?id=$RID" > "$R"
 [ "$(jget "$R" "d['id']")" = "$RID" ] && [ "$(jget "$R" "d['wallclock_s'] >= 0")" = True ] \
   && [ "$(jget "$R" "d['queue_s'] >= 0")" = True ] \
-  && ok "/api/requests?id= 详情" || bad "/api/requests?id=：$(head -c 300 "$R")"
+  && ok "/api/requests?id= detail" || bad "/api/requests?id=: $(head -c 300 "$R")"
 curl -s -H "$H" "http://$HOST:$PORT/api/requests?id=deadbeef0000" > "$R"
 [ "$(jget "$R" "d['error']['message']")" ] \
-  && ok "/api/requests?id= 404 错误体" || bad "/api/requests 缺失 id 错误体：$(head -c 300 "$R")"
+  && ok "/api/requests?id= 404 error body" || bad "/api/requests missing-id error body: $(head -c 300 "$R")"
 
-# 15. 静态页：/ 是含 Chat 面板的三 tab 壳，tokens.css 含令牌与深色套，app.js 含 Chat 逻辑。
+# 15. Static pages: / is a three-tab shell containing the Chat panel, tokens.css carries theme tokens and the
+#     dark theme, app.js carries the Chat logic.
 curl -s "http://$HOST:$PORT/" > "$R"
 grep -q 'id="panel-chat"' "$R" && grep -q '/web/tokens.css' "$R" && grep -q '/web/app.js' "$R" \
-  && ok "/ 三 tab 壳（panel-chat/tokens.css/app.js）" || bad "/ 静态壳：$(head -c 200 "$R")"
+  && ok "/ three-tab shell (panel-chat/tokens.css/app.js)" || bad "/ static shell: $(head -c 200 "$R")"
 curl -s "http://$HOST:$PORT/web/tokens.css" > "$R"
 grep -q -- '--bg' "$R" && grep -q 'data-theme="dark"' "$R" \
-  && ok "/web/tokens.css（令牌 + 深色套）" || bad "/web/tokens.css：$(head -c 200 "$R")"
+  && ok "/web/tokens.css (theme tokens + dark theme)" || bad "/web/tokens.css: $(head -c 200 "$R")"
 curl -s "http://$HOST:$PORT/web/app.js" > "$R"
 grep -q 'pollMetrics' "$R" && grep -q 'panel-chat' "$R" \
-  && ok "/web/app.js（Chat 逻辑）" || bad "/web/app.js：$(head -c 200 "$R")"
+  && ok "/web/app.js (Chat logic)" || bad "/web/app.js: $(head -c 200 "$R")"
 
-# 16. 前端二：index 带 Monitor/About 骨架，app.js 暴露 QinferRequests 与 sparkline，
-#     /api-monitor 装了壳且 monitor.js 可达（复用 loadDetail）。
+# 16. Frontend part two: index carries the Monitor/About skeleton, app.js exposes QinferRequests and sparkline,
+#     /api-monitor is shelled and monitor.js is reachable (reuses loadDetail).
 curl -s "http://$HOST:$PORT/" > "$R"
 grep -q 'id="card-state"' "$R" && grep -q 'id="req-detail"' "$R" && grep -q 'id="about-engine"' "$R" \
-  && ok "/ Monitor/About 骨架（card-state/req-detail/about-engine）" || bad "/ 骨架：$(head -c 200 "$R")"
+  && ok "/ Monitor/About skeleton (card-state/req-detail/about-engine)" || bad "/ skeleton: $(head -c 200 "$R")"
 curl -s "http://$HOST:$PORT/web/app.js" > "$R"
 grep -q 'QinferRequests' "$R" && grep -q 'initMonitor' "$R" && grep -q 'sparkline' "$R" \
-  && ok "/web/app.js（Monitor/About/sparkline）" || bad "/web/app.js：$(head -c 200 "$R")"
+  && ok "/web/app.js (Monitor/About/sparkline)" || bad "/web/app.js: $(head -c 200 "$R")"
 curl -s "http://$HOST:$PORT/api-monitor" > "$R"
 grep -q 'id="req-list"' "$R" && grep -q 'monitor.js' "$R" \
-  && ok "/api-monitor 壳（req-list/monitor.js）" || bad "/api-monitor：$(head -c 200 "$R")"
+  && ok "/api-monitor shell (req-list/monitor.js)" || bad "/api-monitor: $(head -c 200 "$R")"
 curl -s "http://$HOST:$PORT/web/monitor.js" > "$R"
 grep -q 'QinferRequests.loadDetail' "$R" \
-  && ok "/web/monitor.js（检查页复用渲染层）" || bad "/web/monitor.js：$(head -c 200 "$R")"
+  && ok "/web/monitor.js (monitor page reuses the render layer)" || bad "/web/monitor.js: $(head -c 200 "$R")"
 
-# 16a. chat 编码失败记账：中文 content 必触发词表外分词失败 → 500，且记录环最新一条
-#      state=error、path=/v1/chat/completions（验证编码失败路径也完成收尾记账）。
+# 16a. chat encoding-failure bookkeeping: Chinese content necessarily triggers out-of-vocabulary tokenization
+#      failure → 500, and the newest ring record is state=error, path=/v1/chat/completions (verifies the
+#      encoding-failure path also completes its closing bookkeeping).
 code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
   -X POST "http://$HOST:$PORT/v1/chat/completions" \
   -d '{"messages":[{"role":"user","content":"中文"}],"max_tokens":8,"temperature":0}')
 [ "$code" = 500 ] && [ "$(jget "$R" "d['error']['type']")" = server_error ] \
-  || bad "16a chat 编码失败应 500：状态 $code，体 $(head -c 200 "$R")"
+  || bad "16a chat encoding failure should be 500: status $code, body $(head -c 200 "$R")"
 curl -s -H "$H" "http://$HOST:$PORT/api/requests" > "$R"
 if [ "$(jget "$R" "d['requests'][0]['state']")" = error ] \
    && [ "$(jget "$R" "d['requests'][0]['path']")" = /v1/chat/completions ]; then
-  ok "16a chat 编码失败记账（最新记录 state=error、path=chat）"
+  ok "16a chat encoding-failure bookkeeping (newest record state=error, path=chat)"
 else
-  bad "16a chat 编码失败记账：最新一条 state=$(jget "$R" "d['requests'][0]['state']") path=$(jget "$R" "d['requests'][0]['path']")"
+  bad "16a chat encoding-failure bookkeeping: newest entry state=$(jget "$R" "d['requests'][0]['state']") path=$(jget "$R" "d['requests'][0]['path']")"
 fi
 
-# 16b. completions 错误记账：中文 prompt → 500，且最新一条 state=error、path=/v1/completions。
+# 16b. completions error bookkeeping: Chinese prompt → 500, and the newest entry is state=error, path=/v1/completions.
 code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
   -X POST "http://$HOST:$PORT/v1/completions" -d '{"prompt":"中文","max_tokens":8,"temperature":0}')
 [ "$code" = 500 ] && [ "$(jget "$R" "d['error']['type']")" = server_error ] \
-  || bad "16b completions 编码失败应 500：状态 $code，体 $(head -c 200 "$R")"
+  || bad "16b completions encoding failure should be 500: status $code, body $(head -c 200 "$R")"
 curl -s -H "$H" "http://$HOST:$PORT/api/requests" > "$R"
 if [ "$(jget "$R" "d['requests'][0]['state']")" = error ] \
    && [ "$(jget "$R" "d['requests'][0]['path']")" = /v1/completions ]; then
-  ok "16b completions 错误记账（最新记录 state=error、path=completions）"
+  ok "16b completions error bookkeeping (newest record state=error, path=completions)"
 else
-  bad "16b completions 错误记账：最新一条 state=$(jget "$R" "d['requests'][0]['state']") path=$(jget "$R" "d['requests'][0]['path']")"
+  bad "16b completions error bookkeeping: newest entry state=$(jget "$R" "d['requests'][0]['state']") path=$(jget "$R" "d['requests'][0]['path']")"
 fi
 
-# 17. 断开释放：起流式请求，0.5 秒掐掉 curl；随后 /slots 应全部回到空闲（≤10 秒轮询）。
+# 17. Disconnect release: start a streaming request, kill curl after 0.5 s; then all /slots must return to idle
+#     (poll for ≤10 s).
 curl -s -N -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/v1/chat/completions" \
   -d '{"messages":[{"role":"user","content":"c"}],"max_tokens":2048,"temperature":0,"stream":true}' >/dev/null &
 CK=$!
@@ -374,10 +389,11 @@ for _ in $(seq 1 40); do
   [ "$(jget "$R" "all(not x['is_processing'] for x in d)")" = True ] && { idle=1; break; }
   sleep 0.25
 done
-[ "$idle" = 1 ] && ok "断开后槽位释放" || bad "断开后槽位未释放：$(head -c 200 "$R")"
+[ "$idle" = 1 ] && ok "slot released after disconnect" || bad "slot not released after disconnect: $(head -c 200 "$R")"
 
-# 18. conversation_cache 命中：同一请求顺序发两次，第二次必命中（首个应答前已入库）；对比
-#     发请求前后的 /metrics，hits 与 totals.reused 各至少 +1，且缓存非空。
+# 18. conversation_cache hit: send the same request twice in sequence, the second must hit (it is cached before
+#     the first response completes); comparing /metrics before and after the requests, hits and totals.reused
+#     each increase by at least 1, and the cache is non-empty.
 curl -s -H "$H" "http://$HOST:$PORT/metrics" > "$R"
 h0=$(jget "$R" "d['conversation_cache']['hits']")
 r0=$(jget "$R" "d['totals']['reused']")
@@ -391,13 +407,14 @@ h1=$(jget "$R" "d['conversation_cache']['hits']")
 r1=$(jget "$R" "d['totals']['reused']")
 if [ "$h1" -ge "$((h0 + 1))" ] && [ "$r1" -ge "$((r0 + 1))" ] \
    && [ "$(jget "$R" "d['conversation_cache']['entries'] >= 1")" = True ]; then
-  ok "18 重复请求命中缓存（hits ${h0}→${h1}、reused ${r0}→${r1}）"
+  ok "18 duplicate request hit cache (hits ${h0}→${h1}, reused ${r0}→${r1})"
 else
-  bad "18 重复请求未命中：hits ${h0}→${h1}、reused ${r0}→${r1}、$(head -c 200 "$R")"
+  bad "18 duplicate request did not hit: hits ${h0}→${h1}, reused ${r0}→${r1}, $(head -c 200 "$R")"
 fi
 
-# 19. Prometheus text 端口：Accept: text/plain → text/plain 内容类型，vLLM 家族样本与直方图在
-#     （本实例至此已完成多次请求：request_success_total ≥ 1、e2e count ≥ 1、缓存命中 ≥ 1 均确定）。
+# 19. Prometheus text port: Accept: text/plain → text/plain content type, vLLM-family samples and histograms
+#     present (this instance has already served many requests by now: request_success_total ≥ 1, e2e count ≥ 1,
+#     cache hits ≥ 1 are all deterministic).
 curl -s -D "$R.hdr" -o "$R.body" -H "$H" -H 'Accept: text/plain' "http://$HOST:$PORT/metrics"
 if grep -qi '^Content-Type: text/plain' "$R.hdr" \
    && python3 - "$R.body" <<'PY'
@@ -415,25 +432,27 @@ assert last_int("vllm:prefix_cache_hits_total") >= 1
 assert "vllm:num_preemptions_total" in text
 PY
 then
-  ok "19 /metrics Prometheus text（Accept 协商 + vLLM 家族 + 直方图）"
+  ok "19 /metrics Prometheus text (Accept negotiation + vLLM family + histograms)"
 else
-  bad "19 /metrics Prometheus text：头 $(head -c 120 "$R.hdr") 体 $(head -c 200 "$R.body")"
+  bad "19 /metrics Prometheus text: header $(head -c 120 "$R.hdr") body $(head -c 200 "$R.body")"
 fi
 
-# 19b. ?format=prometheus 无 Accept 也出 text；无 Accept 无参数保持 JSON（前端与 curl 缺省不破）。
+# 19b. ?format=prometheus yields text even without Accept; no Accept and no param keeps JSON (the defaults for
+#      the frontend and curl are not broken).
 curl -s -D "$R.hdr" -o "$R.body" -H "$H" "http://$HOST:$PORT/metrics?format=prometheus"
 grep -qi '^Content-Type: text/plain' "$R.hdr" \
   && ok "19b ?format=prometheus → text" \
-  || bad "19b ?format=prometheus：头 $(head -c 120 "$R.hdr")"
+  || bad "19b ?format=prometheus: header $(head -c 120 "$R.hdr")"
 curl -s -D "$R.hdr" -o "$R" -H "$H" "http://$HOST:$PORT/metrics"
 if grep -qi '^Content-Type: application/json' "$R.hdr" \
    && [ "$(jget "$R" "d['totals']['requests'] >= 1")" = True ]; then
-  ok "19b 无 Accept 保持 JSON（totals.requests 存在）"
+  ok "19b no Accept keeps JSON (totals.requests present)"
 else
-  bad "19b 无 Accept 应 JSON：头 $(head -c 120 "$R.hdr") 体 $(head -c 200 "$R")"
+  bad "19b no Accept should be JSON: header $(head -c 120 "$R.hdr") body $(head -c 200 "$R")"
 fi
 
-# 20. qinfer: 家族（JSON 自有事实，模型标签在各样本上）：与 19 同一快照源、模型名标签转义正确。
+# 20. qinfer: family (JSON-native facts, model label on each sample): same snapshot source as 19, model-name
+#     label escaping correct.
 curl -s -D "$R.hdr" -o "$R.body" -H "$H" -H 'Accept: text/plain' "http://$HOST:$PORT/metrics"
 if python3 - "$R.body" <<'PY'
 import sys
@@ -446,23 +465,24 @@ lab = 'model_name="qinfer-serve-fixture"'
 assert ("qinfer:live_state{" + lab + ',state="idle"}') in text, "模型标签样本缺失"
 PY
 then
-  ok "20 qinfer: 家族齐备且带模型标签"
+  ok "20 qinfer: family complete with model labels"
 else
-  bad "20 qinfer 家族：$(head -c 200 "$R.body")"
+  bad "20 qinfer family: $(head -c 200 "$R.body")"
 fi
 rm -f "$R.hdr" "$R.body"
 
-# 21. 工具（OpenAI 域）：21a 正规 tools 包装生成 200 且 content 非空；21b 历史 assistant
-#      tool_calls（content null）+ tool 消息走通渲染管道（夹具模板只出 content——本用例是管线
-#      验证：消息过滤与工具定义注入不丢）；21c 坏 tools 形状一律 400（"auto"/空名字/非数组）。
+# 21. Tools (OpenAI domain): 21a a well-formed tools wrapper yields 200 with non-empty content; 21b historical
+#      assistant tool_calls (content null) + tool messages go through the render pipeline (the fixture template
+#      only emits content — this case validates the pipeline: message filtering and tool-definition injection
+#      are not dropped); 21c malformed tools shapes all yield 400 ("auto"/empty name/non-array).
 code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
   -X POST "http://$HOST:$PORT/v1/chat/completions" \
   -d '{"model":"x","messages":[{"role":"user","content":"c"}],"max_tokens":8,"temperature":0,
        "tools":[{"type":"function","function":{"name":"get_weather","description":"查天气","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]}')
 if [ "$code" = 200 ] && [ -n "$(jget "$R" "d['choices'][0]['message']['content']")" ]; then
-  ok "21a OpenAI tools 渲染（200 + content 非空）"
+  ok "21a OpenAI tools render (200 + non-empty content)"
 else
-  bad "21a tools：状态 $code，体 $(head -c 200 "$R")"
+  bad "21a tools: status $code, body $(head -c 200 "$R")"
 fi
 code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
   -X POST "http://$HOST:$PORT/v1/chat/completions" \
@@ -472,9 +492,9 @@ code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/j
                    {"role":"tool","tool_call_id":"call_1","content":"c"}],
        "max_tokens":8,"temperature":0}')
 if [ "$code" = 200 ]; then
-  ok "21b tool 历史（assistant tool_calls + tool 消息）"
+  ok "21b tool history (assistant tool_calls + tool messages)"
 else
-  bad "21b tool 历史：状态 $code，体 $(head -c 200 "$R")"
+  bad "21b tool history: status $code, body $(head -c 200 "$R")"
 fi
 for bad_tools in '"auto"' '[{"type":"function","function":{"name":""}}]' '123'; do
   code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
@@ -483,13 +503,14 @@ for bad_tools in '"auto"' '[{"type":"function","function":{"name":""}}]' '123'; 
   [ "$code" = 400 ] || break
 done
 if [ "$code" = 400 ]; then
-  ok "21c 坏 tools 形状 → 400（\"auto\"/空名字/非数组）"
+  ok "21c malformed tools shapes → 400 (\"auto\"/empty name/non-array)"
 else
-  bad "21c 坏 tools 应 400：得 $code，体 $(head -c 200 "$R")"
+  bad "21c malformed tools should be 400: got $code, body $(head -c 200 "$R")"
 fi
 
-# 22. 工具（Anthropic 域）：tools 的 input_schema 改名 parameters、tool_use/tool_result 历史
-#      走消息组装管道 → 200；生成块是 text（夹具不真产 <tool_call>）、input_tokens ≥ 1。
+# 22. Tools (Anthropic domain): tools' input_schema is renamed to parameters; tool_use/tool_result history
+#      goes through the message assembly pipeline → 200; the generated block is text (the fixture does not
+#      actually emit <tool_call>), input_tokens ≥ 1.
 code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
   -X POST "http://$HOST:$PORT/v1/messages" \
   -d '{"model":"x",
@@ -501,24 +522,26 @@ code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/j
 if [ "$code" = 200 ] && [ "$(jget "$R" "d['content'][0]['type']")" = text ] \
    && [ "$(jget "$R" "d['stop_reason']")" = max_tokens ] \
    && [ "$(jget "$R" "d['usage']['input_tokens']")" -ge 1 ]; then
-  ok "22 Anthropic tools（input_schema/历史/usage/stop_reason）"
+  ok "22 Anthropic tools (input_schema/history/usage/stop_reason)"
 else
-  bad "22 Anthropic tools：状态 $code，体 $(head -c 200 "$R")"
+  bad "22 Anthropic tools: status $code, body $(head -c 200 "$R")"
 fi
 
-# 23. count_tokens 带 tools：input_schema 归一进渲染，计数 ≥ 1（与补全同 prompt 口径）。
+# 23. count_tokens with tools: input_schema is normalized into rendering, count ≥ 1 (same prompt basis as
+#     completion).
 code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
   -X POST "http://$HOST:$PORT/v1/messages/count_tokens" \
   -d '{"model":"x","messages":[{"role":"user","content":"c"}],
        "tools":[{"name":"get_weather","description":"查天气","input_schema":{"type":"object","properties":{"city":{"type":"string"}}}}]}')
 if [ "$code" = 200 ] && [ "$(jget "$R" "d['input_tokens']")" -ge 1 ]; then
-  ok "23 count_tokens 带 tools"
+  ok "23 count_tokens with tools"
 else
-  bad "23 count_tokens+tools：状态 $code，体 $(head -c 200 "$R")"
+  bad "23 count_tokens+tools: status $code, body $(head -c 200 "$R")"
 fi
 
-# 24. OpenAI 流式带 tools：SSE 角色首帧 + 拼文非空 + [DONE]（夹具不真产 <tool_call>，验证
-#     tools 形状穿过流式管道不破帧）。
+# 24. OpenAI streaming with tools: SSE role first frame + non-empty concatenated text + [DONE] (the fixture
+#     does not really emit <tool_call>; verifies tools shapes pass through the streaming pipeline without
+#     breaking frames).
 curl -sN -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/v1/chat/completions" \
   -d '{"model":"x","messages":[{"role":"user","content":"c"}],"max_tokens":8,"temperature":0,
        "stream":true,
@@ -532,36 +555,37 @@ assert objs[0]["choices"][0]["delta"].get("role") == "assistant", "首帧缺 rol
 text = "".join(o["choices"][0]["delta"].get("content", "") for o in objs)
 assert text, "拼文空"
 print("stream-tools-ok")' | grep -q stream-tools-ok \
-  && ok "24 OpenAI 流式带 tools（角色首帧 + 拼文非空 + [DONE]）" \
-  || bad "24 流式带 tools"
+  && ok "24 OpenAI streaming with tools (role first frame + non-empty text + [DONE])" \
+  || bad "24 streaming with tools"
 
-# 25. 前端三：Strata 风格静态资源可达（components/sprite/fonts），/ 带新壳标记（st-header/
-#     st-pill/主题钮），既有 15/16 的兼容 id 保留不破。
+# 25. Frontend part three: Strata-style static assets reachable (components/sprite/fonts), / carries the new
+#     shell markers (st-header/st-pill/theme button); the existing 15/16 compatibility ids are preserved.
 for p in web/components.css web/app.css web/sprite.svg web/fonts/outfit-latin-wght.woff2; do
   code=$(curl -s -o /dev/null -w '%{http_code}' "http://$HOST:$PORT/$p")
-  [ "$code" = 200 ] || bad "25 /$p 应 200，得 $code"
+  [ "$code" = 200 ] || bad "25 /$p should be 200, got $code"
 done
 curl -s "http://$HOST:$PORT/" > "$R"
 grep -q 'st-header' "$R" && grep -q 'st-pill' "$R" && grep -q 'btn-theme' "$R" \
   && grep -q 'id="panel-chat"' "$R" && grep -q 'id="card-state"' "$R" \
-  && ok "25 Strata 资源 + 新壳（st-header/st-pill/btn-theme，兼容点保留）" \
-  || bad "25 新壳标记：$(head -c 200 "$R")"
+  && ok "25 Strata assets + new shell (st-header/st-pill/btn-theme, compatibility points preserved)" \
+  || bad "25 new shell markers: $(head -c 200 "$R")"
 
-# 26. 前端四：i18n 与设置收纳——/ 含语言钮（btn-lang）与 data-i18n 标记、About 含 api-key
-#     （key 从顶栏收进设置卡），app.js 含 qinfer.lang 字典与切语言函数。
+# 26. Frontend part four: i18n and settings consolidation — / carries the language button (btn-lang) and
+#     data-i18n markers, About carries api-key (the key moved from the top bar into a settings card), and
+#     app.js contains the qinfer.lang dictionary and the language-switching function.
 curl -s "http://$HOST:$PORT/" > "$R"
 grep -q 'id="btn-lang"' "$R" && grep -q 'data-i18n' "$R" \
   && grep -q 'id="api-key"' "$R" && grep -q 'data-i18n="about.apiKey"' "$R" \
-  && ok "26 i18n 标记 + key 收纳（btn-lang/data-i18n/About 内 api-key）" \
-  || bad "26 i18n/key 收纳：$(head -c 200 "$R")"
+  && ok "26 i18n markers + key consolidation (btn-lang/data-i18n/api-key in About)" \
+  || bad "26 i18n/key consolidation: $(head -c 200 "$R")"
 curl -s "http://$HOST:$PORT/web/app.js" > "$R"
 grep -q 'qinfer.lang' "$R" && grep -q 'applyLang' "$R" && grep -q 'data-i18n' "$R" \
-  && ok "26 app.js 语言层（qinfer.lang/applyLang/data-i18n）" \
-  || bad "26 app.js 语言层：$(head -c 200 "$R")"
+  && ok "26 app.js language layer (qinfer.lang/applyLang/data-i18n)" \
+  || bad "26 app.js language layer: $(head -c 200 "$R")"
 
-# 27. chunked 终止块：SSE 流必须带规范的 0 长度终止块——浏览器（严格 chunked 解析）在缺
-#     终止块时报 ERR_INCOMPLETE_CHUNKED_ENCODING 前端看不到流；python http.client 同样
-#     严格，读到不完整流抛 IncompleteRead。
+# 27. chunked terminator: the SSE stream must end with a canonical zero-length terminating chunk — without it,
+#     browsers (strict chunked parsing) fail with ERR_INCOMPLETE_CHUNKED_ENCODING and the frontend never sees
+#     the stream; python http.client is equally strict and raises IncompleteRead on an incomplete stream.
 out27=$(python3 - "$HOST" "$PORT" <<'PYEOF'
 import http.client, sys
 host, port = sys.argv[1], int(sys.argv[2])
@@ -580,17 +604,18 @@ print("chunked-terminated-ok")
 PYEOF
 )
 [ "$out27" = chunked-terminated-ok ] \
-  && ok "27 chunked 终止块（严格解析完整读到 [DONE]）" \
-  || bad "27 chunked 终止块：缺 0 长度终止块 → IncompleteRead/流不完整：$out27"
+  && ok "27 chunked terminator (strict parsing reads all the way to [DONE])" \
+  || bad "27 chunked terminator: missing zero-length terminating chunk → IncompleteRead/incomplete stream: $out27"
 
-# 28. 推理线程池可配置且默认不满载：--compute-threads 4 → /props 的 compute_threads=4；
-#     不带参数 → 默认值 = 物理并发数的一半、封顶 8（用户要求默认不能吃满整个 CPU）。
+# 28. The inference thread pool is configurable and not saturated by default: --compute-threads 4 → /props
+#     compute_threads=4; without the flag → default = half the physical concurrency, capped at 8 (users want
+#     the default to not consume the whole CPU).
 stop
 start --api-key testkey --compute-threads 4 || exit 1
 curl -s -H "$H" "http://$HOST:$PORT/props" > "$R"
 ct=$(jget "$R" "d['compute_threads']")
 [ "$ct" = 4 ] && ok "28 --compute-threads 4 → /props compute_threads=4" \
-  || bad "28 compute_threads：应 4 得 $ct"
+  || bad "28 compute_threads: expected 4, got $ct"
 stop
 start --api-key testkey || exit 1
 curl -s -H "$H" "http://$HOST:$PORT/props" > "$R"
@@ -598,13 +623,14 @@ ct=$(jget "$R" "d['compute_threads']")
 cores="$(getconf _NPROCESSORS_ONLN)"
 half=$(( cores / 2 )); [ "$half" -gt 8 ] && half=8
 [ -n "$ct" ] && [ "$ct" -ge 1 ] && [ "$ct" -le "$half" ] \
-  && ok "28 默认 compute_threads=$ct（≤ 物理核数一半 $half，不满载）" \
-  || bad "28 默认 compute_threads：得 $ct，期望 1..$half（cores=$cores）"
+  && ok "28 default compute_threads=$ct (≤ half the physical cores $half, not saturated)" \
+  || bad "28 default compute_threads: got $ct, expected 1..$half (cores=$cores)"
 stop
 
-# 29. --gpu 语义按构建分野：CUDA 构建下 --gpu 0 正常拉起（dense 设备执行激活，层 0 GDN + 层 1 QSA
-#     两条 *_cuda 路径都会跑到），并发一个请求验证设备推理产出；无 CUDA 构建必须拒绝启动（明确报错
-#     不静默回退）。不带 --gpu 服务照常起（纯 CPU 路径零变化，本脚本其它用例就是那条路）。
+# 29. --gpu semantics split by build: on a CUDA build --gpu 0 starts normally (dense device execution is
+#     active; both *_cuda paths of layer 0 GDN + layer 1 QSA run), and one request verifies the device-inference
+#     output; on a CUDA-less build startup must be rejected (an explicit error, no silent fallback). Without
+#     --gpu the server starts as usual (pure-CPU path unchanged; the other cases in this script exercise it).
 timeout 8 "$SERVER" --model "$FIX" --host "$HOST" --port "$PORT" --n-embd 256 --hc 2 --hc-lr 3 \
           --layers 2 --top-k 2 --gdn-head-dim 32 --qsa-head-dim 32 --n-rot 4 --idx-dim 4 \
           --idx-top-k 2048 --idx-block 4 --max-context 4096 --api-key testkey --gpu 0 \
@@ -616,22 +642,22 @@ for _ in $(seq 1 30); do
   sleep 0.25
 done
 if [ "$up" = 1 ]; then
-  # CUDA 构建：--gpu 0 激活 dense 设备执行。请求走完整推理（token embd → GDN → MoE → QSA → 头），
-  # 任一设备内核炸（非法访问/分派落空）都会在服务端现形（400/500/坠）。
+  # CUDA build: --gpu 0 activates dense device execution. The request runs full inference (token embd → GDN →
+  # MoE → QSA → head); any device-kernel crash (illegal access/missed dispatch) will surface server-side (400/500/crash).
   code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
     -X POST "http://$HOST:$PORT/v1/chat/completions" \
     -d '{"model":"x","messages":[{"role":"system","content":"c"},{"role":"user","content":"d"}],"max_tokens":8,"temperature":0}')
   if [ "$code" = 200 ] && [ -n "$(jget "$R" "d['choices'][0]['message']['content']")" ]; then
-    ok "29 --gpu 0 拉起且设备推理正常（双子层 *_cuda 路径）"
+    ok "29 --gpu 0 started and device inference OK (both layer *_cuda paths)"
   else
-    bad "29 --gpu 0 服务起来但设备推理失败：http=$code，$(head -c 200 "$R")"
+    bad "29 --gpu 0 server is up but device inference failed: http=$code, $(head -c 200 "$R")"
   fi
 else
   wait "$BPID" 2>/dev/null; rc=$?
-  if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && grep -q "CUDA 未启用" /tmp/gpu-reject.log; then
-    ok "29 --gpu 在无 CUDA 构建上拒绝启动（exit=$rc，错误体含 CUDA 未启用）"
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && grep -q "CUDA-enabled build" /tmp/gpu-reject.log; then
+    ok "29 --gpu refused to start on a CUDA-less build (exit=$rc, error body contains CUDA-enabled build)"
   else
-    bad "29 --gpu 拒绝启动：exit=$rc（124=静默卡住），日志 $(tail -2 /tmp/gpu-reject.log)"
+    bad "29 --gpu refused startup: exit=$rc (124=silently hung), log $(tail -2 /tmp/gpu-reject.log)"
   fi
 fi
 pkill -9 -x qinfer-server 2>/dev/null
@@ -641,21 +667,21 @@ rm -f /tmp/gpu-reject.log
 
 stop
 
-# ---- 503：--reject-after 1 → 第 1 个请求正常，之后一律队列满 ----
+# ---- 503: --reject-after 1 → first request OK, then queue-full from then on ----
 start --api-key testkey --slots 1 --reject-after 1 || exit 1
 code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
   -X POST "http://$HOST:$PORT/v1/chat/completions" \
   -d '{"messages":[{"role":"user","content":"a"}],"max_tokens":4,"temperature":0}')
-[ "$code" = 200 ] || bad "reject-after 首请求应 200，得 $code"
+[ "$code" = 200 ] || bad "reject-after first request should be 200, got $code"
 code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
   -X POST "http://$HOST:$PORT/v1/chat/completions" \
   -d '{"messages":[{"role":"user","content":"b"}],"max_tokens":4,"temperature":0}')
 if [ "$code" = 503 ] && cmp -s "$R" <(printf '%s' '{"error":"queue full"}'); then
-  ok "503 身体精确为 {\"error\":\"queue full\"}"
+  ok "503 body exactly {\"error\":\"queue full\"}"
 else
-  bad "503：状态 $code，体 $(head -c 200 "$R")"
+  bad "503: status $code, body $(head -c 200 "$R")"
 fi
 stop
 
-echo "serve 集成：通过 $PASS、失败 $FAIL"
+echo "serve integration: passed $PASS, failed $FAIL"
 [ "$FAIL" = 0 ]

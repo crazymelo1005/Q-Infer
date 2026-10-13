@@ -1,12 +1,17 @@
-// HTTP 接线层：httplib 路由、鉴权、worker 池。请求在 HTTP 线程内完成解析与校验，交入调度器的有界
-// 队列；槽位 worker 驱动门面生成，增量经 Job 的事件缓冲回写 HTTP 线程（非流式收齐、SSE 逐帧）。
+// HTTP wiring layer: httplib routing, auth, worker pool. Requests are parsed and
+// validated on HTTP threads, then handed to the scheduler's bounded queue; slot
+// workers drive the facade, and increments are written back to the HTTP thread
+// through the Job event buffer (non-streaming collects them all, SSE per frame).
 //
-// v0 并发正确性的一条关键约束：artifact::GgufFile 的读取用一份 mutable ifstream（seekg+read，
-// gguf_table.cpp 的 read_at），不是线程安全的；PLE 的 GgufTable 同理。故这里用一把进程级 engine_mu_
-// 串行化 Engine 的全部可变访问（generate 与 tokenizer().encode——encode 会写各 worker 共享的
-// piece_cache_，见 tokenizer.cpp:261/275，核读结论见任务报告）——队列/槽位/事件缓冲结构已为 M2
-// 就位，锁是吞吐优化的第一刀（换按线程文件句柄或 pread）。锁放服务层不放门面：Engine::generate
-// 自身无锁，服务层是唯一并行使用引擎的地方。
+// A key v0 concurrency constraint: artifact::GgufFile reads go through a single
+// mutable ifstream (seekg+read in gguf_table.cpp's read_at) and are not thread
+// safe; the PLE GgufTable is the same. So one process-wide engine_mu_ serializes
+// all mutable Engine access (generate and tokenizer().encode — encode writes the
+// piece_cache_ shared by workers, see tokenizer.cpp:261/275) — the queue/slot/
+// event-buffer structures are already in place for M2; the lock is the first
+// throughput cut (per-thread file handles or pread come later). The lock lives in
+// the service layer, not the facade: Engine::generate itself is lock-free and the
+// service layer is the only parallel user of the engine.
 #pragma once
 
 #include <atomic>
@@ -33,26 +38,31 @@ struct Response;
 
 namespace qinfer::serve {
 
-// 503 的响应体是全服务唯一的字面量（规格 §4：`{error: "queue full"}` 的扁平形状）。
+// The 503 body is the single literal shared by the whole service (spec §4:
+// the flat `{error: "queue full"}` shape).
 inline constexpr const char* kQueueFullBody = "{\"error\":\"queue full\"}";
 
 struct ServeConfig {
     std::string model_path;
     std::string host = "127.0.0.1";
     int port = 8080;
-    std::string api_key;                 // 空 = 不鉴权（本机默认）
+    std::string api_key;                 // empty = no auth (local default)
     std::size_t slots = 8;
-    std::size_t queue_capacity = 0;      // 0 = 2 × slots（规格 §4 第 1 条）
-    int threads = 0;                     // httplib HTTP 线程池；0 = 2 × slots + 2
-    int compute_threads = 0;             // 引擎推理线程池（scheduling::set_pool_threads）；0 = 默认
-                                         // （物理并发数的一半、封顶 8——默认不满载，用户要求）；1 或负 = 关
-    // --gpu：启用 CUDA 设备侧。auto = 全部可见卡；否则逗号分隔的设备索引列表（nvidia-smi 序号）。
-    // 空 + 非 auto = 纯 CPU（现行为）。只有带 QINFER_CUDA_BUILD 的构建才允许非空。
-    bool gpu_auto = false;               // --gpu auto（启动时取全部可见 CUDA 卡）
-    std::vector<int> gpu_devices;        // --gpu 0,1 显式列表；空 = 纯 CPU
-    std::size_t conversation_cache = 64; // token 前缀缓存条数；0 = 关（/metrics 的 conversation_cache 实读）
-    std::uint64_t reject_after = 0;      // 0 = 关；>0 = 第 N 个请求起一律 503（集成测试用，注释见 main）
-    // 门面几何直通（默认 = 真模型推导值；集成测试覆写成夹具值）。
+    std::size_t queue_capacity = 0;      // 0 = 2 x slots (spec §4 item 1)
+    int threads = 0;                     // httplib HTTP pool; 0 = 2 x slots + 2
+    int compute_threads = 0;             // engine inference pool (scheduling::set_pool_threads); 0 = default
+                                         // (half the physical cores, capped at 8 — conservative by requirement); 1 or negative = off
+    // --gpu: enable the CUDA device side. auto = every visible GPU; otherwise a
+    // comma-separated device index list (nvidia-smi numbering). Empty + non-auto
+    // = pure CPU (current behavior). Only QINFER_CUDA_BUILD builds may use it.
+    bool gpu_auto = false;               // --gpu auto (use every visible CUDA GPU at startup)
+    std::vector<int> gpu_devices;        // --gpu 0,1 explicit list; empty = pure CPU
+    std::string lang = "en";             // --lang en|zh: server-side output language
+                                         // (startup logs; error messages remain English by API
+                                         // convention with the detail string carried through)
+    std::size_t conversation_cache = 64; // token-prefix cache entries; 0 = off (/metrics reads it live)
+    std::uint64_t reject_after = 0;      // 0 = off; >0 = 503 every request from the Nth (integration tests; see main)
+    // Facade geometry passthrough (defaults = real-model derived values; integration tests override).
     FacadeConfig facade;
 };
 
@@ -61,8 +71,8 @@ public:
     Serve(ServeConfig cfg, std::shared_ptr<Engine> eng);
     ~Serve();
 
-    bool listen(std::string& err);   // 注册路由并绑定，阻塞在 HTTP 线程池内；失败写 err
-    void stop();                     // 线程安全，可从信号处理器调用
+    bool listen(std::string& err);   // register routes and bind; blocks in the HTTP pool; err on failure
+    void stop();                     // thread-safe; callable from a signal handler
 
 private:
     void register_routes();
@@ -77,42 +87,45 @@ private:
                              httplib::Response& res);
     std::shared_ptr<Job> launch(const std::string& path, std::string prompt,
                                 const GenOptions& opts, bool stream);
-    void record_request(const std::shared_ptr<Job>& job, int http_status, bool disconnected);   // T12：填 last_timings 计时；T13：gen 累计；T14：Records 环
-    TelemetryExtra telemetry_extra() const;   // T13：遥测每采样读一份的引擎侧指标（随 record_request 的累计）
+    void record_request(const std::shared_ptr<Job>& job, int http_status, bool disconnected);   // T12: last_timings; T13: gen totals; T14: records ring
+    TelemetryExtra telemetry_extra() const;   // T13: engine-side metrics per telemetry sample (accumulated in record_request)
 
     ServeConfig cfg_;
     std::shared_ptr<Engine> eng_;
     Scheduler sched_;
-    PromptCache prompt_cache_;   // token 前缀缓存：命中免进 engine_mu_（spec §6 的 conversation_cache 数据源）
-    std::mutex engine_mu_;             // 见文件头注释：v0 串行化引擎访问（encode + generate）
+    PromptCache prompt_cache_;   // token-prefix cache: hits skip engine_mu_ (source of /metrics conversation_cache)
+    std::mutex engine_mu_;             // see file header: v0 serializes engine access (encode + generate)
     std::vector<std::thread> workers_;
     std::atomic<std::uint64_t> req_id_{0};
     std::unique_ptr<httplib::Server> svr_;
-    std::string web_index_, web_monitor_;   // 启动时读入的静态页
-    // 最近一次完成的请求的计时（/v1/status 的 last_timings 与 /metrics 的 live 共用）。
+    std::string web_index_, web_monitor_;   // static pages loaded at startup
+    // Timing of the most recently completed request (shared by /v1/status last_timings and /metrics live).
     struct LastTimings {
         bool have = false;
         double queue_s = 0.0, first_token_s = 0.0, wallclock_s = 0.0, decode_tok_s = 0.0;
         std::uint64_t prompt_tokens = 0, output_tokens = 0;
         std::string finish;
     };
-    mutable std::mutex last_mu_;     // telemetry_extra() 是 const，锁内读数需 mutable（同 EventBuffer::mu_）
+    mutable std::mutex last_mu_;     // telemetry_extra() is const, so the lock needs mutable (like EventBuffer::mu_)
     LastTimings last_;
-    std::time_t started_;              // 服务启动时刻（/v1/status 的 uptime_s）
-    // 遥测：T13 起在构造函数里 start()（launch 是每请求入口，无请求时也应采样）；/v1/status 的
-    // machine 与 T14 的 /metrics 都读它。
+    std::time_t started_;              // server start time (/v1/status uptime_s)
+    // Telemetry: started in the constructor since T13 (launch only runs on requests;
+    // sampling must happen even when idle); /v1/status machine and /metrics read it.
     std::unique_ptr<Telemetry> tel_;
-    // tok_s_mean 的累计口径：最近一次请求的解码速度是 v0 的 tok_s，全程均值另记这两项。
-    std::uint64_t gen_done_ = 0;   // 累计生成的 token 数（成功请求才累加）
-    std::uint64_t gen_us_ = 0;     // 累计解码耗时（µs）
-    std::atomic<std::uint64_t> reused_{0};   // 缓存命中的 prompt token 累计（totals.reused；worker 线程写）
-    // 请求记录环（/metrics 的 requests/totals 与 /api/requests 的数据源，T14 起 record_request 填）。
+    // tok_s_mean accumulation: the latest request's decode rate is v0 tok_s; the
+    // all-time mean is tracked by these two fields.
+    std::uint64_t gen_done_ = 0;   // total generated tokens (successful requests only)
+    std::uint64_t gen_us_ = 0;     // total decode time (us)
+    std::atomic<std::uint64_t> reused_{0};   // prompt tokens served from cache (totals.reused; written by workers)
+    // Request records ring (source of /metrics requests/totals and /api/requests; filled by record_request since T14).
     Records records_;
-    // 延迟三直方图（/metrics 的 Prometheus text 端口的 ttft/itl/e2e 家族；record_request 落完成时刻时
-    // observe，自带锁，HTTP 线程 snapshot——与 last_ 的临界区无关）。
+    // Three latency histograms (ttft/itl/e2e families on the /metrics Prometheus
+    // text port; observed by record_request at completion, internally locked,
+    // snapshotted on HTTP threads — unrelated to the last_ critical section).
     Latencies lat_;
-    // /metrics 的 totals 累计（与 last_ 同临界区更新——record_request 是 HTTP 线程调用的唯一写入者；
-    // /metrics 读时也持 last_mu_，无竞态）。
+    // /metrics totals (updated in the same critical section as last_ —
+    // record_request is the only writer from HTTP threads; /metrics holds last_mu_
+    // when reading, so no race).
     struct Totals {
         std::uint64_t prompt_tokens = 0, completion_tokens = 0, requests = 0;
         double prompt_ms = 0.0, decode_ms = 0.0;
@@ -120,7 +133,7 @@ private:
     Totals totals_;
 };
 
-// main.cpp 用：命令行解析（自写的键值扫描，零依赖）。
+// Used by main.cpp: command-line parsing (hand-rolled key/value scan, zero deps).
 ServeConfig parse_flags(int argc, char** argv, std::string& err);
 
 }  // namespace qinfer::serve

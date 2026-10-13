@@ -1,14 +1,17 @@
 "use strict";
-/* Q-Infer 前端公共层（app.js）。
-   index.html   : 三 tab 入口 + Chat 面板（本文件）。
-   monitor.html : 请求检查页——复用本文件定义的公共函数，首行前置
-                  <script>window.__apiMonitorPage = true;</script> 跳过三 tab 入口。
-   所有 API 调用统一走 api()：自动带 Authorization: Bearer <sessionStorage 密钥>。
-   主题切换（浅/深）记 localStorage qinfer.theme，首帧锁在 index.html 内联脚本。 */
+/* Q-Infer shared front-end layer (app.js).
+   index.html   : three-tab shell + Chat panel (this file).
+   monitor.html : request-monitor page — reuses the shared functions; the first
+                  inline <script>window.__apiMonitorPage = true;</script> skips
+                  the three-tab shell.
+   All API calls go through api() — they carry Authorization: Bearer
+   <sessionStorage key> automatically.
+   Theme (light/dark) is stored in localStorage qinfer.theme; the first frame
+   is locked by an inline script in the HTML files. */
 
 function $(id) { return document.getElementById(id); }
 
-/* ---- i18n：zh/en 字典 + 切换（localStorage qinfer.lang，页面间共享） ---- */
+/* ---- i18n: zh/en dictionaries + toggle (localStorage qinfer.lang, shared across pages) ---- */
 const I18N = {
   zh: {
     "brand.tag": "本地推理",
@@ -61,6 +64,15 @@ const I18N = {
     "req.loading": "加载详情…",
     "req.detailFail": "请求详情不可用：HTTP ",
     "req.loadFail": "加载失败：",
+    "about.hide": "隐藏",
+    "about.svcBody": "推理端点为 <span class=\"mono\" id=\"about-ports\"></span>。OpenAI 域走 <span class=\"mono\">/v1/chat/completions</span>（含 SSE 流式）、<span class=\"mono\">/v1/completions</span>、<span class=\"mono\">/v1/models</span>；Anthropic 域走 <span class=\"mono\">/v1/messages</span> 与 <span class=\"mono\">/v1/messages/count_tokens</span>；监控走 <span class=\"mono\">/metrics</span> 与 <span class=\"mono\">/api/requests</span>。",
+    "theme.title": "浅色 / 深色",
+    "theme.dark": "深色主题",
+    "theme.light": "浅色主题",
+    "apiMon.title": "请求检查",
+    "apiMon.keyLabel": "API 密钥",
+    "apiMon.keyPh": "可选",
+    "apiMon.back": "返回主面板",
   },
   en: {
     "brand.tag": "Local inference",
@@ -113,17 +125,37 @@ const I18N = {
     "req.loading": "Loading details…",
     "req.detailFail": "Request details unavailable: HTTP ",
     "req.loadFail": "Load failed: ",
+    "about.hide": "Hide",
+    "about.svcBody": "Endpoints: <span class=\"mono\" id=\"about-ports\"></span>. OpenAI domain at <span class=\"mono\">/v1/chat/completions</span> (incl. SSE streaming), <span class=\"mono\">/v1/completions</span>, <span class=\"mono\">/v1/models</span>; Anthropic domain at <span class=\"mono\">/v1/messages</span> and <span class=\"mono\">/v1/messages/count_tokens</span>; monitoring at <span class=\"mono\">/metrics</span> and <span class=\"mono\">/api/requests</span>.",
+    "theme.title": "Light / dark theme",
+    "theme.dark": "Dark theme",
+    "theme.light": "Light theme",
+    "apiMon.title": "Request monitor",
+    "apiMon.keyLabel": "API key",
+    "apiMon.keyPh": "optional",
+    "apiMon.back": "Back to main panel",
   },
 };
 
-function tr(key) {
-  const lang = localStorage.getItem("qinfer.lang") === "en" ? "en" : "zh";
-  return (I18N[lang] && I18N[lang][key]) || (I18N.zh[key] || key);
+// Resolve the UI language: an explicit choice stored in localStorage wins;
+// otherwise fall back to the browser language (zh prefix -> Chinese, anything
+// else -> English). English is the default on this basis.
+function uiLang() {
+  const v = localStorage.getItem("qinfer.lang");
+  if (v === "en" || v === "zh") return v;
+  const nav = (navigator.language || "").toLowerCase();
+  return nav.indexOf("zh") === 0 ? "zh" : "en";
 }
 
-// 应用语言：data-i18n 文本、data-i18n-ph 占位符、data-i18n-title/title 提示；语言钮标签随动。
+function tr(key) {
+  const lang = uiLang();
+  return (I18N[lang] && I18N[lang][key]) || (I18N.en[key] || key);
+}
+
+// Apply the UI language: data-i18n text, data-i18n-ph placeholders,
+// data-i18n-title/title tooltips; the toggle button label follows along.
 function applyLang() {
-  const lang = localStorage.getItem("qinfer.lang") === "en" ? "en" : "zh";
+  const lang = uiLang();
   document.documentElement.lang = lang === "en" ? "en" : "zh-CN";
   document.querySelectorAll("[data-i18n]").forEach(function (el) {
     el.textContent = tr(el.dataset.i18n);
@@ -136,11 +168,18 @@ function applyLang() {
     el.setAttribute("title", tr(k));
     el.setAttribute("aria-label", tr(k));
   });
+  // Rich key with inline markup (e.g. the /props paragraph): safe here because
+  // the dictionaries are static, no user input ever reaches them.
+  document.querySelectorAll("[data-i18n-html]").forEach(function (el) {
+    el.innerHTML = tr(el.dataset.i18nHtml);
+  });
   const lb = $("btn-lang");
   if (lb) lb.textContent = lang === "en" ? "中" : "EN";
   const bd = document.querySelector(".st-header__brand small");
-  if (bd) bd.textContent = tr("brand.tag");
-  // 已渲染的语言气泡 role 标签随语言刷新（动态生成，无 data-i18n）。
+  // Only the shell pages' brand carries no data-i18n; the monitor page sets its
+  // own title through the [data-i18n] pass above. Skip it to avoid overriding.
+  if (bd && !bd.dataset.i18n) bd.textContent = tr("brand.tag");
+  // Refresh role labels of already-rendered bubbles (dynamically built, no data-i18n).
   document.querySelectorAll("#msg-list .bubble").forEach(function (b) {
     const r = b.querySelector(".bubble-role");
     if (!r) return;
@@ -150,19 +189,19 @@ function applyLang() {
 }
 
 function toggleLang() {
-  const next = localStorage.getItem("qinfer.lang") === "en" ? "zh" : "en";
+  const next = uiLang() === "en" ? "zh" : "en";
   try { localStorage.setItem("qinfer.lang", next); } catch (e) {}
   applyLang();
   showToast(next === "en" ? "English" : "中文", "info");
 }
 
-/* ---- API 密钥（localStorage，跨标签页共享；与 Strata 同款） ---- */
+/* ---- API key (localStorage, shared across tabs; same approach as Strata) ---- */
 function apiKey() { return localStorage.getItem("qinfer.api_key") || ""; }
 function setApiKey(k) {
   try { localStorage.setItem("qinfer.api_key", k); } catch (e) {}
 }
 
-/* ---- 统一 fetch：带密钥头；有 body 时补 Content-Type ---- */
+/* ---- Unified fetch: Authorization header; Content-Type when a body is present ---- */
 async function api(path, opts) {
   opts = opts || {};
   const h = new Headers(opts.headers || {});
@@ -178,7 +217,7 @@ function esc(s) {
   });
 }
 
-/* ---- 页面级提示条 ---- */
+/* ---- Page-level banner ---- */
 function showBanner(msg, kind) {
   const b = $("banner");
   if (!b) return;
@@ -189,7 +228,7 @@ function showBanner(msg, kind) {
   showBanner._t = window.setTimeout(function () { b.classList.add("hidden"); }, 6000);
 }
 
-/* ---- 状态点 ---- */
+/* ---- Status dot ---- */
 function setStatusDot(ok) {
   const d = $("status-dot");
   if (!d) return;
@@ -197,7 +236,7 @@ function setStatusDot(ok) {
   d.classList.toggle("bad", !ok);
 }
 
-/* ---- 顶栏状态 pill：data-state 驱动 dot 颜色（idle/generating/reading/queued/error） ---- */
+/* ---- Header status pill: data-state drives the dot color (idle/generating/reading/queued/error) ---- */
 function setPill(state, text) {
   const pill = $("pill");
   if (!pill) return;
@@ -210,7 +249,7 @@ function setPill(state, text) {
   if (t && text) t.textContent = text;
 }
 
-/* ---- toast 通知 ---- */
+/* ---- Toast notifications ---- */
 function showToast(title, kind, msg) {
   const box = $("toasts");
   if (!box) return;
@@ -225,7 +264,7 @@ function showToast(title, kind, msg) {
   window.setTimeout(function () { el.remove(); }, 5000);
 }
 
-/* ---- 主题切换：localStorage qinfer.theme + html[data-theme] ---- */
+/* ---- Theme toggle: localStorage qinfer.theme + html[data-theme] ---- */
 function currentTheme() { return document.documentElement.dataset.theme === "dark" ? "dark" : "light"; }
 function setTheme(t) {
   document.documentElement.dataset.theme = t;
@@ -237,10 +276,10 @@ function setTheme(t) {
 }
 function toggleTheme() {
   setTheme(currentTheme() === "dark" ? "light" : "dark");
-  showToast(currentTheme() === "dark" ? "深色主题" : "浅色主题", "info");
+  showToast(currentTheme() === "dark" ? tr("theme.dark") : tr("theme.light"), "info");
 }
 
-/* ---- tab 切换 ---- */
+/* ---- Tab switching ---- */
 function switchTab(name) {
   document.querySelectorAll(".tab-btn").forEach(function (b) {
     const on = b.dataset.tab === name;
@@ -253,17 +292,17 @@ function switchTab(name) {
   if (name === "about") refreshAbout();
 }
 
-/* ---- SSE 读取：把 data: 帧逐个喂给 onEvent；[DONE] 或流结束返回 ---- */
+/* ---- SSE reader: feeds data: frames to onEvent one by one; returns on [DONE] or stream end ---- */
 async function readSSE(res, onEvent) {
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = "";
-  // 吞一段解码文本，按 \n\n 切帧；遇 [DONE] 返回 true（消费完毕）。
+  // Consume a decoded chunk, split into frames on \n\n; [DONE] returns true.
   function framesFrom(data) {
     buf += data;
     while (true) {
       const i = buf.indexOf("\n\n");
-      if (i < 0) return false;              // 剩半帧，等下一次拼接
+      if (i < 0) return false;              // half frame left, wait for the next chunk
       const frame = buf.slice(0, i);
       buf = buf.slice(i + 2);
       for (const line of frame.split("\n")) {
@@ -271,7 +310,7 @@ async function readSSE(res, onEvent) {
         const d = line.slice(5).trim();
         if (d === "[DONE]") return true;
         if (!d) continue;
-        try { onEvent(JSON.parse(d)); } catch (e) { /* 跳过坏帧 */ }
+        try { onEvent(JSON.parse(d)); } catch (e) { /* skip malformed frame */ }
       }
     }
   }
@@ -281,11 +320,11 @@ async function readSSE(res, onEvent) {
     if (framesFrom(chunk)) return;
     if (r.done) break;
   }
-  // 服务端在 [DONE] 前关闭：把残帧最后拼一次（多半无输出，半帧静默跳过）。
+  // Server closed before [DONE]: flush the remaining frame once (usually no output).
   framesFrom("");
 }
 
-/* ---- 采样器：默认取 /props，sessionStorage 有持久值时优先 ---- */
+/* ---- Sampler: /props defaults, sessionStorage value wins when present ---- */
 function saveSampler() {
   const s = {
     temperature: parseFloat($("s-temp").value),
@@ -317,7 +356,7 @@ async function loadModel() {
     if (!res.ok) return;
     const d = await res.json();
     if (d.data && d.data.length) modelId = d.data[0].id;
-  } catch (e) { /* 首屏不打断 */ }
+  } catch (e) { /* never break first paint */ }
 }
 
 async function loadProps() {
@@ -331,7 +370,7 @@ async function loadProps() {
       if (p.top_p !== undefined) $("s-top-p").value = p.top_p;
       if (p.seed !== undefined) $("s-seed").value = p.seed;
     }
-  } catch (e) { /* 默认值兜底 */ }
+  } catch (e) { /* fall back to defaults */ }
 }
 
 function hideEmptyPrompt() {
@@ -389,7 +428,8 @@ async function sendChat() {
     seed: parseInt($("s-seed").value, 10),
   };
   const out = addMsg("assistant", "");
-  // prefill 期可见反馈：等待行（转圈 + 文案）→ 首个 delta 到达时移除，正文接管。
+  // Visible feedback during prefill: a waiting row (spinner + text), removed once
+  // the first delta arrives and the real text takes over.
   const waitRow = document.createElement("div");
   waitRow.className = "msg-waiting";
   const spinner = document.createElement("span");
@@ -414,7 +454,7 @@ async function sendChat() {
       try {
         const e = await res.json();
         if (e.error && e.error.message) msg = e.error.message;
-      } catch (e) { /* 非 JSON 错误体 */ }
+      } catch (e) { /* non-JSON error body */ }
       waitRow.remove();
       out.textContent = msg;
       out.parentElement.className = "bubble error";
@@ -469,7 +509,7 @@ function newChat() {
   showToast(tr("chat.newChat"), "info");
 }
 
-/* ---- 导出对话为 Markdown ---- */
+/* ---- Export chat as Markdown ---- */
 function exportChat() {
   const rows = [];
   document.querySelectorAll("#msg-list .bubble").forEach(function (b) {
@@ -487,7 +527,7 @@ function exportChat() {
   showToast(tr("chat.exported"), "success");
 }
 
-/* ---- 每秒轮询 /metrics：状态行与状态点 ---- */
+/* ---- Poll /metrics every second: status line and dot ---- */
 function fmtRate(v) {
   if (v === null || v === undefined) return "—";
   return v >= 1000 ? (v / 1000).toFixed(1) + "k" : v.toFixed(1);
@@ -513,7 +553,7 @@ async function pollMetrics() {
   }
 }
 
-/* ---- 公共初始化：Key、语言、主题与 tab（index / monitor 两页通用） ---- */
+/* ---- Shared init: key, language, theme and tabs (index / monitor pages) ---- */
 function initCommon() {
   document.querySelectorAll(".tab-btn").forEach(function (b) {
     b.addEventListener("click", function () { switchTab(b.dataset.tab); });
@@ -528,7 +568,7 @@ function initCommon() {
     kt.addEventListener("click", function () {
       const show = keyInput.type === "password";
       keyInput.type = show ? "text" : "password";
-      kt.textContent = show ? (tr("about.show") === "显示" ? "隐藏" : "Hide") : tr("about.show");
+      kt.textContent = show ? tr("about.hide") : tr("about.show");
     });
   }
   const lg = $("btn-lang");
@@ -536,12 +576,12 @@ function initCommon() {
   applyLang();
   const th = $("btn-theme");
   if (th) {
-    setTheme(currentTheme());   // 同步图标
+    setTheme(currentTheme());   // sync the icon
     th.addEventListener("click", toggleTheme);
   }
 }
 
-/* ---- 请求记录渲染层（Monitor tab 与 /api-monitor 共用） ---- */
+/* ---- Request-record rendering layer (Monitor tab and /api-monitor share it) ---- */
 window.QinferRequests = {
   badge: function (state) {
     const cls = state === "completed" ? "ok" : state === "error" ? "err" : state === "queued" ? "busy" : "";
@@ -555,7 +595,7 @@ window.QinferRequests = {
     if (!unix) return "—";
     return new Date(unix * 1000).toLocaleString();
   },
-  // records：/api/requests 列表视图（剥掉 input/output/reasoning）。
+  // records: /api/requests list view (drops input/output/reasoning).
   renderList: function (records, listEl, onPick) {
     listEl.innerHTML = "";
     if (!records.length) {
@@ -707,7 +747,7 @@ window.QinferRequests = {
   },
 };
 
-/* ---- Chat 初始化 ---- */
+/* ---- Chat setup ---- */
 function initChat() {
   ["s-temp", "s-top-p", "s-seed"].forEach(function (id) {
     $(id).addEventListener("change", saveSampler);
@@ -726,7 +766,7 @@ function initChat() {
   });
 }
 
-/* ---- Monitor：四卡片 + 请求列表/详情 + 10 系列 sparkline ---- */
+/* ---- Monitor: four cards + request list/detail + 10-series sparkline ---- */
 function kvTable(tbodyId, rows) {
   const tb = $(tbodyId);
   tb.innerHTML = "";
@@ -859,7 +899,7 @@ async function refreshRequests() {
     $("card-kept").textContent = d.retention === undefined ? "—" : d.retention;
     reqCache_ = d.requests || [];
     renderFiltered();
-  } catch (e) { /* 下一次轮询再试 */ }
+  } catch (e) { /* retry on the next poll */ }
 }
 
 async function refreshMonitor() {
@@ -897,7 +937,7 @@ function initMonitor() {
 
 document.addEventListener("DOMContentLoaded", function () {
   initCommon();
-  if (!$("panel-chat") || window.__apiMonitorPage) return; // api-monitor 页：只复用公共函数
+  if (!$("panel-chat") || window.__apiMonitorPage) return; // api-monitor page: shared helpers only
   initChat();
   initMonitor();
   loadModel();

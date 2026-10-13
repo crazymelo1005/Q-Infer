@@ -15,7 +15,7 @@ namespace qinfer::serve {
 
 namespace {
 
-// ---- 请求体参数读取（全部按规格 §5 的非法参数 → 400 口径）----
+// ---- Request body parameter reading (all invalid parameters per spec §5 → 400 semantics) ----
 bool num_param(const Json& body, const char* key, double dflt, double& out) {
     const Json* v = body.find(key);
     if (v == nullptr) { out = dflt; return true; }
@@ -33,7 +33,7 @@ bool str_param(const Json& body, const char* key, std::string& out, bool& presen
     return true;
 }
 
-// stop：缺省 → 空；字符串 → 一个；数组 → 全字符串；其他 → 假（400）。
+// stop: missing → empty; string → one; array → all strings; other → false (400).
 bool stop_param(const Json& body, std::vector<std::string>& out) {
     const Json* v = body.find("stop");
     out.clear();
@@ -49,7 +49,7 @@ bool stop_param(const Json& body, std::vector<std::string>& out) {
     return false;
 }
 
-// ---- 错误体（规格 §5 的两个域形状）----
+// ---- Error body (the two domain shapes of spec §5) ----
 Json openai_err(const std::string& message, const std::string& type, const char* param) {
     Json inner = Json::objv();
     inner.set("message", Json::strv(message));
@@ -75,7 +75,7 @@ void send_json(httplib::Response& res, int status, const Json& body) {
     res.set_content(json_dump(body), "application/json; charset=utf-8");
 }
 
-// ---- 记录序列化（列表视图不带大字段，详情全带；Strata request_records 同款）----
+// ---- Record serialization (list view omits large fields, detail includes all; same as Strata request_records) ----
 Json record_summary_json(const RequestRecord& r) {
     Json o = Json::objv();
     o.set("id", Json::strv(r.id));
@@ -106,14 +106,14 @@ Json record_detail_json(const RequestRecord& r) {
     return o;
 }
 
-// 历史系列（log. 每点：值或 null）。
+// History series (from log. Each point: a value or null).
 Json series_json(const std::vector<std::optional<double>>& s) {
     Json a = Json::arrv();
     for (const auto& v : s) a.push(v ? Json::numv(*v) : Json::nullv());
     return a;
 }
 
-// 一位小数（Strata 的 round(x, 1)），仅展示用。
+// One decimal place (Strata's round(x, 1)), display only.
 double round1(double v) { return std::round(v * 10.0) / 10.0; }
 
 bool anthropic_path(const std::string& p) {
@@ -127,20 +127,22 @@ std::string read_file(const std::string& path) {
     return s.str();
 }
 
-// vector<Json> → Json 数组（render_chat 的 tools 实参形状；空数组与 nullptr 语义等价，
-// 调用处统一用 tools.empty() 判——缺省不注入，模板 tools 分支不进入）。
+// vector<Json> → Json array (the shape of render_chat's tools argument; an empty array is semantically
+// equivalent to nullptr, callers uniformly test tools.empty() — omitted by default, the template's
+// tools branch is never entered).
 Json tools_array(const std::vector<Json>& tools) {
     Json a = Json::arrv();
     for (const Json& t : tools) a.push(t);
     return a;
 }
 
-// 把停等协议滚一遍（worker 侧语义见 worker_main）：读 kToken 攒文本，kDone/kError 收尾。
-// HTTP 线程专用（阻塞 pop）。返回 false = 出错（err 给出消息）。
+// Run the stop-and-wait protocol once (worker-side semantics in worker_main): read kToken to
+// accumulate text, kDone/kError to finish. HTTP-thread only (blocking pop). Returns false = error
+// (err carries the message).
 bool drain_nonstream(const std::shared_ptr<Job>& job, std::string& text, std::string& err) {
     JobEvent e;
     for (;;) {
-        if (!job->events->pop(e)) { err = "事件缓冲异常终止"; return false; }
+        if (!job->events->pop(e)) { err = "Event buffer terminated abnormally"; return false; }
         if (e.kind == EventKind::kToken) { text += e.text; continue; }
         if (e.kind == EventKind::kDone) return true;
         // kError
@@ -149,101 +151,108 @@ bool drain_nonstream(const std::shared_ptr<Job>& job, std::string& text, std::st
     }
 }
 
-// 消息列表组装（Anthropic 域）：system + messages（收 user/assistant/tool；content 收字符串或
-// 块数组——text 块拼接、thinking 块跳过、tool_use 块→调用、tool_result 块→内联 tool 消息；
-// 出现图像块等一律拒绝）→ 与 OpenAI 域同一套 Message 列表交给 render_chat。两个兼容域对同一
-// 请求出同一 token 序列（M1.3 硬指标）就靠这条单一渲染路径。工具调用语义对拍 Strata
-// anthropic_to_messages：tool_use 的 input 经 tool_arguments 转成模板参数形状（坏 JSON 拒绝干净
-// 而非难为整段对话，#510）、tool_result 拆成逐条 {"role":"tool"}。
+// Conversation assembly (Anthropic domain): system + messages (accepts user/assistant/tool; content
+// accepts a string or block array — text blocks are concatenated, thinking blocks are skipped,
+// tool_use blocks → calls, tool_result blocks → inline tool messages; image blocks etc. are all
+// rejected) → the same Message list as the OpenAI domain goes to render_chat. The two compatibility
+// domains producing the same token sequence for the same request (M1.3 hard requirement) rests on
+// this single rendering path. Tool-call semantics cross-check Strata's anthropic_to_messages:
+// tool_use's input is converted via tool_arguments to the template parameter shape (malformed JSON
+// is rejected cleanly rather than derailing the whole conversation, #510), and tool_result is split
+// into per-item {"role":"tool"} messages.
 bool messages_to_conversation(const Json& body, std::vector<Message>& conv, std::string& err) {
     const Json* sys = body.find("system");
     if (sys != nullptr) {
-        if (!sys->is_str()) { err = "system 必须是字符串"; return false; }
+        if (!sys->is_str()) { err = "system must be a string"; return false; }
         conv.emplace_back(Message{"system", sys->str});
     }
     const Json* msgs = body.find("messages");
-    if (msgs == nullptr || !msgs->is_arr()) { err = "缺少 messages 数组"; return false; }
+    if (msgs == nullptr || !msgs->is_arr()) { err = "Missing messages array"; return false; }
     for (const Json& m : msgs->arr) {
-        if (!m.is_obj()) { err = "messages 元素不是对象"; return false; }
+        if (!m.is_obj()) { err = "messages element is not an object"; return false; }
         const Json* role = m.find("role");
-        if (role == nullptr || !role->is_str()) { err = "缺 role 字符串"; return false; }
+        if (role == nullptr || !role->is_str()) { err = "Missing role string"; return false; }
         const std::string& r = role->str;
         if (r != "user" && r != "assistant" && r != "tool") {
-            err = "role 只收 user/assistant/tool";
+            err = "role accepts only user/assistant/tool";
             return false;
         }
         const Json* content = m.find("content");
-        if (content == nullptr) { err = "缺 content"; return false; }
+        if (content == nullptr) { err = "Missing content"; return false; }
         std::string text;
-        std::vector<Json> calls;   // assistant 消息里的 tool_use 块（模板形状，见 prompt.hpp）
+        std::vector<Json> calls;   // tool_use blocks in the assistant message (template shape, see prompt.hpp)
         if (content->is_str()) {
             text = content->str;
         } else if (content->is_arr()) {
             for (const Json& blk : content->arr) {
-                if (!blk.is_obj()) { err = "content 块不是对象"; return false; }
+                if (!blk.is_obj()) { err = "content block is not an object"; return false; }
                 const Json* ty = blk.find("type");
-                if (ty == nullptr || !ty->is_str()) { err = "content 块缺 type"; return false; }
+                if (ty == nullptr || !ty->is_str()) { err = "content block missing type"; return false; }
                 if (ty->str == "text") {
                     const Json* t = blk.find("text");
-                    if (t == nullptr || !t->is_str()) { err = "文本块缺 text"; return false; }
+                    if (t == nullptr || !t->is_str()) { err = "Text block missing text"; return false; }
                     text += t->str;
                 } else if (ty->str == "thinking") {
-                    // 思考块跳过（不入模板；reasoning_content 的交接 M2 一并做）
+                    // Thinking blocks are skipped (not put into the template; the reasoning_content
+                    // handoff is deferred to M2)
                 } else if (ty->str == "tool_use") {
-                    if (r != "assistant") { err = "tool_use 块只出现在 assistant 消息"; return false; }
+                    if (r != "assistant") { err = "tool_use block only appears in assistant messages"; return false; }
                     const Json* name = blk.find("name");
-                    if (name == nullptr || !name->is_str()) { err = "tool_use 块缺 name"; return false; }
+                    if (name == nullptr || !name->is_str()) { err = "tool_use block missing name"; return false; }
                     Json fn = Json::objv();
                     fn.set("name", Json::strv(name->str));
-                    // input 缺省/坏 JSON → tool_arguments 兜成 {} 或 {"arguments": 原文}（#510）
+                    // input missing/malformed JSON → tool_arguments falls back to {} or
+                    // {"arguments": raw} (#510)
                     fn.set("arguments", tool_arguments(blk.find("input")));
                     Json call = Json::objv();
                     call.set("function", std::move(fn));
                     calls.push_back(std::move(call));
                 } else if (ty->str == "tool_result") {
-                    if (r != "user") { err = "tool_result 块只出现在 user 消息"; return false; }
+                    if (r != "user") { err = "tool_result block only appears in user messages"; return false; }
                     std::string rt;
                     const Json* rc = blk.find("content");
-                    if (rc == nullptr) { err = "tool_result 块缺 content"; return false; }
+                    if (rc == nullptr) { err = "tool_result block missing content"; return false; }
                     if (rc->is_str()) {
                         rt = rc->str;
                     } else if (rc->is_arr()) {
                         for (const Json& rb : rc->arr) {
-                            if (!rb.is_obj()) { err = "tool_result content 块不是对象"; return false; }
+                            if (!rb.is_obj()) { err = "tool_result content block is not an object"; return false; }
                             const Json* rty = rb.find("type");
                             if (rty == nullptr || !rty->is_str() || rty->str != "text") {
-                                err = "tool_result 内容只收文本块（图像等多模态 M2）";
+                                err = "tool_result content accepts only text blocks (images and other multimodal deferred to M2)";
                                 return false;
                             }
                             const Json* t = rb.find("text");
-                            if (t == nullptr || !t->is_str()) { err = "tool_result 文本块缺 text"; return false; }
+                            if (t == nullptr || !t->is_str()) { err = "tool_result text block missing text"; return false; }
                             rt += t->str;
                         }
                     } else {
-                        err = "tool_result content 必须是字符串或块数组";
+                        err = "tool_result content must be a string or block array";
                         return false;
                     }
-                    // 内联 tool 消息（逐条紧跟，Strata anthropic_to_messages 同款）：
-                    // 渲染时模板按 role=tool 出 <tool_response>；空结果按统一空过滤跳过。
+                    // Inline tool message (each one immediately follows, same as Strata
+                    // anthropic_to_messages): at render time the template emits <tool_response> for
+                    // role=tool; empty results are skipped by the uniform empty filter.
                     if (rt.empty()) continue;
                     conv.emplace_back(Message{"tool", std::move(rt)});
                 } else {
-                    err = "content 块只收 text/thinking/tool_use/tool_result（图像等多模态 M2）";
+                    err = "content block accepts only text/thinking/tool_use/tool_result (images and other multimodal deferred to M2)";
                     return false;
                 }
             }
         } else {
-            err = "content 必须是字符串或块数组";
+            err = "content must be a string or block array";
             return false;
         }
-        // 统一空过滤：文本与调用都空才整条跳过（与 OpenAI 域同款）。
+        // Uniform empty filter: the whole message is skipped only when both text and calls are empty
+        // (same as the OpenAI domain).
         if (text.empty() && calls.empty()) continue;
         conv.emplace_back(Message{r, std::move(text), std::move(calls)});
     }
     return true;
 }
 
-// v/unit，四舍五入 digits 位；nullopt → null。
+// v/unit, rounded to digits decimal places; nullopt → null.
 static Json scaled_mib_gib(const std::optional<double>& v, double unit, int digits) {
     if (!v) return Json::nullv();
     const double p = std::pow(10.0, digits);
@@ -262,8 +271,9 @@ Serve::Serve(ServeConfig cfg, std::shared_ptr<Engine> eng)
     const std::filesystem::path base = std::filesystem::path(__FILE__).parent_path() / "web";
     web_index_ = read_file((base / "index.html").string());
     web_monitor_ = read_file((base / "monitor.html").string());
-    // T13：遥测在构造函数启动（launch 是每请求入口，放那无请求时 tel_ 恒 null、T14 的 /metrics
-    // 首帧无数据）；进程生存期采样，析构经 tel_ 的 dtor join。
+    // T13: telemetry starts in the constructor (launch is the per-request entry point; placed there,
+    // tel_ would be null when there are no requests and the first frame of T14's /metrics would have
+    // no data); sampling spans the process lifetime, destruction joins via tel_'s dtor.
     tel_ = std::make_unique<Telemetry>([this] { return telemetry_extra(); });
     tel_->start();
 }
@@ -279,18 +289,23 @@ void Serve::worker_main() {
         GenResult res;
         bool ok = false;
         {
-            // 编码查缓存（spec §6 的 conversation_cache）：查询在锁外，命中拿缓存的 ids 免做
-            // BPE（也不写各 worker 共享的 piece_cache_）；未命中才在锁内 encode 并回填。
-            // generate 一如 v0 仍须在 engine_mu_ 内串行（写共享 KV），命中省的是分词、锁照进。
-            // 缓存只在锁外查、锁内回填：持锁方向恒为 engine→cache，无反向路径。
+            // Encoding consults the cache (conversation_cache of spec §6): lookup happens outside the
+            // lock; on a hit the cached ids are used without BPE (and without writing the
+            // worker-shared piece_cache_); only on a miss is encode run inside the lock and the cache
+            // backfilled. generate, as in v0, still serializes inside engine_mu_ (it writes the shared
+            // KV); what a hit saves is tokenization, while the lock is still taken. The cache is
+            // looked up only outside the lock and backfilled inside it: the lock-order direction is
+            // always engine → cache, with no reverse path.
             const bool hit = prompt_cache_.lookup(job->prompt, ids);
             std::lock_guard<std::mutex> lock(engine_mu_);
             if (!hit) {
                 if (!eng_->tokenizer().encode(job->prompt, /*parse_special=*/true, ids, err)) {
                     job->finish = "error";
-                    job->error = "分词失败：" + err;
-                    // 先落完成时刻再停流：HTTP 侧读到 done_at 时必然已就绪（与其他错误路径同构），
-                    // 否则 HTTP 线程可能赶在 done_at 之前调 record_request、被其守卫整条跳过。
+                    job->error = "Tokenization failed: " + err;
+                    // Set the completion time before stopping the stream: when the HTTP side reads
+                    // done_at it is guaranteed ready (isomorphic to the other error paths); otherwise
+                    // the HTTP thread might call record_request before done_at and have it skipped
+                    // entirely by the guard.
                     job->done_at = std::chrono::steady_clock::now();
                     job->events->stop_with_error(job->error);
                     sched_.done(job);
@@ -300,13 +315,14 @@ void Serve::worker_main() {
             }
             job->prompt_ids = std::move(ids);
             job->n_prompt = job->prompt_ids.size();
-            if (hit) reused_.fetch_add(job->n_prompt);   // 命中 = 这整段 prompt 免编码（totals.reused）
+            if (hit) reused_.fetch_add(job->n_prompt);   // hit = this whole prompt was encoded for free (totals.reused)
             ok = eng_->generate(job->prompt_ids, job->opts,
                                 [&](const std::string& piece) -> bool {
                                     if (job->first_at == std::chrono::steady_clock::time_point{})
                                         job->first_at = std::chrono::steady_clock::now();
-                                    // 停滞（未断开）的 SSE 客户端可让 worker 阻塞在 push 上并持有 engine_mu_，
-                                    // 冻结全部槽位——M2 调优项（锁粒度/超时），M1 记录不住。
+                                    // A stalled (not disconnected) SSE client can block the worker on
+                                    // push while holding engine_mu_, freezing all slots — an M2 tuning
+                                    // item (lock granularity/timeouts), not preventable in M1.
                                     return job->events->push(JobEvent{EventKind::kToken, piece, {}, {}});
                                 },
                                 res, err);
@@ -326,15 +342,16 @@ void Serve::worker_main() {
             job->done_at = std::chrono::steady_clock::now();
             job->events->stop_with_error(err);
         }
-        // push 全失败（客户端已断开）时也照常释放槽位；记录由 HTTP 侧标 disconnected。
+        // When all pushes fail (client disconnected), slots are still released as usual; the record
+        // is marked disconnected on the HTTP side.
         sched_.done(job);
     }
 }
 
 std::shared_ptr<Job> Serve::launch(const std::string& path, std::string prompt,
                                    const GenOptions& opts, bool stream) {
-    // reject_after：第 N 个请求起一律拒绝入队（503）。req_id_ 的读在 job->id = req_id_++ 前，
-    // 保证「第 N 个请求」按到达序数。
+    // reject_after: from the Nth request on, all requests are rejected at enqueue (503). The read of
+    // req_id_ happens before job->id = req_id_++, ensuring the Nth request is by arrival ordinal.
     if (cfg_.reject_after > 0 && req_id_.load() >= cfg_.reject_after) return nullptr;
     auto job = std::make_shared<Job>();
     job->id = req_id_++;
@@ -350,29 +367,30 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
     Json body;
     std::string jerr;
     if (!json_parse(req.body, body, jerr) || !body.is_obj()) {
-        send_json(res, 400, openai_err("请求体不是合法 JSON 对象：" + jerr, "invalid_request_error", nullptr));
+        send_json(res, 400, openai_err("Request body is not a valid JSON object: " + jerr, "invalid_request_error", nullptr));
         return;
     }
     const Json* msgs = body.find("messages");
     if (msgs == nullptr || !msgs->is_arr()) {
-        send_json(res, 400, openai_err("缺少 messages 数组", "invalid_request_error", "messages"));
+        send_json(res, 400, openai_err("Missing messages array", "invalid_request_error", "messages"));
         return;
     }
-    // messages → Message 列表（OpenAI 域）：role 收 system/user/assistant/tool（developer 并入
-    // system）；content 收 null/字符串/文本块数组（图像等多模态 M2 再开）；assistant 的
-    // tool_calls 历史经 parse_openai_tool_calls 归一成模板形状。语义对拍 Strata
-    // openai_to_messages：只滤文本与调用都空的消息（assistant 的 tool_calls 消息 content 可空）。
+    // messages → Message list (OpenAI domain): role accepts system/user/assistant/tool (developer is
+    // folded into system); content accepts null/string/array of text blocks (images and other
+    // multimodal open in M2); the assistant's tool_calls history is normalized to the template shape
+    // via parse_openai_tool_calls. Semantics cross-check Strata's openai_to_messages: only messages
+    // with both text and calls empty are filtered (an assistant tool_calls message may have empty content).
     std::vector<Message> conv;
     for (const Json& m : msgs->arr) {
-        if (!m.is_obj()) { send_json(res, 400, openai_err("messages 元素不是对象", "invalid_request_error", "messages")); return; }
+        if (!m.is_obj()) { send_json(res, 400, openai_err("messages element is not an object", "invalid_request_error", "messages")); return; }
         const Json* role = m.find("role");
         if (role == nullptr || !role->is_str()) {
-            send_json(res, 400, openai_err("每条消息需要字符串 role", "invalid_request_error", "messages"));
+            send_json(res, 400, openai_err("Each message requires a string role", "invalid_request_error", "messages"));
             return;
         }
         const std::string r = role->str == "developer" ? "system" : role->str;
         if (r != "system" && r != "user" && r != "assistant" && r != "tool") {
-            send_json(res, 400, openai_err("role 只收 system/user/assistant/tool", "invalid_request_error", "messages"));
+            send_json(res, 400, openai_err("role accepts only system/user/assistant/tool", "invalid_request_error", "messages"));
             return;
         }
         std::string text;
@@ -384,18 +402,18 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
                 for (const Json& blk : content->arr) {
                     if (!blk.is_obj() || !blk.find("type") || !blk.find("type")->is_str() ||
                         blk.find("type")->str != "text") {
-                        send_json(res, 400, openai_err("content 块只收 {type: text}（图像等多模态 M2）", "invalid_request_error", "messages"));
+                        send_json(res, 400, openai_err("content block accepts only {type: text} (images and other multimodal deferred to M2)", "invalid_request_error", "messages"));
                         return;
                     }
                     const Json* t = blk.find("text");
                     if (t == nullptr || !t->is_str()) {
-                        send_json(res, 400, openai_err("文本块缺 text", "invalid_request_error", "messages"));
+                        send_json(res, 400, openai_err("Text block missing text", "invalid_request_error", "messages"));
                         return;
                     }
                     text += t->str;
                 }
             } else {
-                send_json(res, 400, openai_err("content 必须是字符串或块数组", "invalid_request_error", "messages"));
+                send_json(res, 400, openai_err("content must be a string or block array", "invalid_request_error", "messages"));
                 return;
             }
         }
@@ -404,26 +422,26 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
         if (tcs != nullptr) {
             std::string cerr;
             if (!parse_openai_tool_calls(*tcs, calls, cerr)) {
-                send_json(res, 400, openai_err("tool_calls 解析失败：" + cerr, "invalid_request_error", "tool_calls"));
+                send_json(res, 400, openai_err("tool_calls parse failed: " + cerr, "invalid_request_error", "tool_calls"));
                 return;
             }
         }
-        if (text.empty() && calls.empty()) continue;   // 空消息（tool 占位等）过滤，模板器不管
+        if (text.empty() && calls.empty()) continue;   // empty messages (tool placeholders etc.) are filtered; the templater ignores them
         conv.emplace_back(Message{r, std::move(text), std::move(calls)});
     }
-    // tools → 内部工具形状（normalize_tools 的 OpenAI 解包）；坏了 400（错误要先于入队）。
+    // tools → internal tool shape (normalize_tools' OpenAI unwrapping); a bad one is 400 (errors must come before enqueue).
     std::vector<Json> tools;
     const Json* tv = body.find("tools");
     if (tv != nullptr) {
         std::string terr;
         if (!normalize_tools(*tv, /*anthropic=*/false, tools, terr)) {
-            send_json(res, 400, openai_err("tools 解析失败：" + terr, "invalid_request_error", "tools"));
+            send_json(res, 400, openai_err("tools parse failed: " + terr, "invalid_request_error", "tools"));
             return;
         }
     }
-    // 裁定⑤：空 prompt 拒绝——所有消息过滤后仍无可渲染内容 → 400。
+    // Ruling ⑤: empty prompt rejected — after all messages are filtered there is still nothing renderable → 400.
     if (conv.empty()) {
-        send_json(res, 400, openai_err("messages 没有可用内容", "invalid_request_error", "messages"));
+        send_json(res, 400, openai_err("messages has no usable content", "invalid_request_error", "messages"));
         return;
     }
     GenOptions opts;
@@ -436,35 +454,39 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
         if (!seedv->is_num()) numeric_ok = false;
         else seed = static_cast<std::int64_t>(seedv->num);
     }
-    if (!numeric_ok) { send_json(res, 400, openai_err("temperature/top_p/max_tokens/seed 必须为数字", "invalid_request_error", nullptr)); return; }
+    if (!numeric_ok) { send_json(res, 400, openai_err("temperature/top_p/max_tokens/seed must be numbers", "invalid_request_error", nullptr)); return; }
     opts.temperature = static_cast<float>(t);
     opts.top_p = static_cast<float>(p);
     opts.seed = seed;
-    if (mt <= 0) { send_json(res, 400, openai_err("max_tokens 必须为正", "invalid_request_error", "max_tokens")); return; }
+    if (mt <= 0) { send_json(res, 400, openai_err("max_tokens must be positive", "invalid_request_error", "max_tokens")); return; }
     opts.max_tokens = static_cast<std::uint64_t>(mt);
-    if (!stop_param(body, opts.stop)) { send_json(res, 400, openai_err("stop 必须是字符串或字符串数组", "invalid_request_error", "stop")); return; }
+    if (!stop_param(body, opts.stop)) { send_json(res, 400, openai_err("stop must be a string or array of strings", "invalid_request_error", "stop")); return; }
     SamplerParams sp; sp.temperature = opts.temperature; sp.top_p = opts.top_p;
-    if (!sp.valid()) { send_json(res, 400, openai_err("temperature 非负、top_p 在 (0,1]", "invalid_request_error", nullptr)); return; }
-    // T10：stream 由路由层从 body 读入并传入；此处不再读 body，只按参数分派（SSE 走 serve_sse）。
+    if (!sp.valid()) { send_json(res, 400, openai_err("temperature must be non-negative and top_p in (0,1]", "invalid_request_error", nullptr)); return; }
+    // T10: stream is read from the body by the routing layer and passed in; the body is no longer
+    // read here, dispatch is by parameter only (SSE goes through serve_sse).
     std::string prompt;
     std::string rerr;
     Json tj = tools_array(tools);
     if (!render_chat(eng_->chat_template(), conv, /*add_generation_prompt=*/true, prompt, rerr,
                      tools.empty() ? nullptr : &tj)) {
-        // 模板器是裁剪子集（规格 §11 兜底）：不静默错译，明确 500 并说明。
-        send_json(res, 500, openai_err("chat 模板不支持的结构：" + rerr, "server_error", nullptr));
+        // The templater is a trimmed subset (fallback per spec §11): no silent mis-rendering, an
+        // explicit 500 with explanation.
+        send_json(res, 500, openai_err("Structure not supported by the chat template: " + rerr, "server_error", nullptr));
         return;
     }
     std::shared_ptr<Job> job = launch(req.path, prompt, opts, stream);
     if (!job) {
         res.status = 503;
         res.set_content(std::string(kQueueFullBody), "application/json; charset=utf-8");
-        // 503 未入队：无计时数据，不入记录环（环只收已接受请求）。
+        // 503 not enqueued: no timing data, not entered into the records ring (the ring only accepts
+        // accepted requests).
         return;
     }
-    job->raw_body = req.body;   // T14：原始请求体进 Records（流式请求也要带）
-    // T10：流式分派——include_usage 宽松收（裁定①）：stream_options 存在且为对象、其下
-    // include_usage 为布尔真才算真；其余一律 false，不额外 400。
+    job->raw_body = req.body;   // T14: the raw request body goes into Records (streaming requests too)
+    // T10: streaming dispatch — include_usage is accepted leniently (Ruling ①): it counts as true
+    // only when stream_options exists, is an object, and its include_usage is boolean true; anything
+    // else is false, with no extra 400.
     if (stream) {
         bool include_usage = false;
         const Json* so = body.find("stream_options");
@@ -478,15 +500,16 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
     std::string text, drain_err;
     const bool ok = drain_nonstream(job, text, drain_err);
     if (!ok) {
-        const int st = job->events->cancelled() ? 499 : 500;   // 499 = 客户端断开，httplib 惯例
+        const int st = job->events->cancelled() ? 499 : 500;   // 499 = client disconnected, httplib convention
         if (st == 500) {
             send_json(res, st, openai_err(drain_err, "server_error", nullptr));
         }
         record_request(job, st, job->events->cancelled());
         return;
     }
-    // 生成文本拆事件：<tool_call> 块 → 调用；坏标记并回文本（split_generation 语义）。调用与
-    // 文本保持生成顺序（Strata OutputParser 同款）；content 全空时置 null（OpenAI 惯例）。
+    // Split generated text into events: <tool_call> blocks → calls; malformed markers are merged back
+    // into text (split_generation semantics). Calls and text keep generation order (same as Strata's
+    // OutputParser); content is set to null when entirely empty (OpenAI convention).
     std::vector<GenEvent> events;
     split_generation(text, tools, events);
     Json r = Json::objv();
@@ -514,7 +537,7 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
     Json choice = Json::objv();
     choice.set("index", Json::numv(0.0));
     choice.set("message", std::move(message));
-    // finish_reason：有调用且自然停 → tool_calls（Strata openai_chunks 口径）。
+    // finish_reason: has calls and stopped naturally → tool_calls (per Strata's openai_chunks).
     choice.set("finish_reason", Json::strv(
         used_tool && job->finish == "stop" ? "tool_calls" : job->finish));
     Json choices = Json::arrv();
@@ -529,12 +552,16 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
     record_request(job, 200, false);
 }
 
-// OpenAI 兼容 SSE。provider 由 httplib 在 handler 返回后反复调用；每次调用恰好写一帧，事件
-// 可展开成多帧（首帧 role、文本增量、工具调用块、终帧/usage/[DONE]），帧在事件消费时整批攒入
-// pending 逐次回落。生成文本经 ToolCallStreamer 增量切分——半个 <tool_call> 跨增量留缓冲等齐，
-// 坏块（解析失败）按文本放行。帧形状对拍 Strata openai_chunks：首帧 {delta:{role,content:""}}、
-// 工具调用整块一帧 {delta:{tool_calls:[{index,id,type,function}]}}、终帧 finish_reason（有调用
-// 且自然停 → tool_calls）。连接断开（write 假）→ cancel → 499 记账 → 返回假收尾。
+// OpenAI-compatible SSE. The provider is called repeatedly by httplib after the handler returns; each
+// call writes exactly one frame, and an event can expand into multiple frames (first role frame, text
+// deltas, tool-call blocks, final frame/usage/[DONE]); frames are batched into pending as events are
+// consumed and drained one at a time. Generated text is split incrementally by ToolCallStreamer — a
+// half <tool_call> spanning increments is buffered until complete, and malformed chunks (parse
+// failures) are released as text. Frame shapes cross-check Strata's openai_chunks: first frame
+// {delta:{role,content:""}}, one frame per whole tool call
+// {delta:{tool_calls:[{index,id,type,function}]}}, final frame finish_reason (has calls and stopped
+// naturally → tool_calls). Connection lost (write false) → cancel → 499 bookkeeping → return false
+// to wrap up.
 void Serve::serve_sse(const std::shared_ptr<Job>& job, bool include_usage,
                       const std::vector<Json>& tools, httplib::Response& res) {
     const std::string id = "chatcmpl-" + std::to_string(job->id);
@@ -542,13 +569,14 @@ void Serve::serve_sse(const std::shared_ptr<Job>& job, bool include_usage,
     const std::string model = eng_->model_name();
     struct State {
         ToolCallStreamer st;
-        // 工具定义按值随 State 留在堆上：provider 的生命周期长于 handler（httplib 在路由函数
-        // 返回后才反复调 chunk provider），引用实参会悬垂。
+        // Tool definitions live by value with State on the heap: the provider outlives the
+        // handler (httplib calls the chunk provider repeatedly only after the route function
+        // returns), so a reference argument would dangle.
         std::vector<Json> tools;
-        std::vector<std::string> pending;   // 待写帧（front 弹出）
-        bool first = true;                  // 首帧 role chunk 未写
-        int calls = 0;                      // 已发出的工具调用块数（finish_reason 判据 + 块 index）
-        bool done = false;                  // kDone/kError 已消费
+        std::vector<std::string> pending;   // frames pending write (popped from front)
+        bool first = true;                  // the first role chunk is not yet written
+        int calls = 0;                      // tool-call blocks already emitted (finish_reason criterion + block index)
+        bool done = false;                  // kDone/kError already consumed
         int final_status = 200;
         bool recorded = false;
     };
@@ -557,7 +585,8 @@ void Serve::serve_sse(const std::shared_ptr<Job>& job, bool include_usage,
     auto provider = [this, job, include_usage, id, created, model, state](
                         std::size_t, httplib::DataSink& sink) -> bool {
         const auto w = [&](const std::string& s) {
-            // 实仓 DataSink::write 是 std::function<bool(const char*, size_t)>（两参调用，见 httplib.h:538）。
+            // The vendored DataSink::write is std::function<bool(const char*, size_t)> (two-argument call,
+            // see httplib.h:538).
             if (!sink.write(s.data(), s.size())) {
                 job->events->cancel();
                 if (!state->recorded) { record_request(job, 499, true); state->recorded = true; }
@@ -588,8 +617,9 @@ void Serve::serve_sse(const std::shared_ptr<Job>& job, bool include_usage,
                 state->pending.push_back(chunk(std::move(d)));
                 return;
             }
-            // kBlock：完整调用块 → 工具调用帧（整块一帧，stream_tools=false 形态）；解析失败
-            // （幻觉出的坏标记）→ 按文本放行。
+            // kBlock: complete call block → tool-call frame (one frame per whole block, the
+            // stream_tools=false shape); parse failure (a hallucinated malformed marker) → released
+            // as text.
             ToolCall tc;
             std::string perr;
             if (!parse_tool_block(sev.text, state->tools, tc, perr)) {
@@ -607,7 +637,8 @@ void Serve::serve_sse(const std::shared_ptr<Job>& job, bool include_usage,
             state->pending.push_back(chunk(std::move(d)));
             ++state->calls;
         };
-        // 写一帧；无帧可写时先消费作业事件攒帧（一个事件可展开成多帧，逐次回落）。
+        // Write one frame; when no frame is writable, first consume job events to accumulate
+        // frames (a single event can expand into multiple frames, drained one at a time).
         for (;;) {
             if (!state->pending.empty() || state->done) break;
             JobEvent e;
@@ -629,11 +660,13 @@ void Serve::serve_sse(const std::shared_ptr<Job>& job, bool include_usage,
                 continue;
             }
             if (e.kind == EventKind::kDone) {
-                // 收尾前把缓冲里等齐的残余切出（未闭合调用按原样文本释放，#211）。
+                // Before wrap-up, flush the buffered remainder (an unclosed call is released as its
+                // raw text, #211).
                 std::vector<ToolCallStreamer::Event> evs;
                 state->st.finish(evs);
                 for (const auto& sev : evs) emit_streamer_event(sev);
-                // 终帧：finish_reason（有调用且自然停 → tool_calls）；需 usage 时先补帧，再 [DONE]。
+                // Final frame: finish_reason (has calls and stopped naturally → tool_calls); when usage
+                // is requested an extra frame comes first, then [DONE].
                 Json dc = Json::objv();
                 Json choice = Json::objv();
                 choice.set("index", Json::numv(0.0));
@@ -668,9 +701,10 @@ void Serve::serve_sse(const std::shared_ptr<Job>& job, bool include_usage,
                 state->done = true;
                 continue;
             }
-            // kError（事件流里以 error 帧出现，一致性让客户端能读到原因）。
+            // kError (appears as an error frame in the event stream so clients can read the reason
+            // consistently).
             Json inner = Json::objv();
-            inner.set("message", Json::strv(e.err.empty() ? "生成失败" : e.err));
+            inner.set("message", Json::strv(e.err.empty() ? "Generation failed" : e.err));
             inner.set("type", Json::strv("server_error"));
             inner.set("param", Json::nullv());
             Json er = Json::objv();
@@ -681,20 +715,24 @@ void Serve::serve_sse(const std::shared_ptr<Job>& job, bool include_usage,
             continue;
         }
         if (state->pending.empty()) {
-            // kDone 已消费、帧全部送出：正常完成。必须调 sink.done() 写 chunked 终止块
-            // （0\r\n\r\n）——httplib 对 provider 返回 false 只是关连接、不写终止块，严格
-            // 的 chunked 客户端（浏览器、http.client）会报 ERR_INCOMPLETE_CHUNKED_ENCODING
-            // / IncompleteRead；curl 容忍 EOF，故此前集成测试未暴露。done() 内部写终止块
-            // 并把流置为 finished，while 循环随之正常退出。
+            // kDone consumed, all frames sent: normal completion. sink.done() must be called to write
+            // the chunked terminator (0\r\n\r\n) — when the provider returns false httplib only
+            // closes the connection without writing the terminator, and strict chunked clients
+            // (browsers, http.client) report ERR_INCOMPLETE_CHUNKED_ENCODING / IncompleteRead; curl
+            // tolerates EOF, which is why earlier integration tests did not catch this. done() writes
+            // the terminator internally and marks the stream finished, so the while loop exits
+            // normally.
             if (!state->recorded) { record_request(job, state->final_status, false); state->recorded = true; }
             if (state->done) { sink.done(); return true; }
-            // 事件缓冲异常终止（kDone 未到、pop 失败已 499 记账）：provider 结束关连接。
+            // Event buffer terminated abnormally (kDone never arrived, pop failure already recorded as
+            // 499): the provider ends, closing the connection.
             return false;
         }
         const std::string frame = state->pending.front();
         state->pending.erase(state->pending.begin());
         if (!w(frame)) return false;
-        // 终帧落地后才记账：断连/中途失败时 w 内已按 499 记，这里不得叠记。
+        // Only account after the final frame lands: on disconnect/mid-stream failure w already
+        // recorded 499, so no double-counting here.
         if (state->pending.empty() && state->done && !state->recorded) {
             record_request(job, state->final_status, false);
             state->recorded = true;
@@ -704,25 +742,29 @@ void Serve::serve_sse(const std::shared_ptr<Job>& job, bool include_usage,
     res.set_chunked_content_provider("text/event-stream", provider);
 }
 
-// Anthropic 兼容 SSE。事件序：message_start → 按需逐块 content_block_start/delta/stop → message_delta
-// → message_stop；kError 走 error 事件收尾。文本块在首段非空文本处打开（text_delta 逐段）；工具块以
-// tool_use 打开（id/name/空 input）并紧跟一条 input_json_delta 带整份参数（stream_tools=false 形态），
-// tool_use 前无条件关掉当前块（块序共享一个递增 index）。stop_reason "tool_use" 仅当有工具块且自然停
-// （Strata anthropic_events 同款）；生成文本经 ToolCallStreamer 增量切分，坏块按文本放行，未闭合
-// 调用在收尾时按原样文本释放（#211）。事件 data 顶层带与事件名一致的 type 字段（Anthropic 官方
-// 形状，集成测试逐条核对）。
+// Anthropic-compatible SSE. Event order: message_start → per-block content_block_start/delta/stop →
+// message_delta → message_stop; kError ends with an error event. A text block opens at the first
+// non-empty text segment (text_delta per segment); a tool block opens with tool_use
+// (id/name/empty input) immediately followed by an input_json_delta carrying the full arguments (the
+// stream_tools=false shape); the current block is unconditionally closed before a tool_use (blocks
+// share one incrementing index). stop_reason "tool_use" only when there is a tool block and a natural
+// stop (same as Strata anthropic_events); generated text is split incrementally by ToolCallStreamer,
+// malformed chunks are released as text, and unclosed calls are released as their raw text at
+// wrap-up (#211). The top level of the event data carries a type field matching the event name
+// (Anthropic's official shape, checked item by item by the integration tests).
 void Serve::serve_anthropic_sse(const std::shared_ptr<Job>& job, const std::vector<Json>& tools,
                                 httplib::Response& res) {
     const std::string id = "msg_" + std::to_string(job->id);
     const std::string model = eng_->model_name();
     struct State {
         ToolCallStreamer st;
-        // 工具定义按值随 State 留在堆上（理由同 serve_sse：provider 生命周期长于 handler）。
+        // Tool definitions live by value with State on the heap (same reason as serve_sse: the
+        // provider outlives the handler).
         std::vector<Json> tools;
-        std::vector<std::string> pending;   // 待写帧（front 弹出）
-        bool started = false;               // message_start 未写
-        bool block_open = false;            // 当前有打开的块（末块 index = block_idx - 1）
-        int block_idx = 0;                  // 下一块序号（text/tool_use 共享）
+        std::vector<std::string> pending;   // frames pending write (popped from front)
+        bool started = false;               // message_start not yet written
+        bool block_open = false;            // a block is currently open (last block index = block_idx - 1)
+        int block_idx = 0;                  // next block ordinal (shared by text/tool_use)
         bool used_tool = false;
         bool done = false;
         int final_status = 200;
@@ -732,7 +774,8 @@ void Serve::serve_anthropic_sse(const std::shared_ptr<Job>& job, const std::vect
     state->tools = tools;
     auto provider = [this, job, id, model, state](std::size_t, httplib::DataSink& sink) -> bool {
         const auto w = [&](const std::string& s) {
-            // 实仓 DataSink::write 是 std::function<bool(const char*, size_t)>（两参调用，见 httplib.h:538）。
+            // The vendored DataSink::write is std::function<bool(const char*, size_t)> (two-argument call,
+            // see httplib.h:538).
             if (!sink.write(s.data(), s.size())) {
                 job->events->cancel();
                 if (!state->recorded) { record_request(job, 499, true); state->recorded = true; }
@@ -769,7 +812,8 @@ void Serve::serve_anthropic_sse(const std::shared_ptr<Job>& job, const std::vect
             d.set("delta", std::move(delta));
             enqueue("content_block_delta", std::move(d));
         };
-        // 流式切分事件 → 块状态机（kToken 与 kDone 收尾共用同一份语义）。
+        // Streaming split events → block state machine (kToken and kDone wrap-up share the same
+        // semantics).
         const auto emit_streamer_event = [&](const ToolCallStreamer::Event& sev) {
             if (sev.kind == ToolCallStreamer::Kind::kText) {
                 if (sev.text.empty()) return;
@@ -786,7 +830,8 @@ void Serve::serve_anthropic_sse(const std::shared_ptr<Job>& job, const std::vect
             ToolCall tc;
             std::string perr;
             if (!parse_tool_block(sev.text, state->tools, tc, perr)) {
-                // 坏标记：并回文本放行，不当错误毁掉请求。
+                // Malformed marker: merged back into text and released, not treated as an error that
+                // kills the request.
                 if (sev.text.empty()) return;
                 if (!state->block_open) {
                     Json blk = Json::objv();
@@ -798,7 +843,7 @@ void Serve::serve_anthropic_sse(const std::shared_ptr<Job>& job, const std::vect
                 text_delta(sev.text);
                 return;
             }
-            close_block();   // tool_use 永远先关当前块再开新块
+            close_block();   // tool_use always closes the current block before opening a new one
             Json blk = Json::objv();
             blk.set("type", Json::strv("tool_use"));
             blk.set("id", Json::strv("toolu_" + std::to_string(job->id) + "_" + std::to_string(state->block_idx)));
@@ -816,7 +861,7 @@ void Serve::serve_anthropic_sse(const std::shared_ptr<Job>& job, const std::vect
             enqueue("content_block_delta", std::move(d));
             state->used_tool = true;
         };
-        // 写一帧；无帧可写时先消费作业事件攒帧。
+        // Write one frame; when no frame is writable, first consume job events to accumulate frames.
         for (;;) {
             if (!state->pending.empty() || state->done) break;
             JobEvent e;
@@ -847,7 +892,8 @@ void Serve::serve_anthropic_sse(const std::shared_ptr<Job>& job, const std::vect
                 continue;
             }
             if (e.kind == EventKind::kDone) {
-                // 收尾：先释放缓冲里等齐的残余，再关当前块，最后 message_delta/message_stop。
+                // Wrap-up: first flush the buffered remainder, then close the current block, finally
+                // message_delta/message_stop.
                 std::vector<ToolCallStreamer::Event> evs;
                 state->st.finish(evs);
                 for (const auto& sev : evs) emit_streamer_event(sev);
@@ -870,11 +916,11 @@ void Serve::serve_anthropic_sse(const std::shared_ptr<Job>& job, const std::vect
                 state->done = true;
                 continue;
             }
-            // kError：Anthropic 用 error 事件收尾（形状与事件流其他帧一致）。
+            // kError: Anthropic ends with an error event (same shape as the other event-stream frames).
             Json er = Json::objv();
             Json inner = Json::objv();
             inner.set("type", Json::strv("server_error"));
-            inner.set("message", Json::strv(e.err.empty() ? "生成失败" : e.err));
+            inner.set("message", Json::strv(e.err.empty() ? "Generation failed" : e.err));
             er.set("type", Json::strv("error"));
             er.set("error", std::move(inner));
             enqueue("error", std::move(er));
@@ -883,20 +929,24 @@ void Serve::serve_anthropic_sse(const std::shared_ptr<Job>& job, const std::vect
             continue;
         }
         if (state->pending.empty()) {
-            // kDone 已消费、帧全部送出：正常完成。必须调 sink.done() 写 chunked 终止块
-            // （0\r\n\r\n）——httplib 对 provider 返回 false 只是关连接、不写终止块，严格
-            // 的 chunked 客户端（浏览器、http.client）会报 ERR_INCOMPLETE_CHUNKED_ENCODING
-            // / IncompleteRead；curl 容忍 EOF，故此前集成测试未暴露。done() 内部写终止块
-            // 并把流置为 finished，while 循环随之正常退出。
+            // kDone consumed, all frames sent: normal completion. sink.done() must be called to write
+            // the chunked terminator (0\r\n\r\n) — when the provider returns false httplib only
+            // closes the connection without writing the terminator, and strict chunked clients
+            // (browsers, http.client) report ERR_INCOMPLETE_CHUNKED_ENCODING / IncompleteRead; curl
+            // tolerates EOF, which is why earlier integration tests did not catch this. done() writes
+            // the terminator internally and marks the stream finished, so the while loop exits
+            // normally.
             if (!state->recorded) { record_request(job, state->final_status, false); state->recorded = true; }
             if (state->done) { sink.done(); return true; }
-            // 事件缓冲异常终止（kDone 未到、pop 失败已 499 记账）：provider 结束关连接。
+            // Event buffer terminated abnormally (kDone never arrived, pop failure already recorded as
+            // 499): the provider ends, closing the connection.
             return false;
         }
         const std::string frame = state->pending.front();
         state->pending.erase(state->pending.begin());
         if (!w(frame)) return false;
-        // 终帧落地后才记账：断连/中途失败时 w 内已按 499 记，这里不得叠记。
+        // Only account after the final frame lands: on disconnect/mid-stream failure w already
+        // recorded 499, so no double-counting here.
         if (state->pending.empty() && state->done && !state->recorded) {
             record_request(job, state->final_status, false);
             state->recorded = true;
@@ -910,50 +960,51 @@ void Serve::handle_completions(const httplib::Request& req, httplib::Response& r
     Json body;
     std::string jerr;
     if (!json_parse(req.body, body, jerr) || !body.is_obj()) {
-        send_json(res, 400, openai_err("请求体不是合法 JSON 对象：" + jerr, "invalid_request_error", nullptr));
+        send_json(res, 400, openai_err("Request body is not a valid JSON object: " + jerr, "invalid_request_error", nullptr));
         return;
     }
     std::string prompt;
     bool present = false;
     if (!str_param(body, "prompt", prompt, present) || !present) {
-        send_json(res, 400, openai_err("缺 prompt 字符串", "invalid_request_error", "prompt"));
+        send_json(res, 400, openai_err("Missing prompt string", "invalid_request_error", "prompt"));
         return;
     }
-    // 裁定⑤：空 prompt 拒绝。
+    // Ruling ⑤: empty prompt rejected.
     if (prompt.empty()) {
-        send_json(res, 400, openai_err("prompt 不能为空串", "invalid_request_error", "prompt"));
+        send_json(res, 400, openai_err("prompt must not be an empty string", "invalid_request_error", "prompt"));
         return;
     }
-    // 参数读取与 handle_chat 同款（temperature/top_p/seed/max_tokens/stop；stream 同 400）。
+    // Parameter reading same as handle_chat (temperature/top_p/seed/max_tokens/stop; stream same 400).
     GenOptions opts;
     double t = 0.0, p = 0.0, mt = 0.0;
     bool numeric_ok = num_param(body, "temperature", 0.8, t) && num_param(body, "top_p", 0.95, p) &&
                       num_param(body, "max_tokens", 512, mt);
-    if (!numeric_ok) { send_json(res, 400, openai_err("temperature/top_p/max_tokens 必须为数字", "invalid_request_error", nullptr)); return; }
+    if (!numeric_ok) { send_json(res, 400, openai_err("temperature/top_p/max_tokens must be numbers", "invalid_request_error", nullptr)); return; }
     opts.temperature = static_cast<float>(t);
     opts.top_p = static_cast<float>(p);
     opts.max_tokens = static_cast<std::uint64_t>(mt);
-    if (mt <= 0) { send_json(res, 400, openai_err("max_tokens 必须为正", "invalid_request_error", "max_tokens")); return; }
-    if (!stop_param(body, opts.stop)) { send_json(res, 400, openai_err("stop 必须是字符串或字符串数组", "invalid_request_error", "stop")); return; }
-    // 裁定④：completions 同样从 body 读 stream:true → 400。
+    if (mt <= 0) { send_json(res, 400, openai_err("max_tokens must be positive", "invalid_request_error", "max_tokens")); return; }
+    if (!stop_param(body, opts.stop)) { send_json(res, 400, openai_err("stop must be a string or array of strings", "invalid_request_error", "stop")); return; }
+    // Ruling ④: completions likewise reads stream:true from the body → 400.
     const Json* sv = body.find("stream");
     if (sv != nullptr && sv->kind == Json::kBool && sv->b) {
-        send_json(res, 400, openai_err("completions 暂不支持 stream:true（chat/messages 域已支持）", "invalid_request_error", "stream"));
+        send_json(res, 400, openai_err("completions does not yet support stream:true (supported in the chat/messages domains)", "invalid_request_error", "stream"));
         return;
     }
     std::shared_ptr<Job> job = launch(req.path, prompt, opts, false);
     if (!job) {
         res.status = 503;
         res.set_content(std::string(kQueueFullBody), "application/json; charset=utf-8");
-        // 503 未入队：无计时数据，不入记录环（环只收已接受请求）。
+        // 503 not enqueued: no timing data, not entered into the records ring (the ring only accepts
+        // accepted requests).
         return;
     }
-    job->raw_body = req.body;   // T14：原始请求体进 Records
+    job->raw_body = req.body;   // T14: the raw request body goes into Records
     std::string text, drain_err;
     if (!drain_nonstream(job, text, drain_err)) {
         const int st = job->events->cancelled() ? 499 : 500;
         if (st == 500) send_json(res, 500, openai_err(drain_err, "server_error", nullptr));
-        record_request(job, st, job->events->cancelled());   // 记账与 chat/messages 域同款：每个退出路径恰好一次
+        record_request(job, st, job->events->cancelled());   // bookkeeping same as the chat/messages domains: exactly once per exit path
         return;
     }
     Json r = Json::objv();
@@ -982,12 +1033,12 @@ void Serve::handle_messages(const httplib::Request& req, httplib::Response& res)
     Json body;
     std::string jerr;
     if (!json_parse(req.body, body, jerr) || !body.is_obj()) {
-        send_json(res, 400, anthropic_err("invalid_request_error", "请求体不是合法 JSON 对象：" + jerr));
+        send_json(res, 400, anthropic_err("invalid_request_error", "Request body is not a valid JSON object: " + jerr));
         return;
     }
     double mt = 0.0;
     if (!num_param(body, "max_tokens", 0, mt) || mt <= 0) {
-        send_json(res, 400, anthropic_err("invalid_request_error", "max_tokens 必填且为正"));
+        send_json(res, 400, anthropic_err("invalid_request_error", "max_tokens is required and must be positive"));
         return;
     }
     std::vector<Message> conv;
@@ -995,34 +1046,35 @@ void Serve::handle_messages(const httplib::Request& req, httplib::Response& res)
         send_json(res, 400, anthropic_err("invalid_request_error", jerr));
         return;
     }
-    // 裁定⑦：空会话 400——与 chat 域的空 prompt 拒绝同姿态，两个兼容域校验一致。
+    // Ruling ⑦: empty conversation 400 — same stance as the chat domain's empty-prompt rejection;
+    // the two compatibility domains validate consistently.
     if (conv.empty()) {
-        send_json(res, 400, anthropic_err("invalid_request_error", "没有可渲染的消息内容"));
+        send_json(res, 400, anthropic_err("invalid_request_error", "No message content to render"));
         return;
     }
-    // tools → 内部工具形状（normalize_tools 的 Anthropic 改名：input_schema → parameters）。
+    // tools → internal tool shape (normalize_tools' Anthropic renaming: input_schema → parameters).
     std::vector<Json> tools;
     const Json* tv = body.find("tools");
     if (tv != nullptr) {
         std::string terr;
         if (!normalize_tools(*tv, /*anthropic=*/true, tools, terr)) {
-            send_json(res, 400, anthropic_err("invalid_request_error", "tools 解析失败：" + terr));
+            send_json(res, 400, anthropic_err("invalid_request_error", "tools parse failed: " + terr));
             return;
         }
     }
     GenOptions opts;
     double t = 0.0, p = 0.0;
     bool numeric_ok = num_param(body, "temperature", 0.8, t) && num_param(body, "top_p", 0.95, p);
-    if (!numeric_ok) { send_json(res, 400, anthropic_err("invalid_request_error", "temperature/top_p 必须为数字")); return; }
+    if (!numeric_ok) { send_json(res, 400, anthropic_err("invalid_request_error", "temperature/top_p must be numbers")); return; }
     opts.temperature = static_cast<float>(t);
     opts.top_p = static_cast<float>(p);
     opts.max_tokens = static_cast<std::uint64_t>(mt);
-    // stop_sequences → stop（字符串数组；缺省空）。
+    // stop_sequences → stop (array of strings; empty by default).
     const Json* stops = body.find("stop_sequences");
     if (stops != nullptr) {
-        if (!stops->is_arr()) { send_json(res, 400, anthropic_err("invalid_request_error", "stop_sequences 必须是数组")); return; }
+        if (!stops->is_arr()) { send_json(res, 400, anthropic_err("invalid_request_error", "stop_sequences must be an array")); return; }
         for (const Json& s : stops->arr) {
-            if (!s.is_str()) { send_json(res, 400, anthropic_err("invalid_request_error", "stop_sequences 元素必须是字符串")); return; }
+            if (!s.is_str()) { send_json(res, 400, anthropic_err("invalid_request_error", "stop_sequences elements must be strings")); return; }
             opts.stop.push_back(s.str);
         }
     }
@@ -1030,23 +1082,25 @@ void Serve::handle_messages(const httplib::Request& req, httplib::Response& res)
     Json tj = tools_array(tools);
     if (!render_chat(eng_->chat_template(), conv, /*add_generation_prompt=*/true, prompt, rerr,
                      tools.empty() ? nullptr : &tj)) {
-        send_json(res, 500, anthropic_err("server_error", "chat 模板不支持的结构：" + rerr));
+        send_json(res, 500, anthropic_err("server_error", "Structure not supported by the chat template: " + rerr));
         return;
     }
-    // 裁定②：Json 没有 is_bool——用 kind == kBool 判。
+    // Ruling ②: Json has no is_bool — use kind == kBool.
     const Json* s = body.find("stream");
     const bool stream = s != nullptr && s->kind == Json::kBool && s->b;
     std::shared_ptr<Job> job = launch(req.path, prompt, opts, stream);
     if (!job) {
         send_json(res, 503, anthropic_err("overloaded_error", "queue full"));
-        // 503 未入队：无计时数据，不入记录环（环只收已接受请求）。
+        // 503 not enqueued: no timing data, not entered into the records ring (the ring only accepts
+        // accepted requests).
         return;
     }
-    job->raw_body = req.body;   // T14：原始请求体进 Records（流式请求也要带）
+    job->raw_body = req.body;   // T14: the raw request body goes into Records (streaming requests too)
     if (stream) { serve_anthropic_sse(job, tools, res); return; }
     std::string text, drain_err;
     if (!drain_nonstream(job, text, drain_err)) {
-        // 记账与 chat 域同款：每个退出路径恰好一次（kError 记 500 写体；客户端断开记 499 不写体）。
+        // Bookkeeping same as the chat domain: exactly once per exit path (kError records 500 and writes
+        // the body; a disconnected client records 499 without writing a body).
         const int st = job->events->cancelled() ? 499 : 500;
         if (st == 500) send_json(res, 500, anthropic_err("server_error", drain_err));
         record_request(job, st, job->events->cancelled());
@@ -1057,7 +1111,8 @@ void Serve::handle_messages(const httplib::Request& req, httplib::Response& res)
     r.set("type", Json::strv("message"));
     r.set("role", Json::strv("assistant"));
     r.set("model", Json::strv(job->model));
-    // 生成文本拆事件：文本块与 tool_use 块保持生成顺序（Anthropic 官方块形状）。
+    // Split generated text into events: text blocks and tool_use blocks keep generation order
+    // (Anthropic's official block shape).
     std::vector<GenEvent> events;
     split_generation(text, tools, events);
     Json content = Json::arrv();
@@ -1078,7 +1133,7 @@ void Serve::handle_messages(const httplib::Request& req, httplib::Response& res)
         }
     }
     r.set("content", std::move(content));
-    // stop_reason：有调用且自然停 → tool_use（Strata anthropic 口径）。
+    // stop_reason: has calls and stopped naturally → tool_use (per Strata's anthropic semantics).
     r.set("stop_reason", Json::strv(
         used_tool && job->finish == "stop" ? "tool_use"
                                            : (job->finish == "length" ? "max_tokens" : "end_turn")));
@@ -1095,7 +1150,7 @@ void Serve::handle_count_tokens(const httplib::Request& req, httplib::Response& 
     Json body;
     std::string jerr;
     if (!json_parse(req.body, body, jerr) || !body.is_obj()) {
-        send_json(res, 400, anthropic_err("invalid_request_error", "请求体不是合法 JSON 对象：" + jerr));
+        send_json(res, 400, anthropic_err("invalid_request_error", "Request body is not a valid JSON object: " + jerr));
         return;
     }
     std::vector<Message> conv;
@@ -1103,18 +1158,19 @@ void Serve::handle_count_tokens(const httplib::Request& req, httplib::Response& 
         send_json(res, 400, anthropic_err("invalid_request_error", jerr));
         return;
     }
-    // 与 handle_messages 同款空会话 400，两路校验一致。
+    // Same as handle_messages: empty conversation 400, both paths validate consistently.
     if (conv.empty()) {
-        send_json(res, 400, anthropic_err("invalid_request_error", "没有可渲染的消息内容"));
+        send_json(res, 400, anthropic_err("invalid_request_error", "No message content to render"));
         return;
     }
-    // tools 同样归一（Anthropic 形状），渲染时才与真实请求同口径（count 与补全同 prompt）。
+    // tools are normalized the same way (Anthropic shape); only at render is the same basis used as a
+    // real request (count and completion share the prompt).
     std::vector<Json> tools;
     const Json* tv = body.find("tools");
     if (tv != nullptr) {
         std::string terr;
         if (!normalize_tools(*tv, /*anthropic=*/true, tools, terr)) {
-            send_json(res, 400, anthropic_err("invalid_request_error", "tools 解析失败：" + terr));
+            send_json(res, 400, anthropic_err("invalid_request_error", "tools parse failed: " + terr));
             return;
         }
     }
@@ -1122,18 +1178,21 @@ void Serve::handle_count_tokens(const httplib::Request& req, httplib::Response& 
     Json tj = tools_array(tools);
     if (!render_chat(eng_->chat_template(), conv, /*add_generation_prompt=*/true, prompt, rerr,
                      tools.empty() ? nullptr : &tj)) {
-        send_json(res, 500, anthropic_err("server_error", "chat 模板不支持的结构：" + rerr));
+        send_json(res, 500, anthropic_err("server_error", "Structure not supported by the chat template: " + rerr));
         return;
     }
     std::vector<std::int32_t> ids;
     if (!prompt_cache_.lookup(prompt, ids)) {
-        // 与 worker_main 同一把 engine_mu_：encode 写各 worker 共享的 piece_cache_，
-        // 脱离锁与并发请求是数据竞争（见 server.hpp 头注释）；chat_template() 是只读访问不需锁。
-        // 锁只罩引擎可变访问：失败路径的 500 响应移到锁外，慢读客户端写响应不得持锁冻结全槽。
-        // 命中免进锁；未命中仍在锁内 encode 与回填（锁序恒定 engine→cache，无反向路径）。
+        // Same engine_mu_ as worker_main: encode writes the worker-shared piece_cache_, and out of
+        // the lock it would be a data race with concurrent requests (see the header comment in
+        // server.hpp); chat_template() is read-only and needs no lock. The lock only covers mutable
+        // engine access: the 500 response on the failure path is moved outside the lock, so writing
+        // a response for a slow-reading client cannot hold the lock and freeze every slot. A hit
+        // never enters the lock; a miss still encodes and backfills inside the lock (lock order is
+        // always engine → cache, no reverse path).
         std::lock_guard<std::mutex> lock(engine_mu_);
         if (!eng_->tokenizer().encode(prompt, /*parse_special=*/true, ids, rerr)) {
-            send_json(res, 500, anthropic_err("server_error", "分词失败：" + rerr));
+            send_json(res, 500, anthropic_err("server_error", "Tokenization failed: " + rerr));
             return;
         }
         prompt_cache_.store(prompt, ids);
@@ -1146,12 +1205,14 @@ void Serve::handle_count_tokens(const httplib::Request& req, httplib::Response& 
 void Serve::record_request(const std::shared_ptr<Job>& job, int http_status, bool disconnected) {
     (void) http_status;
     if (!job) return;
-    // 未达完成态（done_at 缺省）不入账：唯一剩余场景是客户端断开（499）路径里 cancel() 与
-    // worker 的 done_at 写入之间没有 happens-before 边——HTTP 线程在 worker 落 done_at 之前
-    // 读到缺省值。未完成的请求不是「最近一次完成的请求」，整体跳过，避免缺省 time_point
-    // 化成约 -1.7e9 s 的假读数污染 /v1/status 的 last_timings。
+    // Requests that never reached the completed state (done_at unset) are not accounted: the only
+    // remaining case is on the client-disconnect (499) path, where there is no happens-before edge
+    // between cancel() and the worker's write of done_at — the HTTP thread can read the default
+    // value before the worker sets done_at. An unfinished request is not the last completed request,
+    // so it is skipped entirely, avoiding a default time_point becoming a bogus reading of about
+    // -1.7e9 s that would pollute last_timings in /v1/status.
     if (job->done_at == std::chrono::steady_clock::time_point{}) return;
-    const auto enq = job->enqueued_at;   // 缺省构造的 time_point（若从未入队）→ 全零
+    const auto enq = job->enqueued_at;   // a default-constructed time_point (if never enqueued) → all zero
     const double wall = std::chrono::duration<double>(job->done_at - enq).count();
     LastTimings lt;
     lt.have = true;
@@ -1169,8 +1230,8 @@ void Serve::record_request(const std::shared_ptr<Job>& job, int http_status, boo
         last_ = lt;
         totals_.prompt_tokens += job->n_prompt;
         totals_.completion_tokens += job->n_gen;
-        totals_.requests += 1;   // 完成计数（Strata 口径的 totals.requests：每次完成时刻 +1）
-        // 计时口径：prefill ≈ first_at- leased_at，decode ≈ done_at - first_at。
+        totals_.requests += 1;   // completion count (per Strata's totals.requests: +1 at each completion time)
+        // Timing basis: prefill ≈ first_at - leased_at, decode ≈ done_at - first_at.
         const auto ms = [](std::chrono::steady_clock::duration d) {
             return std::chrono::duration<double, std::milli>(d).count();
         };
@@ -1179,9 +1240,11 @@ void Serve::record_request(const std::shared_ptr<Job>& job, int http_status, boo
         const auto start = job->first_at != std::chrono::steady_clock::time_point{}
                                ? job->first_at : job->leased_at;
         if (job->done_at > start) totals_.decode_ms += ms(job->done_at - start);
-        // T13：tok_s_mean 的全程累计（生成 token ÷ 解码耗时；与 telemetry_extra 同锁，采样线程前一次
-        // 读数与本次累加之间有 happens-before 边）。编码失败 n_gen 恒 0 被 n_gen > 0 拦掉，
-        // 断开竞态（done_at 未落）由上面的 done_at 守卫拦。
+        // T13: full-run accumulation of tok_s_mean (generated tokens ÷ decode time; same lock as
+        // telemetry_extra, and there is a happens-before edge between the sampling thread's previous
+        // reading and this accumulation). On encode failure n_gen is always 0, filtered out by the
+        // n_gen > 0 check; the disconnect race (done_at not yet set) is caught by the done_at guard
+        // above.
         if (job->n_gen > 0 && job->done_at > job->leased_at &&
             job->done_at != std::chrono::steady_clock::time_point{}) {
             const auto start = job->first_at != std::chrono::steady_clock::time_point{}
@@ -1193,9 +1256,10 @@ void Serve::record_request(const std::shared_ptr<Job>& job, int http_status, boo
             }
         }
     }
-    // ---- 延迟直方图（Prometheus text 端口的 ttft/itl/e2e 家族）----
-    // 与 totals 同口径只在完成时刻计一次；起止统一为 enq（入队）→ 首 token → done_at，与 e2e
-    // 同一起点。无首 token 的失败请求 ttft 传 0，Latencies 端 >0 守卫跳过，不污染桶。
+    // ---- Latency histogram (the ttft/itl/e2e families on the Prometheus text endpoint) ----
+    // Like totals, counted once at completion time; the span is uniformly enq (enqueue) → first
+    // token → done_at, sharing e2e's start point. Failed requests without a first token pass ttft as
+    // 0, and the Latencies-side >0 guard skips them so buckets stay clean.
     const auto start_of_decode = job->first_at != std::chrono::steady_clock::time_point{}
                                      ? job->first_at : job->leased_at;
     lat_.observe(job->first_at != std::chrono::steady_clock::time_point{}
@@ -1204,14 +1268,14 @@ void Serve::record_request(const std::shared_ptr<Job>& job, int http_status, boo
                  job->done_at > start_of_decode
                      ? std::chrono::duration<double>(job->done_at - start_of_decode).count() : 0.0,
                  wall);
-    // ---- T14：Records 环（同一 job 只建一条；断开/错误都收尾成 error 态）----
+    // ---- T14: Records ring (one entry per job; disconnects/errors all finish in the error state) ----
     if (job->record_id.empty()) {
         RequestBegin b;
         b.path = job->path;
         b.model = job->model;
         b.input = job->raw_body;
         b.stream = job->stream;
-        Json raw;   // response_format 从原始请求体取（解析失败也不碍事，落空串）
+        Json raw;   // response_format read from the raw request body (a parse failure is harmless; it lands as an empty string)
         std::string jerr;
         if (json_parse(job->raw_body, raw, jerr) && raw.is_obj()) {
             const Json* rf = raw.find("response_format");
@@ -1220,7 +1284,7 @@ void Serve::record_request(const std::shared_ptr<Job>& job, int http_status, boo
                 if (ty != nullptr && ty->is_str()) b.response_format = ty->str;
             }
         }
-        b.created = static_cast<double>(std::time(nullptr)) - wall;   // ≈ 请求开始
+        b.created = static_cast<double>(std::time(nullptr)) - wall;   // ≈ request start
         job->record_id = records_.begin(b);
     }
     if (!job->record_id.empty()) {
@@ -1250,8 +1314,9 @@ TelemetryExtra Serve::telemetry_extra() const {
 
 void Serve::register_routes() {
     httplib::Server& svr = *svr_;
-    // 鉴权（规格 §3）：/web、/api-monitor、/ 与 /health 可达，页面自带 key；
-    // /v1/*、/api/*、/metrics 缺失或错误 → 401（对应域的错误形状）。
+    // Auth (spec §3): /web, /api-monitor, / and /health are reachable, and the pages carry the key
+    // themselves; /v1/*, /api/* and /metrics with a missing or wrong key → 401 (the error shape of
+    // the corresponding domain).
     svr.set_pre_routing_handler([this](const httplib::Request& req, httplib::Response& res) {
         if (cfg_.api_key.empty()) return httplib::Server::HandlerResponse::Unhandled;
         const std::string want = "Bearer " + cfg_.api_key;
@@ -1261,13 +1326,14 @@ void Serve::register_routes() {
             return httplib::Server::HandlerResponse::Unhandled;
         }
         if (anthropic_path(req.path)) {
-            send_json(res, 401, anthropic_err("authentication_error", "缺少或错误的 API key"));
+            send_json(res, 401, anthropic_err("authentication_error", "Missing or wrong API key"));
         } else {
-            send_json(res, 401, openai_err("缺少或错误的 API key", "authentication_error", nullptr));
+            send_json(res, 401, openai_err("Missing or wrong API key", "authentication_error", nullptr));
         }
         return httplib::Server::HandlerResponse::Handled;
     });
-    // 未挂路由的路径一律 404 JSON（规格 §3 的静态域：/v1/responses、/load 等全走这里）。
+    // Paths without a registered route always get a 404 JSON (spec §3's static domain: /v1/responses,
+    // /load etc. all go through here).
     svr.set_error_handler([](const httplib::Request& req, httplib::Response& res) {
         (void) req;
         if (res.status == 404) send_json(res, 404, openai_err("not found", "not_found", nullptr));
@@ -1307,7 +1373,8 @@ void Serve::register_routes() {
         r.set("data", std::move(data));
         send_json(res, 200, r);
     });
-    // T10：stream 判定移到路由层（请求体非法/非对象 → 视作非流式）；handle_chat 的 stream 即最终真值。
+    // T10: stream detection moved to the routing layer (invalid/non-object request body → treated as
+    // non-streaming); handle_chat's stream is the final truth.
     svr.Post("/v1/chat/completions", [this](const httplib::Request& req, httplib::Response& res) {
         Json body;
         std::string jerr;
@@ -1320,11 +1387,13 @@ void Serve::register_routes() {
     });
     svr.Post("/v1/completions",
              [this](const httplib::Request& req, httplib::Response& res) { handle_completions(req, res); });
-    // Anthropic 域：/v1/messages（含流式）+ count_tokens。401 域分流已在 pre-routing（anthropic_path）。
+    // Anthropic domain: /v1/messages (including streaming) + count_tokens. The 401 domain split
+    // already happens in pre-routing (anthropic_path).
     svr.Post("/v1/messages", [this](const httplib::Request& req, httplib::Response& res) { handle_messages(req, res); });
     svr.Post("/v1/messages/count_tokens", [this](const httplib::Request& req, httplib::Response& res) { handle_count_tokens(req, res); });
-    // 状态与属性静态域（规格 §3；/metrics 与 /api/requests 留给 T14）：/v1/status 对外自述、
-    // /status 探针简版、/props 能力发现、/slots 上下文环。
+    // Status and property static domain (spec §3; /metrics and /api/requests are reserved for T14):
+    // /v1/status self-describes externally, /status is the stripped-down probe, /props capability
+    // discovery, /slots the context ring.
     svr.Get("/v1/status", [this](const httplib::Request&, httplib::Response& res) {
         const auto now = std::time(nullptr);
         const std::uint64_t ctx = cfg_.facade.max_context;
@@ -1392,7 +1461,7 @@ void Serve::register_routes() {
             auto get = [&hw](const char* k) -> std::optional<double> {
                 return hw.count(k) ? std::optional<double>(hw.at(k)) : std::nullopt;
             };
-            if (!st.gpu_name.empty()) {   // Strata: machine.gpu 在无卡时整个为 null
+            if (!st.gpu_name.empty()) {   // Strata: machine.gpu is entirely null when there is no GPU
                 Json g = Json::objv();
                 g.set("name", Json::strv(st.gpu_name));
                 g.set("used_mib", scaled_mib_gib(get("gpu_mem_used"), 1 << 20, 0));
@@ -1444,7 +1513,8 @@ void Serve::register_routes() {
         r.set("default_generation_settings", std::move(dg));
         r.set("total_slots", Json::numv(static_cast<double>(cfg_.slots)));
         r.set("compute_threads", Json::numv(static_cast<double>(cfg_.compute_threads)));
-        // GPU 设备侧：offload_enabled = 配置里给了 --gpu；gpu_devices = auto 或显式列表。
+        // GPU device side: offload_enabled = --gpu was given in the config; gpu_devices = auto or an
+        // explicit list.
         r.set("offload_enabled", Json::boolv(cfg_.gpu_auto || !cfg_.gpu_devices.empty()));
         {
             Json gd = Json::arrv();
@@ -1496,8 +1566,8 @@ void Serve::register_routes() {
         Json live = Json::objv();
         live.set("state", Json::strv(busy ? "generating" : "idle"));
         live.set("queued", Json::numv(static_cast<double>(sched_.queued())));
-        live.set("phase", Json::nullv());          // v0 无阶段跟踪
-        live.set("prompt_tokens", Json::nullv());  // v0 不做进行中请求的逐项视图
+        live.set("phase", Json::nullv());          // v0 has no phase tracking
+        live.set("prompt_tokens", Json::nullv());  // v0 has no per-item view of in-flight requests
         live.set("prompt_read", Json::nullv());
         live.set("prompt_total", Json::nullv());
         live.set("generated", Json::nullv());
@@ -1523,7 +1593,7 @@ void Serve::register_routes() {
                 live.set("tok_s_mean", Json::nullv());
             }
         }
-        live.set("tok_s_window_s", Json::nullv());   // v0 无滑动窗口（M2 补）
+        live.set("tok_s_window_s", Json::nullv());   // v0 has no sliding window (M2 to add)
         const auto views = sched_.slots_view();
         live.set("parallel", Json::numv(static_cast<double>(cfg_.slots)));
         int running = 0;
@@ -1541,13 +1611,13 @@ void Serve::register_routes() {
         live.set("slots", std::move(slots));
         live.set("waiting", Json::numv(static_cast<double>(sched_.queued())));
         r.set("live", std::move(live));
-        const auto list = records_.list();   // 最新在前
+        const auto list = records_.list();   // newest first
         Json reqs = Json::arrv();
         for (std::size_t i = 0; i < list.size() && i < 12; ++i) reqs.push(record_summary_json(list[i]));
         r.set("requests", std::move(reqs));
         Json cc = Json::objv();
         {
-            // 缓存实况（spec §6 的 conversation_cache 填实）：逐请求计数，全是真实值。
+            // Cache live view (spec §6's conversation_cache filled in): per-request counters, all real values.
             const PromptCache::Stats cs = prompt_cache_.stats();
             cc.set("enabled", Json::boolv(prompt_cache_.enabled()));
             cc.set("capacity", Json::numv(static_cast<double>(cfg_.conversation_cache)));
@@ -1572,7 +1642,7 @@ void Serve::register_routes() {
         const auto ts = tel_ ? tel_->snapshot() : TelemetrySnapshot{};
         Json hw = Json::objv();
         for (const auto& [k, v] : ts.now) hw.set(k, v ? Json::numv(*v) : Json::nullv());
-        if (ts.gpus.size() > 1) {   // Strata：仅多卡时带 gpus[]
+        if (ts.gpus.size() > 1) {   // Strata: gpus[] only when there are multiple GPUs
             Json gpu_list = Json::arrv();
             for (const GpuReading& gr : ts.gpus) {
                 Json g = Json::objv();
@@ -1591,7 +1661,7 @@ void Serve::register_routes() {
         Json hs = Json::objv();
         hs.set("gpu_name", Json::strv(ts.stat.gpu_name));
         hs.set("gpu_count", Json::numv(static_cast<double>(ts.stat.gpu_count)));
-        hs.set("gpu_note", Json::nullv());   // v0 恒空（见 telemetry.hpp 注释）
+        hs.set("gpu_note", Json::nullv());   // always empty in v0 (see the comment in telemetry.hpp)
         hs.set("cpu_name", Json::strv(ts.stat.cpu_name));
         hs.set("cores", Json::numv(static_cast<double>(ts.stat.cores)));
         hs.set("threads", Json::numv(static_cast<double>(ts.stat.threads)));
@@ -1600,10 +1670,12 @@ void Serve::register_routes() {
         for (const auto& [k, vec] : ts.history) hist.set(k, series_json(vec));
         r.set("history", std::move(hist));
         r.set("time", Json::numv(static_cast<double>(now)));
-        // 内容协商（Strata 契约，serve/prometheus.py 的 wants_prometheus）：Accept 带 text/plain
-        // 或 openmetrics，或 ?format=prometheus → Prometheus text；前端 fetch 与无头 curl
-        // （Accept 缺省 */*）保持 JSON。text 与 JSON 同源——渲染只读刚构建的 r，单一事实源。
-        // 谓词按 Strata 的「query 含 format=prometheus」口径写，故传回完整的 k=v 片段而非裸值。
+        // Content negotiation (Strata contract, wants_prometheus in serve/prometheus.py): Accept with
+        // text/plain or openmetrics, or ?format=prometheus → Prometheus text; the frontend fetch and
+        // headless curl (default Accept */*) stay on JSON. text and JSON share one source — rendering
+        // only reads the just-built r, a single source of truth. The predicate follows Strata's
+        // "query contains format=prometheus" semantics, so the full k=v fragment is passed back
+        // rather than a bare value.
         const std::string fmt = "format=" + req.get_param_value("format");
         if (wants_prometheus(req.get_header_value("Accept"), fmt)) {
             res.set_content(render_prometheus(r, lat_.snapshot(), eng_->model_name()),
@@ -1630,11 +1702,12 @@ void Serve::register_routes() {
         out.set("requests", std::move(arr));
         out.set("retention", Json::numv(static_cast<double>(Records::kCap)));
         out.set("persistent", Json::boolv(false));
-        out.set("loaded", Json::boolv(true));   // 引擎启动即装载（v0 无热装载）
+        out.set("loaded", Json::boolv(true));   // loaded at engine startup (no hot loading in v0)
         out.set("auto_load", Json::boolv(false));
         send_json(res, 200, out);
     });
-    // 静态页（T15/T16 落地文件；此刻 404 也正常——T9 只验 API 面）。
+    // Static pages (the files landed by T15/T16; 404 is fine at this point — T9 only verifies the API
+    // surface).
     svr.Get("/", [this](const httplib::Request&, httplib::Response& res) {
         res.set_content(web_index_, "text/html; charset=utf-8");
     });
@@ -1647,14 +1720,15 @@ void Serve::register_routes() {
 
 bool Serve::listen(std::string& err) {
     register_routes();
-    // HTTP 线程池：2 × 槽位 + 2（规格 §10：线程池大小由入口按槽位数配置）。
-    // 本入库的 httplib 用 new_task_queue 成员挂线程池（无 set_thread_pool_size），按实仓 API 接。
+    // HTTP thread pool: 2 × slots + 2 (spec §10: pool size configured by the entry point from the
+    // slot count). This vendored httplib hooks the pool through the new_task_queue member (no
+    // set_thread_pool_size), wired per the vendored API.
     const std::size_t tp = cfg_.threads > 0 ? static_cast<std::size_t>(cfg_.threads) : 2 * cfg_.slots + 2;
     svr_->new_task_queue = [tp] { return new httplib::ThreadPool(tp); };
     for (std::size_t i = 0; i < cfg_.slots; ++i) workers_.emplace_back([this] { worker_main(); });
     if (!svr_->bind_to_port(cfg_.host, cfg_.port)) {
         sched_.stop();
-        err = "绑定 " + cfg_.host + ":" + std::to_string(cfg_.port) + " 失败";
+        err = "Failed to bind " + cfg_.host + ":" + std::to_string(cfg_.port);
         return false;
     }
     (void) svr_->listen_after_bind();
