@@ -65,6 +65,90 @@ std::size_t cell_offset(std::uint64_t page, std::uint64_t h, std::uint64_t t,
         page * stride * page_size + (h * page_size + t % page_size) * head_dim);
 }
 
+// Page base offset in a pool (elements before the first kv head of the page).
+// __host__ __device__: shared by the host-side offset math and the gather kernel.
+__host__ __device__ std::size_t page_base(std::uint64_t page, std::uint64_t page_size,
+                                          std::uint64_t n_head_kv, std::uint64_t head_dim) {
+    return static_cast<std::size_t>(page * page_size * n_head_kv * head_dim);
+}
+
+// Device gather: one output element per thread; the source offset recomputes
+// the same page/head/cell layout the host kv_gather memcpy's from. The wrapper
+// pre-checks the host mirror table, so `page` is never -1 here.
+__global__ void kv_gather_dev_kernel(const std::uint16_t* __restrict__ k_pool,
+                                     const std::uint16_t* __restrict__ v_pool,
+                                     const std::int32_t* __restrict__ table,
+                                     const std::uint64_t* __restrict__ ids,
+                                     std::uint16_t* __restrict__ d_k_scratch,
+                                     std::uint16_t* __restrict__ d_v_scratch,
+                                     int n_ids, int n_kv, int page_size, int head_dim) {
+    const int total = n_ids * n_kv * head_dim;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= total) return;
+    const int e = idx % head_dim;
+    const int row = idx / head_dim;          // row = id * n_kv + h
+    const int id = row / n_kv;
+    const int h = row - id * n_kv;
+    const std::uint64_t t = ids[id];
+    const std::int32_t page = table[static_cast<std::size_t>(t / static_cast<std::uint64_t>(page_size))];
+    const std::size_t at =
+        page_base(static_cast<std::uint64_t>(page), static_cast<std::uint64_t>(page_size),
+                  static_cast<std::uint64_t>(n_kv), static_cast<std::uint64_t>(head_dim)) +
+        static_cast<std::size_t>((h * page_size + static_cast<int>(t % static_cast<std::uint64_t>(page_size))) *
+                                 head_dim + e);
+    d_k_scratch[idx] = k_pool[at];
+    d_v_scratch[idx] = v_pool[at];
+}
+
+bool dev_gather(KvDevicePool* p, const std::uint64_t* ids, std::uint64_t n_ids,
+                std::uint16_t* d_k_scratch, std::uint16_t* d_v_scratch, std::string& err) {
+    err.clear();
+    if (p == nullptr || (n_ids != 0 && ids == nullptr) || d_k_scratch == nullptr ||
+        d_v_scratch == nullptr) {
+        err = "device KV gather: pointers incomplete";
+        return false;
+    }
+    if (n_ids == 0) return true;
+    // Pre-check the host mirror: every selected page must be resident (-1 never).
+    for (std::uint64_t i = 0; i < n_ids; ++i) {
+        const std::uint64_t logi = ids[i] / p->page_size;
+        if (logi >= p->n_pages) {
+            err = "device KV gather: cell " + std::to_string(ids[i]) + " page out of range";
+            return false;
+        }
+        if (p->table[static_cast<std::size_t>(logi)] < 0) {
+            err = "device KV gather: page " + std::to_string(logi) +
+                  " not resident (host streaming arrives with --kv-resident)";
+            return false;
+        }
+    }
+    const std::size_t id_bytes = static_cast<std::size_t>(n_ids) * sizeof(std::uint64_t);
+    std::uint64_t* d_ids = nullptr;
+    if (cudaMalloc(&d_ids, id_bytes) != cudaSuccess) {
+        err = "device KV gather: id buffer allocation failed";
+        return false;
+    }
+    if (cudaMemcpy(d_ids, ids, id_bytes, cudaMemcpyHostToDevice) != cudaSuccess) {
+        err = "device KV gather: id upload failed";
+        cudaFree(d_ids);
+        return false;
+    }
+    const int total = static_cast<int>(n_ids * p->n_head_kv * p->head_dim);
+    const int threads = 256;
+    const int blocks = (total + threads - 1) / threads;
+    kv_gather_dev_kernel<<<blocks, threads>>>(
+        p->k_pool, p->v_pool, p->d_table, d_ids, d_k_scratch, d_v_scratch,
+        static_cast<int>(n_ids), static_cast<int>(p->n_head_kv),
+        static_cast<int>(p->page_size), static_cast<int>(p->head_dim));
+    cudaFree(d_ids);
+    const cudaError_t st = cudaDeviceSynchronize();
+    if (st != cudaSuccess) {
+        err = std::string("device KV gather: kernel failed: ") + cudaGetErrorString(st);
+        return false;
+    }
+    return true;
+}
+
 bool dev_reserve(KvDevicePool*& out, std::uint64_t n_pages, std::uint64_t n_head_kv,
                  std::uint64_t page_size, std::uint64_t head_dim, std::string& err) {
     err.clear();
@@ -165,6 +249,7 @@ KvDeviceExec kv_device_exec() {
     KvDeviceExec e;
     e.reserve = &dev_reserve;
     e.append = &dev_append;
+    e.gather = &dev_gather;
     e.read_pool = &dev_read_pool;
     e.release = &dev_release;
     return e;

@@ -35,6 +35,14 @@ struct KvDeviceExec {
     // math as host kv_append; only the cell bytes cross the bus.
     bool (*append)(KvDevicePool*, std::uint64_t t, const KvCell& cell,
                    std::string& err) = nullptr;
+    // Device gather: selected cells (ascending ids) are collected page-side
+    // into dense scratch buffers, same [id][kv_head][head_dim] layout as host
+    // kv_gather. `{d_k,d_v}_scratch` are device pointers, each n_ids * n_head_kv
+    // * head_dim uint16 words. A missing page (table -1) is an explicit error
+    // at this stage; readmission arrives with --kv-resident in task 4.
+    bool (*gather)(KvDevicePool*, const std::uint64_t* ids, std::uint64_t n_ids,
+                   std::uint16_t* d_k_scratch, std::uint16_t* d_v_scratch,
+                   std::string& err) = nullptr;
     // Copy the whole k/v pools back to host buffers (test/verification hook).
     bool (*read_pool)(KvDevicePool*, std::uint16_t* k_out, std::uint16_t* v_out,
                       std::string& err) = nullptr;

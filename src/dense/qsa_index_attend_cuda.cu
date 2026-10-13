@@ -350,26 +350,64 @@ bool qsa_index_cuda(const float* pooled, std::uint64_t n_bid, std::uint64_t idx_
     return ok;
 }
 
+namespace {
+
+// Shared launch for both qsa_attend_cuda variants (stage B): all pointers are
+// device pointers; zeroes d_attn, then runs attend + gate kernels on `stream`
+// and syncs. Same kernels, same reduction order as the original host wrapper.
+bool launch_attn_dev(const float* d_q, const float* d_qf, const std::uint16_t* d_k,
+                     const std::uint16_t* d_v, std::uint64_t n_ids, const QsaShapes& s,
+                     float* d_attn, float* d_w, cudaStream_t stream, std::string& err) {
+    const std::uint64_t hd = s.head_dim;
+    const std::uint64_t nh = s.n_head;
+    const std::uint64_t nkv = s.n_head_kv;
+    const std::size_t attn_bytes = static_cast<std::size_t>(nh * hd) * sizeof(float);
+    if (cudaMemset(d_attn, 0, attn_bytes) != cudaSuccess) {
+        err = "qsa_attend: attn zeroing failed";
+        return false;
+    }
+    if (n_ids == 0) return true;
+    const int hd_i = static_cast<int>(hd);
+    const int ids_i = static_cast<int>(n_ids);
+    const double scale = 1.0 / std::sqrt(static_cast<double>(hd));
+    // Shared memory: s_red[n_ids] (float, per-j score/exp) + s_max + s_part;
+    // one union buffer: total = n_ids + 2 * blockDim.
+    const std::size_t smem =
+        (static_cast<std::size_t>(n_ids) + 2 * static_cast<std::size_t>(hd_i)) * sizeof(float);
+    qsa_attend_kernel<<<static_cast<int>(nh), hd_i, smem, stream>>>(
+        d_q, d_k, d_v, ids_i, hd_i, static_cast<int>(nh), static_cast<int>(nkv),
+        static_cast<float>(scale), d_attn, d_w);
+    qsa_gate_kernel<<<static_cast<int>(nh), hd_i, 0, stream>>>(d_attn, d_qf, hd_i,
+                                                               static_cast<int>(nh), d_attn);
+    const cudaError_t launch = cudaGetLastError();
+    if (launch != cudaSuccess) {
+        err = std::string("qsa_attend: kernel launch failed: ") + cudaGetErrorString(launch);
+        return false;
+    }
+    return true;
+}
+
+}  // namespace
+
 bool qsa_attend_cuda(const float* q, const std::uint16_t* k_scratch, const std::uint16_t* v_scratch,
                      std::uint64_t n_ids, const QsaShapes& s, const float* q_full, float* attn,
                      float* weights, cudaStream_t stream, std::string& err) {
+    err.clear();
     if (!s.attention_sane()) {
-        err = "QSA 的注意力几何不成立（头宽/头数为 0，或 n_head 不是 n_head_kv 的整数倍）";
+        err = "qsa_attend_cuda: attention geometry invalid (zero head dim/count, or n_head not divisible by n_head_kv)";
         return false;
     }
     if (q == nullptr || attn == nullptr || q_full == nullptr) {
-        err = "qsa_attend_cuda 的指针不完整";
+        err = "qsa_attend_cuda: pointers incomplete";
+        return false;
+    }
+    if (n_ids != 0 && (k_scratch == nullptr || v_scratch == nullptr)) {
+        err = "qsa_attend_cuda: cells given but scratch pointers null";
         return false;
     }
     const std::uint64_t hd = s.head_dim;
     const std::uint64_t nh = s.n_head;
     const std::uint64_t nkv = s.n_head_kv;
-    for (std::uint64_t h = 0; h < nh * hd; ++h) attn[h] = 0.0f;
-    if (n_ids == 0) return true;
-    if (k_scratch == nullptr || v_scratch == nullptr) {
-        err = "qsa_attend_cuda 有 cell 但 scratch 指针为空";
-        return false;
-    }
     const std::size_t q_bytes = static_cast<std::size_t>(nh * hd) * sizeof(float);
     const std::size_t kv_bytes = static_cast<std::size_t>(n_ids * nkv * hd) * sizeof(std::uint16_t);
     const std::size_t qf_bytes = static_cast<std::size_t>(nh * 2 * hd) * sizeof(float);
@@ -385,7 +423,7 @@ bool qsa_attend_cuda(const float* q, const std::uint16_t* k_scratch, const std::
         cudaMalloc(&d_v, kv_bytes) != cudaSuccess || cudaMalloc(&d_qf, qf_bytes) != cudaSuccess ||
         cudaMalloc(&d_attn, attn_bytes) != cudaSuccess ||
         (weights != nullptr && cudaMalloc(&d_w, w_bytes) != cudaSuccess)) {
-        err = "qsa_attend_cuda：显存分配失败";
+        err = "qsa_attend_cuda: device allocation failed";
         cudaFree(d_q);
         cudaFree(d_k);
         cudaFree(d_v);
@@ -399,7 +437,7 @@ bool qsa_attend_cuda(const float* q, const std::uint16_t* k_scratch, const std::
               cudaMemcpy(d_v, v_scratch, kv_bytes, cudaMemcpyHostToDevice) == cudaSuccess &&
               cudaMemcpy(d_qf, q_full, qf_bytes, cudaMemcpyHostToDevice) == cudaSuccess;
     if (!ok) {
-        err = "qsa_attend_cuda：输入拷入失败";
+        err = "qsa_attend_cuda: input upload failed";
         cudaFree(d_q);
         cudaFree(d_k);
         cudaFree(d_v);
@@ -408,38 +446,17 @@ bool qsa_attend_cuda(const float* q, const std::uint16_t* k_scratch, const std::
         cudaFree(d_w);
         return false;
     }
-    const int hd_i = static_cast<int>(hd);
-    const int ids_i = static_cast<int>(n_ids);
-    const double scale = 1.0 / std::sqrt(static_cast<double>(hd));
-    // 共享内存：s_red[n_ids]（float，存每 j 的分数/exp）+ s_max[blockDim] + s_part[blockDim]。
-    // 用一个联合缓冲：总长 = n_ids + 2·blockDim。
-    const std::size_t smem =
-        (static_cast<std::size_t>(n_ids) + 2 * static_cast<std::size_t>(hd_i)) * sizeof(float);
-    // s_max / s_part 需要 double：用两个独立 float 缓冲（归约在 float，ADR-009 允差）。
-    qsa_attend_kernel<<<static_cast<int>(nh), hd_i, smem, stream>>>(
-        static_cast<const float*>(d_q), static_cast<const std::uint16_t*>(d_k),
-        static_cast<const std::uint16_t*>(d_v), ids_i, hd_i, static_cast<int>(nh),
-        static_cast<int>(nkv), static_cast<float>(scale), static_cast<float*>(d_attn),
-        static_cast<float*>(d_w));
-    qsa_gate_kernel<<<static_cast<int>(nh), hd_i, 0, stream>>>(
-        static_cast<const float*>(d_attn), static_cast<const float*>(d_qf), hd_i,
-        static_cast<int>(nh), static_cast<float*>(d_attn));
-    const cudaError_t launch = cudaGetLastError();
-    if (launch != cudaSuccess) {
-        err = std::string("qsa_attend_cuda：内核启动失败：") + cudaGetErrorString(launch);
-        cudaFree(d_q);
-        cudaFree(d_k);
-        cudaFree(d_v);
-        cudaFree(d_qf);
-        cudaFree(d_attn);
-        cudaFree(d_w);
-        return false;
+    ok = launch_attn_dev(static_cast<const float*>(d_q), static_cast<const float*>(d_qf),
+                         static_cast<const std::uint16_t*>(d_k),
+                         static_cast<const std::uint16_t*>(d_v), n_ids, s,
+                         static_cast<float*>(d_attn), static_cast<float*>(d_w), stream, err);
+    if (ok) {
+        ok = cudaMemcpy(attn, d_attn, attn_bytes, cudaMemcpyDeviceToHost) == cudaSuccess;
+        if (ok && weights != nullptr) {
+            ok = cudaMemcpy(weights, d_w, w_bytes, cudaMemcpyDeviceToHost) == cudaSuccess;
+        }
+        if (!ok) err = "qsa_attend_cuda: result download failed";
     }
-    ok = cudaMemcpy(attn, d_attn, attn_bytes, cudaMemcpyDeviceToHost) == cudaSuccess;
-    if (ok && weights != nullptr) {
-        ok = cudaMemcpy(weights, d_w, w_bytes, cudaMemcpyDeviceToHost) == cudaSuccess;
-    }
-    if (!ok) err = "qsa_attend_cuda：结果拷回失败";
     cudaFree(d_q);
     cudaFree(d_k);
     cudaFree(d_v);
@@ -447,6 +464,26 @@ bool qsa_attend_cuda(const float* q, const std::uint16_t* k_scratch, const std::
     cudaFree(d_attn);
     cudaFree(d_w);
     return ok;
+}
+
+bool qsa_attend_cuda_dev(const float* d_q, const float* d_q_full,
+                         const std::uint16_t* d_k, const std::uint16_t* d_v,
+                         std::uint64_t n_ids, const QsaShapes& s, float* d_attn,
+                         float* d_weights, cudaStream_t stream, std::string& err) {
+    err.clear();
+    if (!s.attention_sane()) {
+        err = "qsa_attend_cuda_dev: attention geometry invalid";
+        return false;
+    }
+    if (d_q == nullptr || d_attn == nullptr || d_q_full == nullptr) {
+        err = "qsa_attend_cuda_dev: pointers incomplete";
+        return false;
+    }
+    if (n_ids != 0 && (d_k == nullptr || d_v == nullptr)) {
+        err = "qsa_attend_cuda_dev: cells given but device k/v scratch null";
+        return false;
+    }
+    return launch_attn_dev(d_q, d_q_full, d_k, d_v, n_ids, s, d_attn, d_weights, stream, err);
 }
 
 }  // namespace qinfer::dense

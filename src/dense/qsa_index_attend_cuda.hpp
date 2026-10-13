@@ -36,6 +36,15 @@ bool qsa_attend_cuda(const float* q, const std::uint16_t* k_scratch, const std::
                      std::uint64_t n_ids, const QsaShapes& s, const float* q_full, float* attn,
                      float* weights, cudaStream_t stream, std::string& err);
 
+// 设备缓冲直读变体（阶段 B：KV 上卡后 k/v scratch 已在设备，不再每步 H2D）。
+// 六个输入/输出指针全部是设备指针（d_q/d_q_full/d_k/d_v 输入，d_attn/d_weights 输出），
+// 本函数只做一次设备端归零 + 两次内核启动（attn + gate）；attn/weights 由调用方搬回。
+// 语义与 qsa_attend_cuda 完全一致（同一内核、同一归约顺序）。
+bool qsa_attend_cuda_dev(const float* d_q, const float* d_q_full,
+                         const std::uint16_t* d_k, const std::uint16_t* d_v,
+                         std::uint64_t n_ids, const QsaShapes& s, float* d_attn,
+                         float* d_weights, cudaStream_t stream, std::string& err);
+
 // BF16 逐行点积的设备版（索引器 q/k 投影；语义与主机 run_bf16_gemv 一致：激活先舍入到 bf16 位型、
 // 逐行 bf16 点积、f32 累加、每行独立）。w_bf16 (rows, cols)、x 是 f32 激活（内部舍入）、out 长 rows。
 bool bf16_gemv_cuda(const std::uint16_t* w_bf16, std::uint64_t rows, std::uint64_t cols,
