@@ -310,6 +310,15 @@ AmdCard* find_amd_card(int index) {
 
 }  // namespace
 
+std::string parse_cpu_model_name(const std::string& line) {
+    const std::size_t colon = line.find(':');
+    if (colon == std::string::npos) return {};
+    const std::size_t first = line.find_first_not_of(" \t", colon + 1);
+    if (first == std::string::npos) return {};
+    const std::size_t last = line.find_last_not_of(" \t");
+    return line.substr(first, last - first + 1);
+}
+
 Telemetry::Telemetry(ExtraFn extra) : extra_(std::move(extra)) {
     // 卡发现：NVML 优先（index 0..64 逐个取句柄到失败），全失败 → AMD sysfs 卡 0。
     nvml_ = load_nvml();
@@ -341,10 +350,7 @@ Telemetry::Telemetry(ExtraFn extra) : extra_(std::move(extra)) {
     std::string line;
     while (std::getline(ci, line)) {
         if (line.rfind("model name", 0) == 0) {
-            stat_.cpu_name = line.substr(11);
-            while (!stat_.cpu_name.empty() &&
-                   (stat_.cpu_name.back() == ' ' || stat_.cpu_name.back() == '\t'))
-                stat_.cpu_name.pop_back();
+            stat_.cpu_name = parse_cpu_model_name(line);
             break;
         }
     }

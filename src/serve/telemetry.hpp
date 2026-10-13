@@ -19,6 +19,11 @@
 
 namespace qinfer::serve {
 
+// 解析 /proc/cpuinfo 的 "model name" 行，取冒号后的值并去首尾空白；无冒号或值全空白 → 空串。
+// 独立成函数以便单测钉死（曾用 line.substr(11) 直切——"model name" 恰 10 字符，index 11 是冒号
+// 本身，cpu_name 被读成 ": Intel(R)…"）。
+std::string parse_cpu_model_name(const std::string& line);
+
 // 单卡读器（NVML 卡或 AMD sysfs 卡）与 NVML 动态符号表：都是不透明类型，定义在 telemetry.cpp。
 struct GpuCtx;
 struct NvmlApi;

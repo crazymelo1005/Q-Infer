@@ -59,6 +59,20 @@ int main() {
     CHECK(s3.now.count("cpu") == 1);
 #endif
 
+    // 7. cpuinfo "model name" 行解析：取冒号后值并去首尾空白；无冒号/无值 → 空串。
+    //    （曾是 substr(11) 直接切——"model name" 恰 10 字符，index 11 是冒号本身，
+    //    cpu_name 被读成 ": Intel(R)…"。）
+    CHECK(parse_cpu_model_name("model name\t: Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz") ==
+          "Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz");
+    CHECK(parse_cpu_model_name("model name : AMD Ryzen 7 5800X") == "AMD Ryzen 7 5800X");
+    CHECK(parse_cpu_model_name("model name\t:\tApple M1  ") == "Apple M1");
+    CHECK(parse_cpu_model_name("model name") == "");
+    CHECK(parse_cpu_model_name("model name\t:") == "");
+#ifndef _WIN32
+    // 7b. 真实 /proc/cpuinfo 读出的 cpu_name 不带前导冒号（上述缺陷的回归钉）。
+    CHECK(s3.stat.cpu_name.empty() || s3.stat.cpu_name.front() != ':');
+#endif
+
     // 8. 任何情况 snapshot 都能取（读锁不含文件 IO——snapshot 只拷内存）。
     Telemetry tel3(nullptr);
     tel3.sample_now();
