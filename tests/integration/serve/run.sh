@@ -633,7 +633,8 @@ stop
 #     --gpu the server starts as usual (pure-CPU path unchanged; the other cases in this script exercise it).
 timeout 8 "$SERVER" --model "$FIX" --host "$HOST" --port "$PORT" --n-embd 256 --hc 2 --hc-lr 3 \
           --layers 2 --top-k 2 --gdn-head-dim 32 --qsa-head-dim 32 --n-rot 4 --idx-dim 4 \
-          --idx-top-k 2048 --idx-block 4 --max-context 4096 --api-key testkey --kv-slots 8 --gpu 0 \
+          --idx-top-k 2048 --idx-block 4 --max-context 4096 --api-key testkey --kv-slots 8 \
+          --kv-resident 4 --gpu 0 \
           >/tmp/gpu-reject.log 2>&1 &
 BPID=$!
 up=0
@@ -642,15 +643,18 @@ for _ in $(seq 1 30); do
   sleep 0.25
 done
 if [ "$up" = 1 ]; then
-  # CUDA build: --gpu 0 activates dense device execution. The request runs full inference (token embd → GDN →
-  # MoE → QSA → head); any device-kernel crash (illegal access/missed dispatch) will surface server-side (400/500/crash).
+  # Query /props first (right after health), then run the request: the timeout
+# window is 8s and the request itself takes a few of them.
+  curl -s -H "$H" "http://$HOST:$PORT/props" > "$R.p"
+  kv_res=$(jget "$R.p" "d['kv_resident']")
   code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
     -X POST "http://$HOST:$PORT/v1/chat/completions" \
     -d '{"model":"x","messages":[{"role":"system","content":"c"},{"role":"user","content":"d"}],"max_tokens":8,"temperature":0}')
-  if [ "$code" = 200 ] && [ -n "$(jget "$R" "d['choices'][0]['message']['content']")" ]; then
-    ok "29 --gpu 0 started and device inference OK (both layer *_cuda paths)"
+  if [ "$code" = 200 ] && [ -n "$(jget "$R" "d['choices'][0]['message']['content']")" ] \
+     && [ "$kv_res" = 4 ]; then
+    ok "29 --gpu 0 device inference OK + device-KV eviction path (--kv-resident 4, /props kv_resident=4)"
   else
-    bad "29 --gpu 0 server is up but device inference failed: http=$code, $(head -c 200 "$R")"
+    bad "29 --gpu 0 device inference failed or kv_resident wrong: http=$code, kv_resident=$kv_res"
   fi
 else
   wait "$BPID" 2>/dev/null; rc=$?

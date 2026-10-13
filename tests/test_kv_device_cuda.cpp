@@ -379,6 +379,72 @@ int test_8k_timing_probe() {
     return 0;
 }
 
+// Stage B task 4: evict / resident / admit primitives. Evict page 0, confirm
+// the miss is reported, admit it back from the host cache's own page-0 block
+// bytes (that is exactly the role the host store plays on the serving path),
+// then confirm the gather matches the host reference again.
+int test_evict_admit() {
+    const std::uint64_t nk = 2, ps = 4, hd = 32, cells = 32;
+    KvDeviceExec exec = kv_device_exec();
+    std::string err;
+    KvPageCache hc;
+    KvDevicePool* dp = nullptr;
+    if (!fill_caches(exec, hc, dp, 8, nk, ps, hd, cells, err)) {
+        std::printf("FAIL fill: %s\n", err.c_str());
+        return 1;
+    }
+    int bad = 0;
+    const std::uint64_t ids[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+    const std::uint64_t n_ids = 12;
+    const std::size_t elems = static_cast<std::size_t>(n_ids * nk * hd);
+    std::uint16_t* dk = nullptr;
+    std::uint16_t* dv = nullptr;
+    if (cudaMalloc(&dk, elems * sizeof(std::uint16_t)) != cudaSuccess ||
+        cudaMalloc(&dv, elems * sizeof(std::uint16_t)) != cudaSuccess) {
+        std::printf("FAIL scratch alloc\n");
+        exec.release(dp, err);
+        return 1;
+    }
+    bool res = true;
+    if (!exec.resident(dp, 0, res, err) || !res) {
+        std::printf("FAIL page 0 should start resident\n");
+        bad = 1;
+    }
+    if (!exec.evict(dp, 0, err) || !exec.resident(dp, 0, res, err) || res) {
+        std::printf("FAIL evict did not flip residency\n");
+        bad = 1;
+    }
+    if (exec.gather(dp, ids, n_ids, dk, dv, err)) {
+        std::printf("FAIL gather after evict should report the missing page\n");
+        bad = 1;
+    }
+    if (!exec.admit_block(dp, 0, hc.k_pool.data(), hc.v_pool.data(), err) ||
+        !exec.resident(dp, 0, res, err) || !res) {
+        std::printf("FAIL admit: %s\n", err.c_str());
+        bad = 1;
+    }
+    if (!exec.gather(dp, ids, n_ids, dk, dv, err)) {
+        std::printf("FAIL gather after admit: %s\n", err.c_str());
+        bad = 1;
+    } else {
+        std::vector<std::uint16_t> hk(elems), hv(elems), gk(elems), gv(elems);
+        kv_gather(hc, ids, n_ids, hk.data(), hv.data(), err);
+        cudaMemcpy(gk.data(), dk, elems * sizeof(std::uint16_t), cudaMemcpyDeviceToHost);
+        cudaMemcpy(gv.data(), dv, elems * sizeof(std::uint16_t), cudaMemcpyDeviceToHost);
+        std::uint64_t mism = 0;
+        for (std::size_t i = 0; i < elems; ++i) {
+            if (hk[i] != gk[i] || hv[i] != gv[i]) ++mism;
+        }
+        std::printf("  evict/admit: gather after readmission %s\n",
+                    mism == 0 ? "byte-identical" : "MISMATCH");
+        if (mism != 0) bad = 1;
+    }
+    cudaFree(dk);
+    cudaFree(dv);
+    exec.release(dp, err);
+    return bad;
+}
+
 }  // namespace
 
 int main() {
@@ -387,6 +453,7 @@ int main() {
     rc += test_guards();
     rc += test_reuse_path();
     rc += test_gather_and_attend();
+    rc += test_evict_admit();
     rc += test_8k_timing_probe();
     if (rc == 0) {
         std::puts("kv_device_cuda: device KV pool + gather + attend all match host reference");

@@ -43,6 +43,19 @@ struct KvDeviceExec {
     bool (*gather)(KvDevicePool*, const std::uint64_t* ids, std::uint64_t n_ids,
                    std::uint16_t* d_k_scratch, std::uint16_t* d_v_scratch,
                    std::string& err) = nullptr;
+    // Evict a logical page: table entry -> -1 (device + host mirror). The bytes
+    // are left in place; a later identity-mapped page write overwrites them.
+    bool (*evict)(KvDevicePool*, std::uint64_t logical, std::string& err) = nullptr;
+    // Admit a full block back from the host store: copies the block bytes (host
+    // layout [kv_head][page_size][head_dim]) into the identity-mapped device
+    // page and sets the table entry. This is what --kv-resident N's miss path
+    // calls; the store is the authoritative copy.
+    bool (*admit_block)(KvDevicePool*, std::uint64_t logical,
+                        const std::uint16_t* k_blk, const std::uint16_t* v_blk,
+                        std::string& err) = nullptr;
+    // Is a logical page currently resident on the device?
+    bool (*resident)(KvDevicePool*, std::uint64_t logical, bool& out,
+                     std::string& err) = nullptr;
     // Copy the whole k/v pools back to host buffers (test/verification hook).
     bool (*read_pool)(KvDevicePool*, std::uint16_t* k_out, std::uint16_t* v_out,
                       std::string& err) = nullptr;

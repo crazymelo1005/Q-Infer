@@ -77,6 +77,7 @@ bool prepare_step_scratch(const StepModel& model, std::uint64_t n_pages, std::ui
         // is reserved lazily on first entry (see run_qsa_layer_cuda).
         out.blocks[l].qsa.dev_kv =
             model.cfg.dense_exec != nullptr ? &model.cfg.dense_exec->kv : nullptr;
+        out.blocks[l].qsa.resident_tokens = model.cfg.kv_resident_tokens;
     }
     // PLE（[S-63]）：配置只挂到它自己那一层，别的层保持为空——于是「挂错层」不可能悄悄发生。
     if (model.cfg.ple != nullptr) {

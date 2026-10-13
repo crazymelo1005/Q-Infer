@@ -43,6 +43,8 @@ struct FacadeConfig {
     std::string ple_table;                   // PLE 表行来源（分片2），空 = 不配 PLE
     std::uint64_t ple_budget_bytes = 0;
     std::uint64_t kv_slots = 0;              // 每 QSA 层常驻槽位；0 = 不挂 KV 窗口
+    std::uint64_t kv_resident = 0;           // --kv-resident N: device KV residency cap in tokens
+                                             // (0 = all-resident; the reversed Strata semantics)
     // 可选的 dense 设备执行器（阶段 A dense 接线）：非空（run_gdn/run_qsa 至少一个）时 step_loop
     // 每层 GDN/QSA 走 *_cuda 入口；主机构建保持全空 → 全主机路径。由 main 在 --gpu 时填
     // `dense_exec_cuda()`（只有 CUDA 构建有那个符号）。

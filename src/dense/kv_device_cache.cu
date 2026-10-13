@@ -243,6 +243,65 @@ bool dev_read_pool(KvDevicePool* p, std::uint16_t* k_out, std::uint16_t* v_out,
 
 bool dev_release(KvDevicePool* p, std::string& err) { return kv_free(p, err); }
 
+// Sync a single table entry to the device (host mirror already updated).
+bool sync_table(KvDevicePool* p, std::uint64_t logical, std::string& err) {
+    const cudaError_t st = cudaMemcpy(p->d_table + logical,
+                                      &p->table[static_cast<std::size_t>(logical)],
+                                      sizeof(std::int32_t), cudaMemcpyHostToDevice);
+    if (st != cudaSuccess) {
+        err = std::string("device KV table sync failed: ") + cudaGetErrorString(st);
+        return false;
+    }
+    return true;
+}
+
+bool dev_evict(KvDevicePool* p, std::uint64_t logical, std::string& err) {
+    err.clear();
+    if (p == nullptr || logical >= p->n_pages) {
+        err = "device KV evict: bad pool or page index";
+        return false;
+    }
+    p->table[static_cast<std::size_t>(logical)] = -1;
+    return sync_table(p, logical, err);
+}
+
+bool dev_admit_block(KvDevicePool* p, std::uint64_t logical, const std::uint16_t* k_blk,
+                     const std::uint16_t* v_blk, std::string& err) {
+    err.clear();
+    if (p == nullptr || k_blk == nullptr || v_blk == nullptr || logical >= p->n_pages) {
+        err = "device KV admit: pointers incomplete or page index out of range";
+        return false;
+    }
+    // Host block layout [kv_head][page_size][head_dim] == device page layout
+    // (identity physical page = logical page): one memcpy each.
+    const std::size_t bytes = static_cast<std::size_t>(p->page_size * p->n_head_kv * p->head_dim) *
+                              sizeof(std::uint16_t);
+    const std::size_t off =
+        page_base(logical, p->page_size, p->n_head_kv, p->head_dim);
+    const cudaError_t sk = cudaMemcpy(p->k_pool + off, k_blk, bytes, cudaMemcpyHostToDevice);
+    if (sk != cudaSuccess) {
+        err = std::string("device KV admit (k): ") + cudaGetErrorString(sk);
+        return false;
+    }
+    const cudaError_t sv = cudaMemcpy(p->v_pool + off, v_blk, bytes, cudaMemcpyHostToDevice);
+    if (sv != cudaSuccess) {
+        err = std::string("device KV admit (v): ") + cudaGetErrorString(sv);
+        return false;
+    }
+    p->table[static_cast<std::size_t>(logical)] = static_cast<std::int32_t>(logical);
+    return sync_table(p, logical, err);
+}
+
+bool dev_resident(KvDevicePool* p, std::uint64_t logical, bool& out, std::string& err) {
+    err.clear();
+    if (p == nullptr || logical >= p->n_pages) {
+        err = "device KV resident: bad pool or page index";
+        return false;
+    }
+    out = p->table[static_cast<std::size_t>(logical)] >= 0;
+    return true;
+}
+
 }  // namespace
 
 KvDeviceExec kv_device_exec() {
@@ -250,6 +309,9 @@ KvDeviceExec kv_device_exec() {
     e.reserve = &dev_reserve;
     e.append = &dev_append;
     e.gather = &dev_gather;
+    e.evict = &dev_evict;
+    e.admit_block = &dev_admit_block;
+    e.resident = &dev_resident;
     e.read_pool = &dev_read_pool;
     e.release = &dev_release;
     return e;

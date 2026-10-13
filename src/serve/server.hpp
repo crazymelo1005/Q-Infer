@@ -61,6 +61,9 @@ struct ServeConfig {
                                          // (startup logs; error messages remain English by API
                                          // convention with the detail string carried through)
     std::size_t conversation_cache = 64; // token-prefix cache entries; 0 = off (/metrics reads it live)
+    std::uint64_t kv_resident = 0;       // --kv-resident N: per-layer device KV residency cap in
+                                         // tokens (reversed semantics: 0 = all-resident; above N
+                                         // the oldest pages stream back to the host store)
     std::uint64_t reject_after = 0;      // 0 = off; >0 = 503 every request from the Nth (integration tests; see main)
     // Facade geometry passthrough (defaults = real-model derived values; integration tests override).
     FacadeConfig facade;

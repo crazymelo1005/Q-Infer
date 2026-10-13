@@ -1525,6 +1525,8 @@ void Serve::register_routes() {
             }
             r.set("gpu_devices", std::move(gd));
         }
+        // Device KV residency cap (tokens); 0 = all-resident (--kv-resident).
+        r.set("kv_resident", Json::numv(static_cast<double>(cfg_.kv_resident)));
         r.set("model_alias", Json::strv(eng_->model_name()));
         r.set("chat_template", Json::strv(eng_->chat_template()));
         Json caps = Json::objv();

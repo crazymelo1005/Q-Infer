@@ -81,6 +81,10 @@ struct QsaScratch {
     // StepScratch's destructor). Host builds keep both null -> host path.
     const KvDeviceExec* dev_kv = nullptr;
     KvDevicePool* dev_pool = nullptr;
+    // Device residency cap in tokens (--kv-resident; 0 = all-resident). Only
+    // meaningful when dev_kv is active: above the cap the oldest logical page is
+    // evicted on append and readmitted from the host store on gather misses.
+    std::uint64_t resident_tokens = 0;
     QsaIndexerState idx_state;
     std::vector<float> cos_tab, sin_tab;
     std::vector<float> q_norm_w, k_norm_w, idx_q_norm_w, idx_k_norm_w;

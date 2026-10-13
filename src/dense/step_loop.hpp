@@ -63,6 +63,10 @@ struct StepConfig {
     // 全走主机路径，零行为变化。
     const DenseExec* dense_exec = nullptr;
 
+    // Device KV residency cap in tokens (--kv-resident; 0 = all-resident). Handed
+    // to each QSA block by prepare_step_scratch; only meaningful with dense_exec.
+    std::uint64_t kv_resident_tokens = 0;
+
     // 可选的 PLE（第 1 层那一步，[S-63]）：给了就在 `ple->layer` 那一层、第一段门控残差之前把它并进
     // 残差栈。配置由调用方建（六张张力 + 表行来源 + 行缓存），**本步的 token 要靠 `run_token_step` 喂**
     // ——`run_step_model` 只收 embedding 行、不知道 token，故配了 PLE 又直接调 `run_step_model` 会明确

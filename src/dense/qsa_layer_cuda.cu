@@ -159,6 +159,21 @@ bool run_qsa_layer_cuda(const artifact::GgufFile& gguf, const QsaLayer& layer, c
         err = "QSA layer " + std::to_string(layer.layer) + " device KV append: " + err;
         return false;
     }
+    // Stage B streaming cap (--kv-resident N): once the window slides past N
+    // tokens, evict the oldest logical page (table -> -1; the host store stays
+    // authoritative and the miss path below readmits on demand).
+    if (dev_kv && s.resident_tokens > 0 && s.pos >= s.resident_tokens) {
+        const std::uint64_t old = (s.pos - s.resident_tokens) / s.kv.page_size;
+        const std::uint64_t cur = s.pos / s.kv.page_size;
+        if (old < s.kv.n_pages && old != cur) {
+            bool res = false;
+            if (!s.dev_kv->resident(s.dev_pool, old, res, err) ||
+                (res && !s.dev_kv->evict(s.dev_pool, old, err))) {
+                err = "QSA layer " + std::to_string(layer.layer) + " device KV evict: " + err;
+                return false;
+            }
+        }
+    }
 
     // 4. 索引器：q/k 走 bf16 投影（设备）→ 主机 qsa_indexer_prep / indexer_key_append。
     s.idx_q_out.assign(static_cast<std::size_t>(layer.idx_q.rows), 0.0f);
@@ -206,6 +221,31 @@ bool run_qsa_layer_cuda(const artifact::GgufFile& gguf, const QsaLayer& layer, c
     }
     s.attn.assign(static_cast<std::size_t>(layer.sh.n_head * hd), 0.0f);
     if (dev_kv) {
+        // Stage B streaming miss path: readmit any selected page the cap
+        // evicted, from the authoritative host store (one block copy each).
+        if (s.store != nullptr) {
+            std::vector<std::uint64_t> need;
+            for (std::uint64_t id : s.ids) {
+                const std::uint64_t pg = id / s.kv.page_size;
+                bool dup = false;
+                for (std::uint64_t q : need) {
+                    if (q == pg) dup = true;
+                }
+                if (dup) continue;
+                bool res = false;
+                if (!s.dev_kv->resident(s.dev_pool, pg, res, err)) return false;
+                if (!res) need.push_back(pg);
+            }
+            for (std::uint64_t pg : need) {
+                std::vector<std::uint16_t> kb(static_cast<std::size_t>(s.store->block_elems())),
+                    vb(static_cast<std::size_t>(s.store->block_elems()));
+                if (!s.store->read_block(pg, kb.data(), vb.data(), err) ||
+                    !s.dev_kv->admit_block(s.dev_pool, pg, kb.data(), vb.data(), err)) {
+                    err = "QSA layer " + std::to_string(layer.layer) + " device KV admit: " + err;
+                    return false;
+                }
+            }
+        }
         // Stage B device path: gather into device scratch, attend on device
         // buffers (no per-step k/v H2D), attn copied back for the projection.
         const std::size_t kvb = static_cast<std::size_t>(n_ids * layer.sh.n_head_kv * hd) *

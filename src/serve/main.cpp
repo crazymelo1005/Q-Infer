@@ -138,6 +138,7 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
         c.lang = v;
     }
     c.conversation_cache = static_cast<std::size_t>(arg_int(a, "--conversation-cache", 64, err));
+    c.kv_resident = static_cast<std::uint64_t>(arg_int(a, "--kv-resident", 0, err));
     if (!parse_gpu(a, c.gpu_auto, c.gpu_devices, err)) return {};
     c.reject_after = static_cast<std::uint64_t>(arg_int(a, "--reject-after", 0, err));
     FacadeConfig& f = c.facade;
@@ -159,6 +160,7 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     f.ple_budget_bytes = static_cast<std::uint64_t>(arg_int(a, "--ple-budget-bytes", 0, err));
     if (a.count("--ple-table")) f.ple_table = a["--ple-table"];
     f.kv_slots = static_cast<std::uint64_t>(arg_int(a, "--kv-slots", 0, err));
+    f.kv_resident = c.kv_resident;
 #ifdef QINFER_CUDA_BUILD
     // --gpu activates dense device execution (stage A wiring): the CUDA whole-layer
     // entries are handed to the facade, so the step loop runs *_cuda per layer.
@@ -183,7 +185,8 @@ int main(int argc, char** argv) {
                              "[--layers N] [--top-k N] [--gdn-head-dim N] [--qsa-head-dim N] [--n-rot N] "
                              "[--idx-dim N] [--idx-top-k N] [--idx-block N] [--max-context N] "
                              "[--cache-slots N] [--cache-byte-budget N] [--ple-table P] "
-                             "[--ple-budget-bytes N] [--kv-slots N] [--conversation-cache N]\n"
+                             "[--ple-budget-bytes N] [--kv-slots N] [--kv-resident N] "
+                             "[--conversation-cache N]\n"
                              "        --threads N is the HTTP thread pool; --compute-threads N is the "
                              "inference thread pool (default: half the physical cores, capped at 8; "
                              "1 or negative = single-threaded); --lang selects the startup-log language "
@@ -227,6 +230,9 @@ int main(int argc, char** argv) {
     } else {
         std::printf("Inference thread pool: %d threads (--compute-threads)\n", cfg.compute_threads);
     }
+    // Startup lines go to stdout, which is block-buffered when redirected to a
+    // file: without an explicit flush the whole log stays invisible until exit.
+    std::fflush(stdout);
     Serve serve(cfg, eng);
     g_serve = &serve;
     std::signal(SIGINT, on_signal);
