@@ -1,0 +1,61 @@
+NOTICE
+======
+
+This repository vendors part of **Strata**, an MIT-licensed MoE inference engine.
+
+    Copyright (c) 2026 Niko1221 and the Strata contributors
+    Upstream: https://github.com/Niko1221/Strata
+    License:  MIT (full text at third_party/strata/LICENSE)
+
+Provenance
+----------
+
+- Tag: `v0.1.43.1`
+- Commit: `a0116b2782a5b82622358c04a06496485d12b2d6`
+- Vendored: 2026-10-13
+- Location: `third_party/strata/`
+- The vendored tree is **unmodified**. Any future edit is a deliberate divergence and
+  must be recorded here and in the decision record below.
+
+What was taken
+--------------
+
+    include/            public engine headers
+    src/                engine sources, including the CUDA/HIP device code
+    cmake/              backend helper scripts the top-level CMake includes
+    third_party/ggml/   ggml shared headers and VERSION.txt (pins llama.cpp commit
+                        3cf03257f219afbe7334045ff7c6a06ac68c627d); ggml itself is
+                        supplied locally via STRATA_GGML_DIR, never downloaded
+    CMakeLists.txt      the engine build entry point
+    LICENSE             the upstream MIT license text
+
+What was deliberately left out, and why
+---------------------------------------
+
+    serve/              the upstream Python serving layer. Q-Infer keeps its own HTTP
+                        layer (OpenAI + Anthropic APIs, web UI, telemetry) and drives
+                        the engine over its stdin/stdout line protocol instead.
+    sycl/               the experimental Intel Arc / SYCL port (its own CMake project,
+                        requires icpx + oneMKL). We build CUDA only.
+    tests/, bench/      upstream's test and microbenchmark harness. Omitting them also
+                        makes STRATA_BUILD_TESTS default to OFF, per the guard in the
+                        upstream CMakeLists.txt (line 95): the option only turns ON when
+                        both directories exist.
+    setup.py, setup.sh  the pack preprocessing step. It is a development-time input, not
+                        something we build into the serving binary.
+    docs/, data/, tools/, chat.py, ref/, Dockerfile, *.bat, READMEs, .github/
+                        documentation, model artifacts and release plumbing. Model
+                        weights must never enter this repository in any case.
+
+How it is used
+--------------
+
+The vendored engine is configured and built by `tools/build_engine.sh` into
+`build-engine/strata`, a separate binary with its own heavy CUDA toolchain
+dependency. Q-Infer's serving binary never links it; it talks to the engine as a
+subprocess. That process boundary is what keeps our "zero runtime dependencies"
+rule intact — see `docs/design/adr/ADR-016-vendored-strata-backend.md`, and
+`docs/design/adr/ADR-008-*` for the dependency rule itself.
+
+Q-Infer's own code is MIT (c) 2026 crazymelo1005, which is compatible with the
+upstream terms above.
