@@ -78,6 +78,18 @@ bool run_qsa_layer_cuda(const artifact::GgufFile& gguf, const QsaLayer& layer, c
     const std::uint64_t idx_dim = layer.idx_dim;
     const bool reload = s.w_layer != layer.layer;
 
+    // Stage B: lazily reserve the device KV pool on first entry into this layer
+    // (geometry comes from the page cache; without a window n_pages is 0 and
+    // the device path stays off -> host path). Released by StepScratch.
+    if (s.dev_kv != nullptr && s.dev_pool == nullptr && s.kv.n_pages > 0) {
+        if (!s.dev_kv->reserve(s.dev_pool, s.kv.n_pages, s.kv.n_head_kv, s.kv.page_size,
+                               s.kv.head_dim, err)) {
+            err = "QSA layer " + std::to_string(layer.layer) + " device KV reserve: " + err;
+            return false;
+        }
+    }
+    const bool dev_kv = s.dev_kv != nullptr && s.dev_pool != nullptr;
+
     // 0. 一层一次：四个 norm 与索引器两个 BF16 投影读进来（按层号判）。
     if (reload) {
         if (!load_f32_1d(gguf, *layer.t_q_norm, s.q_norm_w, err) ||
@@ -139,6 +151,14 @@ bool run_qsa_layer_cuda(const artifact::GgufFile& gguf, const QsaLayer& layer, c
         return false;
     }
     if (!kv_append(s.kv, s.pos, KvCell{s.k_f16.data(), s.v_f16.data()}, err)) return false;
+    // Device KV (stage B): also write the cell into the device pool. The host
+    // store/window writes above stay for now (task 4 switches them off in the
+    // all-resident mode); the twin write is what keeps the two paths comparable.
+    if (dev_kv &&
+        !s.dev_kv->append(s.dev_pool, s.pos, KvCell{s.k_f16.data(), s.v_f16.data()}, err)) {
+        err = "QSA layer " + std::to_string(layer.layer) + " device KV append: " + err;
+        return false;
+    }
 
     // 4. 索引器：q/k 走 bf16 投影（设备）→ 主机 qsa_indexer_prep / indexer_key_append。
     s.idx_q_out.assign(static_cast<std::size_t>(layer.idx_q.rows), 0.0f);
@@ -184,21 +204,58 @@ bool run_qsa_layer_cuda(const artifact::GgufFile& gguf, const QsaLayer& layer, c
             gather_pages.push_back(pg);
         }
     }
-    s.k_scratch.assign(static_cast<std::size_t>(n_ids * layer.sh.n_head_kv * hd), 0);
-    s.v_scratch.assign(s.k_scratch.size(), 0);
-    if (!kv_gather(s.kv, s.ids.data(), n_ids, s.k_scratch.data(), s.v_scratch.data(), err)) return false;
+    s.attn.assign(static_cast<std::size_t>(layer.sh.n_head * hd), 0.0f);
+    if (dev_kv) {
+        // Stage B device path: gather into device scratch, attend on device
+        // buffers (no per-step k/v H2D), attn copied back for the projection.
+        const std::size_t kvb = static_cast<std::size_t>(n_ids * layer.sh.n_head_kv * hd) *
+                                sizeof(std::uint16_t);
+        const std::size_t qb = s.q_ready.size() * sizeof(float);
+        const std::size_t qfb = s.q_full.size() * sizeof(float);
+        const std::size_t ab = s.attn.size() * sizeof(float);
+        void* dk = nullptr;
+        void* dv = nullptr;
+        float* d_q = nullptr;
+        float* d_qf = nullptr;
+        float* d_attn = nullptr;
+        if (cudaMalloc(&dk, kvb) != cudaSuccess || cudaMalloc(&dv, kvb) != cudaSuccess ||
+            cudaMalloc(&d_q, qb) != cudaSuccess || cudaMalloc(&d_qf, qfb) != cudaSuccess ||
+            cudaMalloc(&d_attn, ab) != cudaSuccess) {
+            err = "QSA layer " + std::to_string(layer.layer) + " device KV scratch alloc failed";
+            return false;
+        }
+        bool ok = cudaMemcpy(d_q, s.q_ready.data(), qb, cudaMemcpyHostToDevice) == cudaSuccess &&
+                  cudaMemcpy(d_qf, s.q_full.data(), qfb, cudaMemcpyHostToDevice) == cudaSuccess &&
+                  s.dev_kv->gather(s.dev_pool, s.ids.data(), n_ids,
+                                   static_cast<std::uint16_t*>(dk),
+                                   static_cast<std::uint16_t*>(dv), err) &&
+                  qsa_attend_cuda_dev(d_q, d_qf, static_cast<const std::uint16_t*>(dk),
+                                      static_cast<const std::uint16_t*>(dv), n_ids, layer.sh,
+                                      d_attn, nullptr, nullptr, err) &&
+                  cudaMemcpy(s.attn.data(), d_attn, ab, cudaMemcpyDeviceToHost) == cudaSuccess;
+        cudaFree(dk);
+        cudaFree(dv);
+        cudaFree(d_q);
+        cudaFree(d_qf);
+        cudaFree(d_attn);
+        if (!ok) return false;
+    } else {
+        s.k_scratch.assign(static_cast<std::size_t>(n_ids * layer.sh.n_head_kv * hd), 0);
+        s.v_scratch.assign(s.k_scratch.size(), 0);
+        if (!kv_gather(s.kv, s.ids.data(), n_ids, s.k_scratch.data(), s.v_scratch.data(), err)) {
+            return false;
+        }
+        if (!qsa_attend_cuda(s.q_ready.data(), s.k_scratch.data(), s.v_scratch.data(), n_ids,
+                             layer.sh, s.q_full.data(), s.attn.data(), nullptr, nullptr, err)) {
+            return false;
+        }
+    }
     for (std::uint64_t pg : gather_pages) {
         if (!s.window->unpin(pg, err)) return false;
     }
 
-    // 6. softmax GQA → 乘门（设备）→ 输出投影（设备）。
-    s.attn.assign(static_cast<std::size_t>(layer.sh.n_head * hd), 0.0f);
-    if (!qsa_attend_cuda(s.q_ready.data(), s.k_scratch.data(), s.v_scratch.data(), n_ids, layer.sh,
-                         s.q_full.data(), s.attn.data(), nullptr, nullptr, err)) {
-        return false;
-    }
     s.gated.assign(s.attn.size(), 0.0f);
-    std::swap(s.attn, s.gated);  // qsa_attend_cuda 已含 gate；s.gated 现在就是过门后的 attn
+    std::swap(s.attn, s.gated);  // attend 已含 gate；s.gated 现在就是过门后的 attn
     if (!project_cuda(gguf, *layer.t_out, layer.out, s.gated.data(), s.w_out, reload, s.gemv, out,
                       err)) {
         return false;

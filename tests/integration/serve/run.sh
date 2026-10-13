@@ -633,7 +633,7 @@ stop
 #     --gpu the server starts as usual (pure-CPU path unchanged; the other cases in this script exercise it).
 timeout 8 "$SERVER" --model "$FIX" --host "$HOST" --port "$PORT" --n-embd 256 --hc 2 --hc-lr 3 \
           --layers 2 --top-k 2 --gdn-head-dim 32 --qsa-head-dim 32 --n-rot 4 --idx-dim 4 \
-          --idx-top-k 2048 --idx-block 4 --max-context 4096 --api-key testkey --gpu 0 \
+          --idx-top-k 2048 --idx-block 4 --max-context 4096 --api-key testkey --kv-slots 8 --gpu 0 \
           >/tmp/gpu-reject.log 2>&1 &
 BPID=$!
 up=0

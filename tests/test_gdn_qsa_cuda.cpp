@@ -429,6 +429,14 @@ int manual_qsa_layer_entry(const char* model, int layer) {
         std::printf("rope 表建失败：%s\n", err.c_str());
         return 1;
     }
+    // Stage B (device KV): the device scratch also gets the exec pointer, so
+    // append/gather/attend go through the device pool; host path unchanged.
+    qinfer::dense::KvDeviceExec kvex = qinfer::dense::kv_device_exec();
+    dev_s.dev_kv = &kvex;
+    if (dev_s.dev_kv->reserve == nullptr) {
+        std::printf("kv_device_exec 没填（CUDA 构建应填）\n");
+        return 1;
+    }
     std::vector<float> host_out(ql.q.cols), dev_out(ql.q.cols);
     for (int step = 0; step < 2; ++step) {  // 2 步：KV 与 idx 状态跨 token
         if (!qinfer::dense::run_qsa_layer(g, ql, x.data(), host_out.data(), host_s, err)) {
@@ -447,6 +455,12 @@ int manual_qsa_layer_entry(const char* model, int layer) {
         worst = std::max(worst, d / (mag > 1e-30 ? mag : 1e-30));
     }
     std::printf("  QSA 整层 2 步（KV/idx 状态跨 token）主机 vs 设备最差相对 L1 %.3e\n", worst);
+    // Manual entry owns the scratch directly (no StepScratch destructor): free
+    // the device pool here.
+    if (dev_s.dev_pool != nullptr) {
+        std::string rel_err;
+        kvex.release(dev_s.dev_pool, rel_err);
+    }
     return worst < 1e-4 ? 0 : 1;
 }
 

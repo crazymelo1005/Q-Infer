@@ -11,6 +11,7 @@ DenseExec dense_exec_cuda() {
     DenseExec e;
     e.run_gdn = &run_gdn_layer_cuda;
     e.run_qsa = &run_qsa_layer_cuda;
+    e.kv = kv_device_exec();
     return e;
 }
 

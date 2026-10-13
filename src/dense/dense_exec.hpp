@@ -8,6 +8,8 @@
 
 #include <string>
 
+#include "dense/kv_device_cache.hpp"
+
 namespace qinfer::artifact {
 class GgufFile;
 }
@@ -25,6 +27,9 @@ struct DenseExec {
                     std::string&) = nullptr;
     bool (*run_qsa)(const artifact::GgufFile&, const QsaLayer&, const float*, float*, QsaScratch&,
                     std::string&) = nullptr;
+    // Device KV operations (stage B): QSA layers read the pool through these
+    // entries when a run is active; empty on host builds.
+    KvDeviceExec kv{};
 };
 
 }  // namespace qinfer::dense

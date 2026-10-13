@@ -89,6 +89,29 @@ struct StepScratch {
     std::vector<float> embd;  // n_embd，`run_token_step` 读进来的那一行 token embedding
     bool ready = false;       // QSA 层的 KV 与 rope 是否已配好（未配则 run 明确报错）
 
+    // A user-declared destructor suppresses the implicit move operations;
+    // restore them so vectors of scratch can still move (BlockScratch is
+    // move-only via its unique_ptr members).
+    StepScratch() = default;
+    StepScratch(StepScratch&&) = default;
+    StepScratch& operator=(StepScratch&&) = default;
+    StepScratch(const StepScratch&) = delete;
+    StepScratch& operator=(const StepScratch&) = delete;
+
+    // Destructor: release per-layer device KV pools (stage B). With
+    // dev_kv/dev_pool both null (host build, or no --gpu run) this is a no-op.
+    // release errors are not propagated here — destructors cannot fail; a pool
+    // leak is bounded by process exit.
+    ~StepScratch() {
+        for (BlockScratch& b : blocks) {
+            if (b.qsa.dev_kv != nullptr && b.qsa.dev_pool != nullptr) {
+                std::string ignored;
+                b.qsa.dev_kv->release(b.qsa.dev_pool, ignored);
+                b.qsa.dev_pool = nullptr;
+            }
+        }
+    }
+
     // PLE 的会话侧状态（只在 `cfg.ple` 非空时有意义）：9 行历史 + 当前 token 的表行向量 + 两个前驱。
     PleState ple;
 

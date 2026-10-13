@@ -17,6 +17,7 @@
 
 #include "artifact/gguf_table.hpp"
 #include "dense/attn_phases.hpp"
+#include "dense/kv_device_cache.hpp"
 #include "dense/kv_page_cache.hpp"
 #include "dense/qsa_indexer.hpp"
 #include "dense/qsa_select.hpp"
@@ -74,6 +75,12 @@ struct QsaScratch {
     // KV 的权威副本（可空，与窗口一起由 attach_kv_window 挂上）。非空时**每个新 cell 都要写它一份**
     // （写槽位那条只在该页常驻时才写），于是槽位被驱逐再准入时能从副本把字节拿回来。见 dense/kv_store.hpp。
     KvHostStore* store = nullptr;
+    // Device KV (stage B): an optional exec + live pool. When both are non-null
+    // and the page-cache geometry is set, append/gather/attend run on the
+    // device (pool reserved lazily on first entry into this layer, released by
+    // StepScratch's destructor). Host builds keep both null -> host path.
+    const KvDeviceExec* dev_kv = nullptr;
+    KvDevicePool* dev_pool = nullptr;
     QsaIndexerState idx_state;
     std::vector<float> cos_tab, sin_tab;
     std::vector<float> q_norm_w, k_norm_w, idx_q_norm_w, idx_k_norm_w;
