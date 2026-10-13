@@ -186,9 +186,11 @@ KV 的设备侧同样走这条缝（阶段 B 落法）：`DenseExec.kv`（`KvDev
 
 能力表只是**必要**条件：能不能算还取决于角色——gate/up 与 down 的激活搭档不同（前者 Q8_K、后者 Q8_0）。角色不对时档掩码会放它进来，由工人自己的 init 挡住，再按 §8.5 改派给兜底组。
 
-### 8.8 引擎后端驱动（厂商化）
+### 8.8 引擎后端驱动与接缝
 
-计算后端可换成厂商化的 Strata 引擎（[ADR-016](adr/ADR-016-vendored-strata-backend.md)），以子进程形态接入：驱动层驱动它的 stdin/stdout 行协议，不共享地址空间，故引擎的 CUDA 依赖不进入本仓库的链接面（ADR-008）。驱动接口在 `src/engine`，只依赖标准库与 pthreads：`EngineProcess`（起进程、按行读写、`wait_timeout` / `kill`）与 `EngineDriver`（`start` 握手、`generate` 单请求、`acquire_slot` / `generate_batch` / `cancel_slot` 批槽位、`stop_and_recover` 重启）。词元以 id 过边界，反词元化留服务层。该库不并入 `qinfer_serve`；服务层如何选用它（`--backend strata|inhouse`）留 P2。
+计算后端可换成厂商化的 Strata 引擎（[ADR-016](adr/ADR-016-vendored-strata-backend.md)、[ADR-017](adr/ADR-017-serve-engine-seam.md)），以子进程形态接入：驱动层驱动它的 stdin/stdout 行协议，不共享地址空间，故引擎的 CUDA 依赖不进入本仓库的链接面（ADR-008）。驱动接口在 `src/engine`：`EngineProcess`（起进程、按行读写、`wait_timeout` / `kill`）与 `EngineDriver`（`start` 握手、`generate` 单请求、`acquire_slot` / `generate_batch` / `cancel_slot` 批槽位、`stop_and_recover` 重启）。
+
+服务层只依赖纯虚接口 `Backend`（`src/serve/facade.hpp`）：`generate`（已编码 id 进、逐 token 文本出）、`tokenizer` / `chat_template` / `model_name` / `config` 与三个 KV 统计。自研 `Engine` 与 `StrataBackend`（`src/serve/backend_strata.hpp`）各实现它；后者持 `EngineDriver` 与词表，负责 id→文本、stop 截断与中断映射，KV 统计恒 0（引擎自管）。`--backend inhouse|strata` 选择实现，默认 `inhouse`；`strata` 由 `--engine-exe` / `--engine-arg` 指向引擎与其参数。真机 A/B 判据见 ADR-017 后果。
 
 ## 9. 尚未定义
 

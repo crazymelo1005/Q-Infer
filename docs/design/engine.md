@@ -460,7 +460,7 @@ G-14 已经测得：四档 KV 的 decode 吞吐几乎相同（±2%），即该�
 - 入库与构建：`third_party/strata`（tag v0.1.43.1，MIT）冻结入库；`tools/build_engine.sh` 编出 `build-engine/strata`，只在构建目录的副本上做，不改入库源码。
 - 驱动层 `src/engine`：`engine_protocol` 造命令（`GEN` / `BGEN` / `BSTOP` / `STOP` / `QUIT` / `VRAM`）与解析事件行（`READY` / `INFO` / `T` / `PP` / `RESUME` / `DONE` / `BADM` / `BT` / `BDONE` / `ERR` / `FATAL` 等）；`engine_process` 起进程与按行 IO；`engine_driver` 负责握手（读至 `READY`，带超时）、单请求生成（回调回 `false` 即写 `STOP` 取消）、批槽位（`acquire_slot` / `generate_batch` / `cancel_slot`）与重启（`stop_and_recover`）。
 - 协议字面量以真实引擎转录为唯一口径：`tests/data/strata_transcript_gen.txt`（引擎 0.1.43.1）。`DONE` 为 15 字段；真机的批处理会先出一个单请求首词元再 `BADM`，与驱动的简化模型有差，见 ADR-016 后果。
-- 本阶段不接服务层：`qinfer_engine` 只依赖标准库与 pthreads，不并入 `qinfer_serve`，`src/serve` 不动；服务层接线与真机 A/B 是 P2。
+- 服务层接线（[ADR-017](adr/ADR-017-serve-engine-seam.md)）：`Serve` 只依赖纯虚接口 `Backend`（`src/serve/facade.hpp`）；`Engine` 与 `StrataBackend`（`src/serve/backend_strata.hpp`）各实现它。`--backend inhouse|strata` 选择实现，默认 `inhouse`；`strata` 下 main 只把同一个 GGUF 的元数据（词表/模板/显示名）读出来移入后端，权重由引擎自己带，引擎靠 `--engine-exe` / `--engine-arg` 起。`qinfer_engine` 起链进 `qinfer_serve`（只依赖标准库与 pthreads，ADR-008 不破）。真机 A/B 待跑，缺口与已知差异见 ADR-017 后果。
 
 ## 附录 A 数据交换优化清单
 
