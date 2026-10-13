@@ -9,6 +9,9 @@
 #include "dense/gdn_preprocess_cuda.hpp"
 #include "dense/gdn_recurrence.hpp"
 #include "dense/gdn_recurrence_cuda.hpp"
+#include "dense/qsa_qk_prep.hpp"
+#include "dense/qsa_qk_prep_cuda.hpp"
+#include "dense/rope.hpp"  // build_rope_table
 #include "experts/ffn.hpp"
 #include "kernels/bf16.hpp"
 #include "kernels/cuda/gdn_proj_gemv.hpp"
@@ -360,6 +363,56 @@ int manual_gdn_layer_entry(const char* model, int layer) {
     return worst < 1e-4 ? 0 : 1;
 }
 
+// ---- QSA 投影与 qk_prep 设备对照（Task 6）----
+// 合成几何：n_head 3、n_head_kv 2、head_dim 8、n_rot 4（部分 rope、非整头）、pos 可变。
+int test_qsa_qk_prep_cuda() {
+    constexpr std::uint64_t kNh = 3, kNhk = 2, kHd = 8, kNrot = 4;
+    std::vector<float> cos_tab, sin_tab;
+    std::string err;
+    if (!qinfer::dense::build_rope_table(kNrot, 1.0e7, 16, cos_tab, sin_tab, err)) {
+        std::printf("  rope 表建失败：%s\n", err.c_str());
+        return 1;
+    }
+    std::vector<float> q_norm(kHd), k_norm(kHd);
+    PrepLcg g;
+    for (float& t : q_norm) t = 0.5f + 0.2f * g.next();
+    for (float& t : k_norm) t = 0.5f + 0.2f * g.next();
+    qinfer::dense::QsaQkWeights w{q_norm.data(), k_norm.data(), 1e-6f};
+    std::vector<float> q_full(static_cast<std::size_t>(kNh * 2 * kHd)),
+        k_raw(static_cast<std::size_t>(kNhk * kHd));
+    for (float& t : q_full) t = g.next();
+    for (float& t : k_raw) t = g.next();
+    std::vector<float> hq(static_cast<std::size_t>(kNh * kHd)),
+        hk(static_cast<std::size_t>(kNhk * kHd)), hg(static_cast<std::size_t>(kNh * kHd));
+    std::vector<float> dq(hq.size()), dk(hk.size()), dg(hg.size());
+    double worst = 0.0;
+    for (std::uint64_t pos = 0; pos < 4; ++pos) {  // 4 个位置走 rope 表
+        CHECK(qinfer::dense::qsa_qk_prep(kNh, kNhk, kHd, kNrot, pos, q_full.data(), k_raw.data(),
+                                         w, cos_tab, sin_tab, hq.data(), hk.data(), hg.data(),
+                                         err));
+        CHECK(err.empty());
+        qinfer::dense::QsaQkPrepCudaScratch sc{nullptr, nullptr, 0};
+        CHECK(qinfer::dense::qsa_qk_prep_cuda(kNh, kNhk, kHd, kNrot, pos, q_full.data(),
+                                              k_raw.data(), w, cos_tab, sin_tab, dq.data(),
+                                              dk.data(), dg.data(), sc, nullptr, err));
+        CHECK(err.empty());
+        const std::vector<std::vector<float>*> pairs = {&hq, &dq, &hk, &dk, &hg, &dg};
+        for (std::size_t i = 0; i < pairs.size(); i += 2) {
+            const auto& a = *pairs[i];
+            const auto& b = *pairs[i + 1];
+            double d = 0.0, mag = 0.0;
+            for (std::size_t j = 0; j < a.size(); ++j) {
+                d += std::fabs(static_cast<double>(a[j]) - static_cast<double>(b[j]));
+                mag += std::fabs(static_cast<double>(a[j]));
+            }
+            worst = std::max(worst, d / (mag > 1e-30 ? mag : 1e-30));
+        }
+    }
+    std::printf("  QSA qk_prep 4 位置（拆头/归一/部分 NEOX rope）设备 vs 主机最差相对 L1 %.3e\n",
+                worst);
+    return worst < 1e-5 ? 0 : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -368,6 +421,7 @@ int main(int argc, char** argv) {
     rc += test_gdn_preprocess_cuda();
     rc += test_gdn_recurrence_cuda();
     rc += test_gdn_closing_cuda();
+    rc += test_qsa_qk_prep_cuda();
     // --model <GGUF> [--layer N]：真权重整层对照（环境2 用；无参数时合成用例已覆盖各段）。
     int layer = 1;
     for (int i = 1; i + 1 < argc; ++i) {
