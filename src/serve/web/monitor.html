@@ -1,24 +1,32 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Q-Infer · 请求检查</title>
 <link rel="stylesheet" href="/web/tokens.css">
+<link rel="stylesheet" href="/web/components.css">
+<link rel="stylesheet" href="/web/app.css">
+<script>
+  try {
+    var t = localStorage.getItem("qinfer.theme") ||
+      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
 </head>
 <body>
-<header class="topbar">
-  <div class="brand">
-    <span class="logo">Q-Infer</span>
-    <span class="model">请求检查 /api-monitor</span>
-  </div>
-  <div class="tab-bar" style="flex:1"></div>
+<header class="st-header topbar">
+  <span class="st-header__brand logo">Q-Infer <small>请求检查 /api-monitor</small></span>
+  <span class="st-header__spacer"></span>
   <div class="keybox">
     <label for="api-key">API 密钥</label>
     <input id="api-key" class="input key-input" type="password" autocomplete="off" placeholder="可选">
     <button id="btn-key-toggle" class="btn ghost" type="button">显示</button>
   </div>
   <a class="btn ghost" href="/">返回主面板</a>
+  <button class="st-btn st-btn--icon" id="btn-theme" type="button" title="浅色 / 深色" aria-label="切换浅色与深色主题">
+    <svg class="st-icon"><use id="theme-icon" href="/web/sprite.svg#i-moon"/></svg></button>
 </header>
 <main>
   <div class="req-layout" style="height:100%">
@@ -37,6 +45,7 @@
     <div id="req-detail" class="req-detail-pane"><div class="note">点左侧一条记录查看详情</div></div>
   </div>
 </main>
+<div class="st-toasts" id="toasts" aria-live="polite"></div>
 <script>window.__apiMonitorPage = true;</script>
 <script src="/web/app.js"></script>
 <script src="/web/monitor.js"></script>

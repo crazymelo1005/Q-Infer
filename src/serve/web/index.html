@@ -1,95 +1,131 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Q-Infer</title>
 <link rel="stylesheet" href="/web/tokens.css">
+<link rel="stylesheet" href="/web/components.css">
+<link rel="stylesheet" href="/web/app.css">
+<script>
+  // 首帧前确定主题：保存的选择优先，否则跟随系统。
+  try {
+    var t = localStorage.getItem("qinfer.theme") ||
+      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
 </head>
 <body>
-<header class="topbar">
-  <div class="brand">
-    <span class="logo">Q-Infer</span>
-    <span class="model" id="brand-model">&hellip;</span>
-  </div>
-  <nav class="tab-bar">
-    <button class="tab-btn active" data-tab="chat" type="button">Chat</button>
-    <button class="tab-btn" data-tab="monitor" type="button">Monitor</button>
-    <button class="tab-btn" data-tab="about" type="button">About</button>
+<header class="st-header topbar">
+  <span class="st-header__brand logo">Q-Infer <small>本地推理</small></span>
+  <nav class="st-tabs tab-bar" role="tablist" aria-label="视图">
+    <button class="st-tab tab-btn active" role="tab" data-tab="chat" type="button" aria-selected="true">
+      <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-chat"/></svg>Chat</button>
+    <button class="st-tab tab-btn" role="tab" data-tab="monitor" type="button" aria-selected="false">
+      <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-activity"/></svg>Monitor</button>
+    <button class="st-tab tab-btn" role="tab" data-tab="about" type="button" aria-selected="false">
+      <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-info"/></svg>About</button>
   </nav>
+  <span class="st-header__spacer"></span>
+  <span class="st-pill" id="pill" data-state="idle" role="status" aria-live="polite">
+    <span class="st-pill__dot"></span><span id="pill-text">连接中…</span></span>
   <div class="keybox">
     <label for="api-key">API 密钥</label>
     <input id="api-key" class="input key-input" type="password" autocomplete="off" placeholder="可选">
     <button id="btn-key-toggle" class="btn ghost" type="button">显示</button>
   </div>
+  <button class="st-btn st-btn--icon" id="btn-theme" type="button" title="浅色 / 深色" aria-label="切换浅色与深色主题">
+    <svg class="st-icon"><use id="theme-icon" href="/web/sprite.svg#i-moon"/></svg></button>
 </header>
+
 <main>
   <div id="banner" class="banner hidden"></div>
 
-  <section id="panel-chat" class="panel">
-    <div id="msg-list" class="msg-list">
-      <div class="note">向引擎提问吧。用右上角填入 API 密钥；采样器抽屉可调 temperature / top_p / seed。</div>
-    </div>
-    <div class="chat-foot">
-      <details class="drawer">
-        <summary>采样器</summary>
-        <div class="drawer-grid">
-          <div class="field">
-            <label for="s-temp">temperature</label>
-            <input id="s-temp" class="input" type="number" min="0" max="2" step="0.05" value="0.8">
-          </div>
-          <div class="field">
-            <label for="s-top-p">top_p</label>
-            <input id="s-top-p" class="input" type="number" min="0.05" max="1" step="0.05" value="0.95">
-          </div>
-          <div class="field">
-            <label for="s-seed">seed（-1 = 随机）</label>
-            <input id="s-seed" class="input" type="number" step="1" value="-1">
-          </div>
+  <!-- ============================ Chat ============================ -->
+  <section class="view panel" id="panel-chat" role="tabpanel">
+    <div class="chat-scroll">
+      <div class="chat" id="chat">
+        <div class="chat-empty" id="chat-empty">
+          <div class="chat-empty__title">向引擎提问吧</div>
+          <div class="chat-empty__sub">模型在本机运行，数据不出本机。右上角可填 API 密钥。</div>
         </div>
-      </details>
-      <div class="send-row">
-        <textarea id="chat-input" class="input chat-input" rows="2"
-                  placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
-        <div class="send-col">
-          <button id="btn-send" class="btn primary" type="button">发送</button>
-          <button id="btn-stop" class="btn danger hidden" type="button">停止</button>
-          <button id="btn-new" class="btn ghost" type="button">新会话</button>
-        </div>
+        <div id="msg-list" class="msg-list"></div>
       </div>
-      <div class="chat-status">
-        <span id="status-dot" class="status-dot"></span>
-        <span id="chat-state">连接中…</span>
+    </div>
+    <div class="composer-wrap">
+      <div class="chat-foot">
+        <details class="drawer">
+          <summary>
+            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-settings"/></svg>采样器</summary>
+          <div class="drawer-grid">
+            <div class="field">
+              <label for="s-temp">temperature</label>
+              <input id="s-temp" class="input" type="number" min="0" max="2" step="0.05" value="0.8">
+            </div>
+            <div class="field">
+              <label for="s-top-p">top_p</label>
+              <input id="s-top-p" class="input" type="number" min="0.05" max="1" step="0.05" value="0.95">
+            </div>
+            <div class="field">
+              <label for="s-seed">seed（-1 = 随机）</label>
+              <input id="s-seed" class="input" type="number" step="1" value="-1">
+            </div>
+          </div>
+        </details>
+        <form class="st-composer" id="composer">
+          <textarea id="chat-input" class="input chat-input" rows="2"
+                    placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+          <div class="st-composer__bar">
+            <button type="button" class="st-btn st-btn--icon" id="btn-new" title="新会话" aria-label="新会话">
+              <svg class="st-icon"><use href="/web/sprite.svg#i-new-chat"/></svg></button>
+            <button type="button" class="st-btn st-btn--icon" id="btn-export" title="导出为 Markdown" aria-label="导出为 Markdown">
+              <svg class="st-icon"><use href="/web/sprite.svg#i-download"/></svg></button>
+            <span class="spacer"></span>
+            <button type="button" class="st-btn st-btn--secondary" id="btn-stop" hidden>
+              <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-stop"/></svg>停止</button>
+            <button type="submit" class="st-btn st-btn--primary st-btn--send" id="btn-send" aria-label="发送">
+              <svg class="st-icon"><use href="/web/sprite.svg#i-send"/></svg></button>
+          </div>
+        </form>
+        <div class="chat-status">
+          <span id="status-dot" class="status-dot"></span>
+          <span id="chat-state">连接中…</span>
+        </div>
       </div>
     </div>
   </section>
 
-  <section id="panel-monitor" class="panel hidden">
-    <div class="monitor-grid" id="cards">
-      <div class="card"><div class="card-title">模型状态</div><div class="card-value" id="card-state">&ndash;</div><div class="card-sub" id="card-state-sub"></div></div>
-      <div class="card"><div class="card-title">请求保留</div><div class="card-value" id="card-kept">&ndash;</div><div class="card-sub">条（/api/requests）</div></div>
-      <div class="card"><div class="card-title">最近 wall-clock</div><div class="card-value" id="card-wall">&ndash;</div><div class="card-sub" id="card-wall-sub"></div></div>
-      <div class="card"><div class="card-title">最近解码速度</div><div class="card-value" id="card-tok">&ndash;</div><div class="card-sub" id="card-tok-sub"></div></div>
-    </div>
-    <div class="spark-grid" id="spark-grid"></div>
-    <div class="req-layout">
-      <div class="req-list-pane">
-        <div class="req-toolbar">
-          <input id="req-search" class="input" type="search" placeholder="搜索路径 / 模型 / 状态">
-          <select id="req-filter" class="input" title="状态过滤">
-            <option value="">全部状态</option>
-            <option value="queued">queued</option>
-            <option value="completed">completed</option>
-            <option value="error">error</option>
-          </select>
-        </div>
-        <div id="req-list" class="req-list"><div class="note">暂无请求记录</div></div>
+  <!-- ============================ Monitor ============================ -->
+  <section class="view panel hidden" id="panel-monitor" role="tabpanel">
+    <div class="monitor">
+      <div class="monitor-grid" id="cards">
+        <div class="card"><div class="card-title">模型状态</div><div class="card-value" id="card-state">&ndash;</div><div class="card-sub" id="card-state-sub"></div></div>
+        <div class="card"><div class="card-title">请求保留</div><div class="card-value" id="card-kept">&ndash;</div><div class="card-sub">条（/api/requests）</div></div>
+        <div class="card"><div class="card-title">最近 wall-clock</div><div class="card-value" id="card-wall">&ndash;</div><div class="card-sub" id="card-wall-sub"></div></div>
+        <div class="card"><div class="card-title">最近解码速度</div><div class="card-value" id="card-tok">&ndash;</div><div class="card-sub" id="card-tok-sub"></div></div>
       </div>
-      <div id="req-detail" class="req-detail-pane"><div class="note">点左侧一条记录查看详情</div></div>
+      <div class="spark-grid" id="spark-grid"></div>
+      <div class="req-layout">
+        <div class="req-list-pane">
+          <div class="req-toolbar">
+            <input id="req-search" class="input" type="search" placeholder="搜索路径 / 模型 / 状态">
+            <select id="req-filter" class="input" title="状态过滤">
+              <option value="">全部状态</option>
+              <option value="queued">queued</option>
+              <option value="completed">completed</option>
+              <option value="error">error</option>
+            </select>
+          </div>
+          <div id="req-list" class="req-list"><div class="note">暂无请求记录</div></div>
+        </div>
+        <div id="req-detail" class="req-detail-pane"><div class="note">点左侧一条记录查看详情</div></div>
+      </div>
     </div>
   </section>
 
-  <section id="panel-about" class="panel hidden">
+  <!-- ============================ About ============================ -->
+  <section class="view panel hidden" id="panel-about" role="tabpanel">
     <div class="about-body">
       <div class="card">
         <div class="card-title">模型与引擎</div>
@@ -110,6 +146,9 @@
     </div>
   </section>
 </main>
+
+<div class="scrim" id="scrim" hidden></div>
+<div class="st-toasts" id="toasts" aria-live="polite"></div>
 <script src="/web/app.js"></script>
 </body>
 </html>

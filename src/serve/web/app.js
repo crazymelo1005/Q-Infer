@@ -3,7 +3,8 @@
    index.html   : 三 tab 入口 + Chat 面板（本文件）。
    monitor.html : 请求检查页——复用本文件定义的公共函数，首行前置
                   <script>window.__apiMonitorPage = true;</script> 跳过三 tab 入口。
-   所有 API 调用统一走 api()：自动带 Authorization: Bearer <sessionStorage 密钥>。 */
+   所有 API 调用统一走 api()：自动带 Authorization: Bearer <sessionStorage 密钥>。
+   主题切换（浅/深）记 localStorage qinfer.theme，首帧锁在 index.html 内联脚本。 */
 
 function $(id) { return document.getElementById(id); }
 
@@ -46,10 +47,55 @@ function setStatusDot(ok) {
   d.classList.toggle("bad", !ok);
 }
 
+/* ---- 顶栏状态 pill：data-state 驱动 dot 颜色（idle/generating/reading/queued/error） ---- */
+function setPill(state, text) {
+  const pill = $("pill");
+  if (!pill) return;
+  pill.dataset.state = state === "generating" || state === "loading" ? "generating"
+    : state === "reading" ? "reading"
+    : state === "queued" ? "queued"
+    : state === "error" ? "error"
+    : "idle";
+  const t = $("pill-text");
+  if (t && text) t.textContent = text;
+}
+
+/* ---- toast 通知 ---- */
+function showToast(title, kind, msg) {
+  const box = $("toasts");
+  if (!box) return;
+  const el = document.createElement("div");
+  el.className = "st-toast st-toast--" + (kind || "info");
+  const icon = kind === "success" ? "i-check" : kind === "error" ? "i-error" : kind === "warn" ? "i-warning" : "i-info";
+  el.innerHTML =
+    '<svg class="st-icon"><use href="/web/sprite.svg#' + icon + '"/></svg>' +
+    '<div><div class="st-toast__title">' + esc(title) + "</div>" +
+    (msg ? '<div class="small">' + esc(msg) + "</div>" : "") + "</div>";
+  box.appendChild(el);
+  window.setTimeout(function () { el.remove(); }, 5000);
+}
+
+/* ---- 主题切换：localStorage qinfer.theme + html[data-theme] ---- */
+function currentTheme() { return document.documentElement.dataset.theme === "dark" ? "dark" : "light"; }
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem("qinfer.theme", t); } catch (e) {}
+  const ic = $("theme-icon");
+  if (ic) ic.setAttribute("href", "/web/sprite.svg#" + (t === "dark" ? "i-sun" : "i-moon"));
+  const tg = $("dark-toggle");
+  if (tg) tg.setAttribute("aria-checked", String(t === "dark"));
+}
+function toggleTheme() {
+  setTheme(currentTheme() === "dark" ? "light" : "dark");
+  showToast(currentTheme() === "dark" ? "深色主题" : "浅色主题", "info");
+}
+
 /* ---- tab 切换 ---- */
 function switchTab(name) {
   document.querySelectorAll(".tab-btn").forEach(function (b) {
-    b.classList.toggle("active", b.dataset.tab === name);
+    const on = b.dataset.tab === name;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", String(on));
   });
   document.querySelectorAll(".panel").forEach(function (p) {
     p.classList.toggle("hidden", p.id !== "panel-" + name);
@@ -135,11 +181,16 @@ async function loadProps() {
       if (p.top_p !== undefined) $("s-top-p").value = p.top_p;
       if (p.seed !== undefined) $("s-seed").value = p.seed;
     }
-    if (d.model_alias) $("brand-model").textContent = d.model_alias;
   } catch (e) { /* 默认值兜底 */ }
 }
 
+function hideEmptyPrompt() {
+  const e = $("chat-empty");
+  if (e) e.style.display = "none";
+}
+
 function addMsg(role, text) {
+  hideEmptyPrompt();
   const el = document.createElement("div");
   el.className = "bubble " + role;
   const label = document.createElement("div");
@@ -189,6 +240,7 @@ async function sendChat() {
   };
   const out = addMsg("assistant", "");
   setStreaming(true);
+  setPill("generating", "生成中…");
   abortCtrl = new AbortController();
   try {
     const res = await api("/v1/chat/completions", {
@@ -206,12 +258,14 @@ async function sendChat() {
       out.textContent = msg;
       out.parentElement.className = "bubble error";
       if (res.status === 401) showBanner("API 密钥无效或未设置", "err");
+      setPill("error", "请求失败");
       return;
     }
     await readSSE(res, function (ev) {
       if (ev.error) {
         out.textContent = ev.error.message || "生成失败";
         out.parentElement.className = "bubble error";
+        setPill("error", "生成失败");
       } else if (ev.choices && ev.choices[0]) {
         const d = ev.choices[0].delta || {};
         if (typeof d.content === "string") out.textContent += d.content;
@@ -221,13 +275,16 @@ async function sendChat() {
   } catch (e) {
     if (e.name === "AbortError") {
       out.textContent += "（已停止）";
+      setPill("idle", "已停止");
     } else {
       out.textContent = "请求失败：" + e.message;
       out.parentElement.className = "bubble error";
+      setPill("error", "请求失败");
     }
   } finally {
     setStreaming(false);
     abortCtrl = null;
+    setPill("idle", "空闲");
   }
 }
 
@@ -238,10 +295,28 @@ function stopChat() {
 function newChat() {
   if (streaming) return;
   $("msg-list").innerHTML = "";
-  const note = document.createElement("div");
-  note.className = "note";
-  note.textContent = "新会话已开始。";
-  $("msg-list").appendChild(note);
+  const e = $("chat-empty");
+  if (e) e.style.display = "";
+  setPill("idle", "新会话");
+  showToast("新会话已开始", "info");
+}
+
+/* ---- 导出对话为 Markdown ---- */
+function exportChat() {
+  const rows = [];
+  document.querySelectorAll("#msg-list .bubble").forEach(function (b) {
+    const role = b.classList.contains("user") ? "你" : "助手";
+    const txt = b.querySelector(".bubble-body").textContent;
+    rows.push("### " + role + "\n\n" + txt + "\n");
+  });
+  if (!rows.length) { showToast("没有可导出的对话", "warn"); return; }
+  const blob = new Blob([rows.join("\n")], { type: "text/markdown;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "qinfer-chat.md";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast("已导出 qinfer-chat.md", "success");
 }
 
 /* ---- 每秒轮询 /metrics：状态行与状态点 ---- */
@@ -262,13 +337,15 @@ async function pollMetrics() {
     const tok = fmtRate(l.tok_s);
     $("chat-state").textContent = "状态 " + state + " · 排队 " + queued + " · " + tok + " tok/s";
     setStatusDot(true);
+    if (state !== "idle" && state !== "?") setPill(state, "状态 " + state + " · " + tok + " tok/s");
   } catch (e) {
     setStatusDot(false);
     $("chat-state").textContent = "服务不可达，正在重试…";
+    setPill("error", "服务不可达");
   }
 }
 
-/* ---- 公共初始化：Key 与 tab（index / monitor 两页通用） ---- */
+/* ---- 公共初始化：Key、主题与 tab（index / monitor 两页通用） ---- */
 function initCommon() {
   document.querySelectorAll(".tab-btn").forEach(function (b) {
     b.addEventListener("click", function () { switchTab(b.dataset.tab); });
@@ -285,6 +362,11 @@ function initCommon() {
       keyInput.type = show ? "text" : "password";
       kt.textContent = show ? "隐藏" : "显示";
     });
+  }
+  const th = $("btn-theme");
+  if (th) {
+    setTheme(currentTheme());   // 同步图标
+    th.addEventListener("click", toggleTheme);
   }
 }
 
@@ -437,7 +519,7 @@ window.QinferRequests = {
       if (p !== null) { any++; if (p < min) min = p; if (p > max) max = p; }
     });
     if (!any || max === min) return;
-    const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2b6cb0";
+    const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#10b981";
     ctx.strokeStyle = accent;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -462,6 +544,9 @@ function initChat() {
   $("btn-send").addEventListener("click", sendChat);
   $("btn-stop").addEventListener("click", stopChat);
   $("btn-new").addEventListener("click", newChat);
+  $("btn-export").addEventListener("click", exportChat);
+  const composer = $("composer");
+  if (composer) composer.addEventListener("submit", function (e) { e.preventDefault(); sendChat(); });
   $("chat-input").addEventListener("keydown", function (e) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();

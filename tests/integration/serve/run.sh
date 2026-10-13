@@ -535,6 +535,18 @@ print("stream-tools-ok")' | grep -q stream-tools-ok \
   && ok "24 OpenAI 流式带 tools（角色首帧 + 拼文非空 + [DONE]）" \
   || bad "24 流式带 tools"
 
+# 25. 前端三：Strata 风格静态资源可达（components/sprite/fonts），/ 带新壳标记（st-header/
+#     st-pill/主题钮），既有 15/16 的兼容 id 保留不破。
+for p in web/components.css web/app.css web/sprite.svg web/fonts/outfit-latin-wght.woff2; do
+  code=$(curl -s -o /dev/null -w '%{http_code}' "http://$HOST:$PORT/$p")
+  [ "$code" = 200 ] || bad "25 /$p 应 200，得 $code"
+done
+curl -s "http://$HOST:$PORT/" > "$R"
+grep -q 'st-header' "$R" && grep -q 'st-pill' "$R" && grep -q 'btn-theme' "$R" \
+  && grep -q 'id="panel-chat"' "$R" && grep -q 'id="card-state"' "$R" \
+  && ok "25 Strata 资源 + 新壳（st-header/st-pill/btn-theme，兼容点保留）" \
+  || bad "25 新壳标记：$(head -c 200 "$R")"
+
 stop
 
 # ---- 503：--reject-after 1 → 第 1 个请求正常，之后一律队列满 ----
