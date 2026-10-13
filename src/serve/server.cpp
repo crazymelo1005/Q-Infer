@@ -127,6 +127,14 @@ std::string read_file(const std::string& path) {
     return s.str();
 }
 
+// vector<Json> → Json 数组（render_chat 的 tools 实参形状；空数组与 nullptr 语义等价，
+// 调用处统一用 tools.empty() 判——缺省不注入，模板 tools 分支不进入）。
+Json tools_array(const std::vector<Json>& tools) {
+    Json a = Json::arrv();
+    for (const Json& t : tools) a.push(t);
+    return a;
+}
+
 // 把停等协议滚一遍（worker 侧语义见 worker_main）：读 kToken 攒文本，kDone/kError 收尾。
 // HTTP 线程专用（阻塞 pop）。返回 false = 出错（err 给出消息）。
 bool drain_nonstream(const std::shared_ptr<Job>& job, std::string& text, std::string& err) {
@@ -141,9 +149,12 @@ bool drain_nonstream(const std::shared_ptr<Job>& job, std::string& text, std::st
     }
 }
 
-// 消息列表组装（Anthropic 域）：system + messages（只收 user/assistant；content 收字符串或文本块
-// 数组，出现图像块等一律拒绝）→ 与 OpenAI 域同一套 Message 列表交给 render_chat。产出与 OpenAI 域
-// 同源的 prompt——两个兼容域对同一请求出同一 token 序列（M1.3 硬指标）就靠这条单一渲染路径。
+// 消息列表组装（Anthropic 域）：system + messages（收 user/assistant/tool；content 收字符串或
+// 块数组——text 块拼接、thinking 块跳过、tool_use 块→调用、tool_result 块→内联 tool 消息；
+// 出现图像块等一律拒绝）→ 与 OpenAI 域同一套 Message 列表交给 render_chat。两个兼容域对同一
+// 请求出同一 token 序列（M1.3 硬指标）就靠这条单一渲染路径。工具调用语义对拍 Strata
+// anthropic_to_messages：tool_use 的 input 经 tool_arguments 转成模板参数形状（坏 JSON 拒绝干净
+// 而非难为整段对话，#510）、tool_result 拆成逐条 {"role":"tool"}。
 bool messages_to_conversation(const Json& body, std::vector<Message>& conv, std::string& err) {
     const Json* sys = body.find("system");
     if (sys != nullptr) {
@@ -155,33 +166,79 @@ bool messages_to_conversation(const Json& body, std::vector<Message>& conv, std:
     for (const Json& m : msgs->arr) {
         if (!m.is_obj()) { err = "messages 元素不是对象"; return false; }
         const Json* role = m.find("role");
-        const Json* content = m.find("content");
-        if (role == nullptr || !role->is_str() ||
-            (role->str != "user" && role->str != "assistant")) {
-            err = "role 只收 user/assistant";
+        if (role == nullptr || !role->is_str()) { err = "缺 role 字符串"; return false; }
+        const std::string& r = role->str;
+        if (r != "user" && r != "assistant" && r != "tool") {
+            err = "role 只收 user/assistant/tool";
             return false;
         }
-        std::string text;
+        const Json* content = m.find("content");
         if (content == nullptr) { err = "缺 content"; return false; }
+        std::string text;
+        std::vector<Json> calls;   // assistant 消息里的 tool_use 块（模板形状，见 prompt.hpp）
         if (content->is_str()) {
             text = content->str;
         } else if (content->is_arr()) {
             for (const Json& blk : content->arr) {
-                if (!blk.is_obj() || !blk.find("type") || !blk.find("type")->is_str() ||
-                    blk.find("type")->str != "text") {
-                    err = "content 块只收 {type: text}（图像等多模态 M2）";
+                if (!blk.is_obj()) { err = "content 块不是对象"; return false; }
+                const Json* ty = blk.find("type");
+                if (ty == nullptr || !ty->is_str()) { err = "content 块缺 type"; return false; }
+                if (ty->str == "text") {
+                    const Json* t = blk.find("text");
+                    if (t == nullptr || !t->is_str()) { err = "文本块缺 text"; return false; }
+                    text += t->str;
+                } else if (ty->str == "thinking") {
+                    // 思考块跳过（不入模板；reasoning_content 的交接 M2 一并做）
+                } else if (ty->str == "tool_use") {
+                    if (r != "assistant") { err = "tool_use 块只出现在 assistant 消息"; return false; }
+                    const Json* name = blk.find("name");
+                    if (name == nullptr || !name->is_str()) { err = "tool_use 块缺 name"; return false; }
+                    Json fn = Json::objv();
+                    fn.set("name", Json::strv(name->str));
+                    // input 缺省/坏 JSON → tool_arguments 兜成 {} 或 {"arguments": 原文}（#510）
+                    fn.set("arguments", tool_arguments(blk.find("input")));
+                    Json call = Json::objv();
+                    call.set("function", std::move(fn));
+                    calls.push_back(std::move(call));
+                } else if (ty->str == "tool_result") {
+                    if (r != "user") { err = "tool_result 块只出现在 user 消息"; return false; }
+                    std::string rt;
+                    const Json* rc = blk.find("content");
+                    if (rc == nullptr) { err = "tool_result 块缺 content"; return false; }
+                    if (rc->is_str()) {
+                        rt = rc->str;
+                    } else if (rc->is_arr()) {
+                        for (const Json& rb : rc->arr) {
+                            if (!rb.is_obj()) { err = "tool_result content 块不是对象"; return false; }
+                            const Json* rty = rb.find("type");
+                            if (rty == nullptr || !rty->is_str() || rty->str != "text") {
+                                err = "tool_result 内容只收文本块（图像等多模态 M2）";
+                                return false;
+                            }
+                            const Json* t = rb.find("text");
+                            if (t == nullptr || !t->is_str()) { err = "tool_result 文本块缺 text"; return false; }
+                            rt += t->str;
+                        }
+                    } else {
+                        err = "tool_result content 必须是字符串或块数组";
+                        return false;
+                    }
+                    // 内联 tool 消息（逐条紧跟，Strata anthropic_to_messages 同款）：
+                    // 渲染时模板按 role=tool 出 <tool_response>；空结果按统一空过滤跳过。
+                    if (rt.empty()) continue;
+                    conv.emplace_back(Message{"tool", std::move(rt)});
+                } else {
+                    err = "content 块只收 text/thinking/tool_use/tool_result（图像等多模态 M2）";
                     return false;
                 }
-                const Json* t = blk.find("text");
-                if (t == nullptr || !t->is_str()) { err = "文本块缺 text"; return false; }
-                text += t->str;
             }
         } else {
             err = "content 必须是字符串或块数组";
             return false;
         }
-        if (text.empty()) continue;
-        conv.emplace_back(Message{role->str, text});
+        // 统一空过滤：文本与调用都空才整条跳过（与 OpenAI 域同款）。
+        if (text.empty() && calls.empty()) continue;
+        conv.emplace_back(Message{r, std::move(text), std::move(calls)});
     }
     return true;
 }
@@ -301,20 +358,68 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
         send_json(res, 400, openai_err("缺少 messages 数组", "invalid_request_error", "messages"));
         return;
     }
-    // messages → [{role, content}]；content 只收字符串（规格 §1 范围外无多模态）。
-    // 收集类型用实仓 prompt.hpp 的 Message（render_chat 的签名以实仓为准，见裁定①）。
+    // messages → Message 列表（OpenAI 域）：role 收 system/user/assistant/tool（developer 并入
+    // system）；content 收 null/字符串/文本块数组（图像等多模态 M2 再开）；assistant 的
+    // tool_calls 历史经 parse_openai_tool_calls 归一成模板形状。语义对拍 Strata
+    // openai_to_messages：只滤文本与调用都空的消息（assistant 的 tool_calls 消息 content 可空）。
     std::vector<Message> conv;
     for (const Json& m : msgs->arr) {
         if (!m.is_obj()) { send_json(res, 400, openai_err("messages 元素不是对象", "invalid_request_error", "messages")); return; }
         const Json* role = m.find("role");
-        const Json* content = m.find("content");
-        if (role == nullptr || !role->is_str() || content == nullptr || !content->is_str()) {
-            send_json(res, 400, openai_err("每条消息需要字符串 role 与 content", "invalid_request_error", "messages"));
+        if (role == nullptr || !role->is_str()) {
+            send_json(res, 400, openai_err("每条消息需要字符串 role", "invalid_request_error", "messages"));
             return;
         }
-        // content 为空的消息（tool 占位）过滤掉，模板器不管
-        if (content->str.empty()) continue;
-        conv.emplace_back(Message{role->str, content->str});
+        const std::string r = role->str == "developer" ? "system" : role->str;
+        if (r != "system" && r != "user" && r != "assistant" && r != "tool") {
+            send_json(res, 400, openai_err("role 只收 system/user/assistant/tool", "invalid_request_error", "messages"));
+            return;
+        }
+        std::string text;
+        const Json* content = m.find("content");
+        if (content != nullptr && !content->is_null()) {
+            if (content->is_str()) {
+                text = content->str;
+            } else if (content->is_arr()) {
+                for (const Json& blk : content->arr) {
+                    if (!blk.is_obj() || !blk.find("type") || !blk.find("type")->is_str() ||
+                        blk.find("type")->str != "text") {
+                        send_json(res, 400, openai_err("content 块只收 {type: text}（图像等多模态 M2）", "invalid_request_error", "messages"));
+                        return;
+                    }
+                    const Json* t = blk.find("text");
+                    if (t == nullptr || !t->is_str()) {
+                        send_json(res, 400, openai_err("文本块缺 text", "invalid_request_error", "messages"));
+                        return;
+                    }
+                    text += t->str;
+                }
+            } else {
+                send_json(res, 400, openai_err("content 必须是字符串或块数组", "invalid_request_error", "messages"));
+                return;
+            }
+        }
+        std::vector<Json> calls;
+        const Json* tcs = m.find("tool_calls");
+        if (tcs != nullptr) {
+            std::string cerr;
+            if (!parse_openai_tool_calls(*tcs, calls, cerr)) {
+                send_json(res, 400, openai_err("tool_calls 解析失败：" + cerr, "invalid_request_error", "tool_calls"));
+                return;
+            }
+        }
+        if (text.empty() && calls.empty()) continue;   // 空消息（tool 占位等）过滤，模板器不管
+        conv.emplace_back(Message{r, std::move(text), std::move(calls)});
+    }
+    // tools → 内部工具形状（normalize_tools 的 OpenAI 解包）；坏了 400（错误要先于入队）。
+    std::vector<Json> tools;
+    const Json* tv = body.find("tools");
+    if (tv != nullptr) {
+        std::string terr;
+        if (!normalize_tools(*tv, /*anthropic=*/false, tools, terr)) {
+            send_json(res, 400, openai_err("tools 解析失败：" + terr, "invalid_request_error", "tools"));
+            return;
+        }
     }
     // 裁定⑤：空 prompt 拒绝——所有消息过滤后仍无可渲染内容 → 400。
     if (conv.empty()) {
@@ -343,7 +448,9 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
     // T10：stream 由路由层从 body 读入并传入；此处不再读 body，只按参数分派（SSE 走 serve_sse）。
     std::string prompt;
     std::string rerr;
-    if (!render_chat(eng_->chat_template(), conv, /*add_generation_prompt=*/true, prompt, rerr)) {
+    Json tj = tools_array(tools);
+    if (!render_chat(eng_->chat_template(), conv, /*add_generation_prompt=*/true, prompt, rerr,
+                     tools.empty() ? nullptr : &tj)) {
         // 模板器是裁剪子集（规格 §11 兜底）：不静默错译，明确 500 并说明。
         send_json(res, 500, openai_err("chat 模板不支持的结构：" + rerr, "server_error", nullptr));
         return;
@@ -365,7 +472,7 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
             const Json* iu = so->find("include_usage");
             if (iu != nullptr && iu->kind == Json::kBool) include_usage = iu->b;
         }
-        serve_sse(job, include_usage, res);
+        serve_sse(job, include_usage, tools, res);
         return;
     }
     std::string text, drain_err;
@@ -378,18 +485,38 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
         record_request(job, st, job->events->cancelled());
         return;
     }
+    // 生成文本拆事件：<tool_call> 块 → 调用；坏标记并回文本（split_generation 语义）。调用与
+    // 文本保持生成顺序（Strata OutputParser 同款）；content 全空时置 null（OpenAI 惯例）。
+    std::vector<GenEvent> events;
+    split_generation(text, tools, events);
     Json r = Json::objv();
     r.set("id", Json::strv("chatcmpl-" + std::to_string(job->id)));
     r.set("object", Json::strv("chat.completion"));
     r.set("created", Json::numv(static_cast<double>(std::time(nullptr))));
     r.set("model", Json::strv(job->model));
-    Json choice = Json::objv();
     Json message = Json::objv();
     message.set("role", Json::strv("assistant"));
-    message.set("content", Json::strv(text));
+    std::string content_str;
+    Json calls = Json::arrv();
+    int call_idx = 0;
+    for (const GenEvent& ev : events) {
+        if (ev.call) {
+            calls.push(openai_tool_call("call_" + std::to_string(job->id) + "_" + std::to_string(call_idx),
+                                        ev.call->name, ev.call->arguments));
+            ++call_idx;
+        } else {
+            content_str += ev.text;
+        }
+    }
+    message.set("content", content_str.empty() ? Json::nullv() : Json::strv(content_str));
+    const bool used_tool = call_idx > 0;
+    if (used_tool) message.set("tool_calls", std::move(calls));
+    Json choice = Json::objv();
     choice.set("index", Json::numv(0.0));
     choice.set("message", std::move(message));
-    choice.set("finish_reason", Json::strv(job->finish));
+    // finish_reason：有调用且自然停 → tool_calls（Strata openai_chunks 口径）。
+    choice.set("finish_reason", Json::strv(
+        used_tool && job->finish == "stop" ? "tool_calls" : job->finish));
     Json choices = Json::arrv();
     choices.push(std::move(choice));
     r.set("choices", std::move(choices));
@@ -402,165 +529,367 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
     record_request(job, 200, false);
 }
 
-// OpenAI 兼容 SSE。provider 由 httplib 在 handler 返回后反复调用；每次调用恰好消费一个
-// 事件并写一帧（多帧合并写进同一次 sink.write）。连接断开（write 假）→ cancel → 返回假收尾。
-void Serve::serve_sse(const std::shared_ptr<Job>& job, bool include_usage, httplib::Response& res) {
+// OpenAI 兼容 SSE。provider 由 httplib 在 handler 返回后反复调用；每次调用恰好写一帧，事件
+// 可展开成多帧（首帧 role、文本增量、工具调用块、终帧/usage/[DONE]），帧在事件消费时整批攒入
+// pending 逐次回落。生成文本经 ToolCallStreamer 增量切分——半个 <tool_call> 跨增量留缓冲等齐，
+// 坏块（解析失败）按文本放行。帧形状对拍 Strata openai_chunks：首帧 {delta:{role,content:""}}、
+// 工具调用整块一帧 {delta:{tool_calls:[{index,id,type,function}]}}、终帧 finish_reason（有调用
+// 且自然停 → tool_calls）。连接断开（write 假）→ cancel → 499 记账 → 返回假收尾。
+void Serve::serve_sse(const std::shared_ptr<Job>& job, bool include_usage,
+                      const std::vector<Json>& tools, httplib::Response& res) {
     const std::string id = "chatcmpl-" + std::to_string(job->id);
     const double created = static_cast<double>(std::time(nullptr));
     const std::string model = eng_->model_name();
-    const auto first = std::make_shared<bool>(true);
-    auto provider = [this, job, include_usage, id, created, model, first](
-                        size_t, httplib::DataSink& sink) -> bool {
-        JobEvent e;
-        const bool got = job->events->pop(e);
-        if (!got) { record_request(job, 499, job->events->cancelled()); return false; }
+    struct State {
+        ToolCallStreamer st;
+        // 工具定义按值随 State 留在堆上：provider 的生命周期长于 handler（httplib 在路由函数
+        // 返回后才反复调 chunk provider），引用实参会悬垂。
+        std::vector<Json> tools;
+        std::vector<std::string> pending;   // 待写帧（front 弹出）
+        bool first = true;                  // 首帧 role chunk 未写
+        int calls = 0;                      // 已发出的工具调用块数（finish_reason 判据 + 块 index）
+        bool done = false;                  // kDone/kError 已消费
+        int final_status = 200;
+        bool recorded = false;
+    };
+    auto state = std::make_shared<State>();
+    state->tools = tools;
+    auto provider = [this, job, include_usage, id, created, model, state](
+                        std::size_t, httplib::DataSink& sink) -> bool {
         const auto w = [&](const std::string& s) {
             // 实仓 DataSink::write 是 std::function<bool(const char*, size_t)>（两参调用，见 httplib.h:538）。
-            if (!sink.write(s.data(), s.size())) { job->events->cancel(); record_request(job, 499, true); return false; }
+            if (!sink.write(s.data(), s.size())) {
+                job->events->cancel();
+                if (!state->recorded) { record_request(job, 499, true); state->recorded = true; }
+                return false;
+            }
             return true;
         };
-        Json chunk = Json::objv();
-        chunk.set("id", Json::strv(id));
-        chunk.set("object", Json::strv("chat.completion.chunk"));
-        chunk.set("created", Json::numv(created));
-        chunk.set("model", Json::strv(model));
-        Json choice = Json::objv();
-        Json delta = Json::objv();
-        if (e.kind == EventKind::kToken) {
-            Json c = Json::arrv();
+        const auto chunk = [&](Json delta) {
+            Json c = Json::objv();
+            c.set("id", Json::strv(id));
+            c.set("object", Json::strv("chat.completion.chunk"));
+            c.set("created", Json::numv(created));
+            c.set("model", Json::strv(model));
+            Json choice = Json::objv();
             choice.set("index", Json::numv(0.0));
-            if (*first) { delta.set("role", Json::strv("assistant")); *first = false; }
-            if (!e.text.empty()) delta.set("content", Json::strv(e.text));
             choice.set("delta", std::move(delta));
             choice.set("finish_reason", Json::nullv());
-            c.push(std::move(choice));
-            chunk.set("choices", std::move(c));
-            return w("data: " + json_dump(chunk) + "\n\n");
-        }
-        // 收尾帧：finish_reason；需 usage 时先补一条 usage 帧，再 [DONE]。
-        Json c = Json::arrv();
-        if (e.kind == EventKind::kDone) {
-            choice.set("index", Json::numv(0.0));
-            choice.set("delta", Json::objv());
-            choice.set("finish_reason", Json::strv(e.finish.empty() ? "stop" : e.finish));
-            c.push(std::move(choice));
-            chunk.set("choices", std::move(c));
-            if (!w("data: " + json_dump(chunk) + "\n\n")) return false;
-            if (include_usage) {
-                Json u = Json::objv();
-                u.set("prompt_tokens", Json::numv(static_cast<double>(job->n_prompt)));
-                u.set("completion_tokens", Json::numv(static_cast<double>(job->n_gen)));
-                u.set("total_tokens", Json::numv(static_cast<double>(job->n_prompt + job->n_gen)));
-                Json uc = Json::objv();
-                uc.set("id", Json::strv(id));
-                uc.set("object", Json::strv("chat.completion.chunk"));
-                uc.set("created", Json::numv(created));
-                uc.set("model", Json::strv(model));
-                uc.set("choices", Json::arrv());
-                uc.set("usage", std::move(u));
-                if (!w("data: " + json_dump(uc) + "\n\n")) return false;
+            Json choices = Json::arrv();
+            choices.push(std::move(choice));
+            c.set("choices", std::move(choices));
+            return "data: " + json_dump(c) + "\n\n";
+        };
+        const auto emit_streamer_event = [&](const ToolCallStreamer::Event& sev) {
+            if (sev.kind == ToolCallStreamer::Kind::kText) {
+                if (sev.text.empty()) return;
+                Json d = Json::objv();
+                d.set("content", Json::strv(sev.text));
+                state->pending.push_back(chunk(std::move(d)));
+                return;
             }
-            if (!w("data: [DONE]\n\n")) return false;
-            record_request(job, 200, false);
+            // kBlock：完整调用块 → 工具调用帧（整块一帧，stream_tools=false 形态）；解析失败
+            // （幻觉出的坏标记）→ 按文本放行。
+            ToolCall tc;
+            std::string perr;
+            if (!parse_tool_block(sev.text, state->tools, tc, perr)) {
+                Json d = Json::objv();
+                d.set("content", Json::strv(sev.text));
+                state->pending.push_back(chunk(std::move(d)));
+                return;
+            }
+            Json d = Json::objv();
+            Json tcs = Json::arrv();
+            tcs.push(openai_tool_call(
+                "call_" + std::to_string(job->id) + "_" + std::to_string(state->calls),
+                tc.name, tc.arguments));
+            d.set("tool_calls", std::move(tcs));
+            state->pending.push_back(chunk(std::move(d)));
+            ++state->calls;
+        };
+        // 写一帧；无帧可写时先消费作业事件攒帧（一个事件可展开成多帧，逐次回落）。
+        for (;;) {
+            if (!state->pending.empty() || state->done) break;
+            JobEvent e;
+            if (!job->events->pop(e)) {
+                if (!state->recorded) { record_request(job, 499, job->events->cancelled()); state->recorded = true; }
+                return false;
+            }
+            if (e.kind == EventKind::kToken) {
+                if (state->first) {
+                    Json d = Json::objv();
+                    d.set("role", Json::strv("assistant"));
+                    d.set("content", Json::strv(""));
+                    state->pending.push_back(chunk(std::move(d)));
+                    state->first = false;
+                }
+                std::vector<ToolCallStreamer::Event> evs;
+                state->st.feed(e.text, evs);
+                for (const auto& sev : evs) emit_streamer_event(sev);
+                continue;
+            }
+            if (e.kind == EventKind::kDone) {
+                // 收尾前把缓冲里等齐的残余切出（未闭合调用按原样文本释放，#211）。
+                std::vector<ToolCallStreamer::Event> evs;
+                state->st.finish(evs);
+                for (const auto& sev : evs) emit_streamer_event(sev);
+                // 终帧：finish_reason（有调用且自然停 → tool_calls）；需 usage 时先补帧，再 [DONE]。
+                Json dc = Json::objv();
+                Json choice = Json::objv();
+                choice.set("index", Json::numv(0.0));
+                choice.set("delta", std::move(dc));
+                choice.set("finish_reason", Json::strv(
+                    state->calls > 0 && e.finish == "stop" ? "tool_calls"
+                                                           : (e.finish.empty() ? "stop" : e.finish)));
+                Json choices = Json::arrv();
+                choices.push(std::move(choice));
+                Json c = Json::objv();
+                c.set("id", Json::strv(id));
+                c.set("object", Json::strv("chat.completion.chunk"));
+                c.set("created", Json::numv(created));
+                c.set("model", Json::strv(model));
+                c.set("choices", std::move(choices));
+                state->pending.push_back("data: " + json_dump(c) + "\n\n");
+                if (include_usage) {
+                    Json u = Json::objv();
+                    u.set("prompt_tokens", Json::numv(static_cast<double>(job->n_prompt)));
+                    u.set("completion_tokens", Json::numv(static_cast<double>(job->n_gen)));
+                    u.set("total_tokens", Json::numv(static_cast<double>(job->n_prompt + job->n_gen)));
+                    Json uc = Json::objv();
+                    uc.set("id", Json::strv(id));
+                    uc.set("object", Json::strv("chat.completion.chunk"));
+                    uc.set("created", Json::numv(created));
+                    uc.set("model", Json::strv(model));
+                    uc.set("choices", Json::arrv());
+                    uc.set("usage", std::move(u));
+                    state->pending.push_back("data: " + json_dump(uc) + "\n\n");
+                }
+                state->pending.push_back("data: [DONE]\n\n");
+                state->done = true;
+                continue;
+            }
+            // kError（事件流里以 error 帧出现，一致性让客户端能读到原因）。
+            Json inner = Json::objv();
+            inner.set("message", Json::strv(e.err.empty() ? "生成失败" : e.err));
+            inner.set("type", Json::strv("server_error"));
+            inner.set("param", Json::nullv());
+            Json er = Json::objv();
+            er.set("error", std::move(inner));
+            state->pending.push_back("data: " + json_dump(er) + "\n\n");
+            state->done = true;
+            state->final_status = 500;
+            continue;
+        }
+        if (state->pending.empty()) {
+            // 全部帧已送出（或事件缓冲异常终止）：记账收尾，provider 结束。
+            if (!state->recorded) { record_request(job, state->final_status, false); state->recorded = true; }
             return false;
         }
-        // kError（事件流里以 error 帧出现，一致性让客户端能读到原因）。
-        Json inner = Json::objv();
-        inner.set("message", Json::strv(e.err.empty() ? "生成失败" : e.err));
-        inner.set("type", Json::strv("server_error"));
-        inner.set("param", Json::nullv());
-        Json er = Json::objv();
-        er.set("error", std::move(inner));
-        // 先写帧后记账：断连时 write 假已在 w 内记 499，先记账会叠成重复/错账。
-        if (!w("data: " + json_dump(er) + "\n\n")) return false;
-        record_request(job, 500, false);
-        return false;
+        const std::string frame = state->pending.front();
+        state->pending.erase(state->pending.begin());
+        if (!w(frame)) return false;
+        // 终帧落地后才记账：断连/中途失败时 w 内已按 499 记，这里不得叠记。
+        if (state->pending.empty() && state->done && !state->recorded) {
+            record_request(job, state->final_status, false);
+            state->recorded = true;
+        }
+        return true;
     };
     res.set_chunked_content_provider("text/event-stream", provider);
 }
 
-// Anthropic 兼容 SSE。事件序钉死：message_start → content_block_start → content_block_delta×n →
-// content_block_stop → message_delta → message_stop；kError 走 error 事件收尾。形状与 serve_sse
-// 同构（provider 每次调用恰好消费一个事件），事件 data 顶层带与事件名一致的 type 字段（Anthropic
-// 官方形状，集成测试逐条核对）。
-void Serve::serve_anthropic_sse(const std::shared_ptr<Job>& job, httplib::Response& res) {
+// Anthropic 兼容 SSE。事件序：message_start → 按需逐块 content_block_start/delta/stop → message_delta
+// → message_stop；kError 走 error 事件收尾。文本块在首段非空文本处打开（text_delta 逐段）；工具块以
+// tool_use 打开（id/name/空 input）并紧跟一条 input_json_delta 带整份参数（stream_tools=false 形态），
+// tool_use 前无条件关掉当前块（块序共享一个递增 index）。stop_reason "tool_use" 仅当有工具块且自然停
+// （Strata anthropic_events 同款）；生成文本经 ToolCallStreamer 增量切分，坏块按文本放行，未闭合
+// 调用在收尾时按原样文本释放（#211）。事件 data 顶层带与事件名一致的 type 字段（Anthropic 官方
+// 形状，集成测试逐条核对）。
+void Serve::serve_anthropic_sse(const std::shared_ptr<Job>& job, const std::vector<Json>& tools,
+                                httplib::Response& res) {
     const std::string id = "msg_" + std::to_string(job->id);
     const std::string model = eng_->model_name();
-    const auto first = std::make_shared<bool>(true);
-    auto provider = [this, job, id, model, first](size_t, httplib::DataSink& sink) -> bool {
+    struct State {
+        ToolCallStreamer st;
+        // 工具定义按值随 State 留在堆上（理由同 serve_sse：provider 生命周期长于 handler）。
+        std::vector<Json> tools;
+        std::vector<std::string> pending;   // 待写帧（front 弹出）
+        bool started = false;               // message_start 未写
+        bool block_open = false;            // 当前有打开的块（末块 index = block_idx - 1）
+        int block_idx = 0;                  // 下一块序号（text/tool_use 共享）
+        bool used_tool = false;
+        bool done = false;
+        int final_status = 200;
+        bool recorded = false;
+    };
+    auto state = std::make_shared<State>();
+    state->tools = tools;
+    auto provider = [this, job, id, model, state](std::size_t, httplib::DataSink& sink) -> bool {
         const auto w = [&](const std::string& s) {
             // 实仓 DataSink::write 是 std::function<bool(const char*, size_t)>（两参调用，见 httplib.h:538）。
-            if (!sink.write(s.data(), s.size())) { job->events->cancel(); record_request(job, 499, true); return false; }
+            if (!sink.write(s.data(), s.size())) {
+                job->events->cancel();
+                if (!state->recorded) { record_request(job, 499, true); state->recorded = true; }
+                return false;
+            }
             return true;
         };
-        const auto ev = [&](const std::string& name, Json data) {
-            return w("event: " + name + "\ndata: " + json_dump(data) + "\n\n");
+        const auto enqueue = [&](const std::string& name, Json data) {
+            state->pending.push_back("event: " + name + "\ndata: " + json_dump(data) + "\n\n");
         };
-        JobEvent e;
-        if (!job->events->pop(e)) { record_request(job, 499, job->events->cancelled()); return false; }
-        if (e.kind == EventKind::kToken) {
-            if (*first) {
-                Json m = Json::objv();
-                m.set("type", Json::strv("message_start"));
-                m.set("id", Json::strv(id));
-                m.set("role", Json::strv("assistant"));
-                m.set("model", Json::strv(model));
-                m.set("content", Json::arrv());
-                m.set("stop_reason", Json::nullv());
-                m.set("stop_sequence", Json::nullv());
-                Json us = Json::objv();
-                us.set("input_tokens", Json::numv(static_cast<double>(job->n_prompt)));
-                us.set("output_tokens", Json::numv(0.0));
-                m.set("usage", std::move(us));
-                if (!ev("message_start", std::move(m))) return false;
-                Json cb = Json::objv();
-                cb.set("type", Json::strv("content_block_start"));
-                cb.set("index", Json::numv(0.0));
-                Json blk = Json::objv();
-                blk.set("type", Json::strv("text"));
-                blk.set("text", Json::strv(""));
-                cb.set("content_block", std::move(blk));
-                if (!ev("content_block_start", std::move(cb))) return false;
-                *first = false;
-            }
+        const auto open_block = [&](Json blk) {
+            Json cb = Json::objv();
+            cb.set("type", Json::strv("content_block_start"));
+            cb.set("index", Json::numv(static_cast<double>(state->block_idx)));
+            cb.set("content_block", std::move(blk));
+            enqueue("content_block_start", std::move(cb));
+            state->block_open = true;
+        };
+        const auto close_block = [&]() {
+            if (!state->block_open) return;
+            Json cb = Json::objv();
+            cb.set("type", Json::strv("content_block_stop"));
+            cb.set("index", Json::numv(static_cast<double>(state->block_idx - 1)));
+            enqueue("content_block_stop", std::move(cb));
+            state->block_open = false;
+        };
+        const auto text_delta = [&](const std::string& t) {
             Json d = Json::objv();
             d.set("type", Json::strv("content_block_delta"));
-            d.set("index", Json::numv(0.0));
+            d.set("index", Json::numv(static_cast<double>(state->block_idx - 1)));
             Json delta = Json::objv();
             delta.set("type", Json::strv("text_delta"));
-            delta.set("text", Json::strv(e.text));
+            delta.set("text", Json::strv(t));
             d.set("delta", std::move(delta));
-            return ev("content_block_delta", std::move(d));
+            enqueue("content_block_delta", std::move(d));
+        };
+        // 流式切分事件 → 块状态机（kToken 与 kDone 收尾共用同一份语义）。
+        const auto emit_streamer_event = [&](const ToolCallStreamer::Event& sev) {
+            if (sev.kind == ToolCallStreamer::Kind::kText) {
+                if (sev.text.empty()) return;
+                if (!state->block_open) {
+                    Json blk = Json::objv();
+                    blk.set("type", Json::strv("text"));
+                    blk.set("text", Json::strv(""));
+                    open_block(std::move(blk));
+                    ++state->block_idx;
+                }
+                text_delta(sev.text);
+                return;
+            }
+            ToolCall tc;
+            std::string perr;
+            if (!parse_tool_block(sev.text, state->tools, tc, perr)) {
+                // 坏标记：并回文本放行，不当错误毁掉请求。
+                if (sev.text.empty()) return;
+                if (!state->block_open) {
+                    Json blk = Json::objv();
+                    blk.set("type", Json::strv("text"));
+                    blk.set("text", Json::strv(""));
+                    open_block(std::move(blk));
+                    ++state->block_idx;
+                }
+                text_delta(sev.text);
+                return;
+            }
+            close_block();   // tool_use 永远先关当前块再开新块
+            Json blk = Json::objv();
+            blk.set("type", Json::strv("tool_use"));
+            blk.set("id", Json::strv("toolu_" + std::to_string(job->id) + "_" + std::to_string(state->block_idx)));
+            blk.set("name", Json::strv(tc.name));
+            blk.set("input", Json::objv());
+            open_block(std::move(blk));
+            ++state->block_idx;
+            Json d = Json::objv();
+            d.set("type", Json::strv("content_block_delta"));
+            d.set("index", Json::numv(static_cast<double>(state->block_idx - 1)));
+            Json delta = Json::objv();
+            delta.set("type", Json::strv("input_json_delta"));
+            delta.set("partial_json", Json::strv(json_dump(tc.arguments)));
+            d.set("delta", std::move(delta));
+            enqueue("content_block_delta", std::move(d));
+            state->used_tool = true;
+        };
+        // 写一帧；无帧可写时先消费作业事件攒帧。
+        for (;;) {
+            if (!state->pending.empty() || state->done) break;
+            JobEvent e;
+            if (!job->events->pop(e)) {
+                if (!state->recorded) { record_request(job, 499, job->events->cancelled()); state->recorded = true; }
+                return false;
+            }
+            if (e.kind == EventKind::kToken) {
+                if (!state->started) {
+                    Json m = Json::objv();
+                    m.set("type", Json::strv("message_start"));
+                    m.set("id", Json::strv(id));
+                    m.set("role", Json::strv("assistant"));
+                    m.set("model", Json::strv(model));
+                    m.set("content", Json::arrv());
+                    m.set("stop_reason", Json::nullv());
+                    m.set("stop_sequence", Json::nullv());
+                    Json us = Json::objv();
+                    us.set("input_tokens", Json::numv(static_cast<double>(job->n_prompt)));
+                    us.set("output_tokens", Json::numv(0.0));
+                    m.set("usage", std::move(us));
+                    enqueue("message_start", std::move(m));
+                    state->started = true;
+                }
+                std::vector<ToolCallStreamer::Event> evs;
+                state->st.feed(e.text, evs);
+                for (const auto& sev : evs) emit_streamer_event(sev);
+                continue;
+            }
+            if (e.kind == EventKind::kDone) {
+                // 收尾：先释放缓冲里等齐的残余，再关当前块，最后 message_delta/message_stop。
+                std::vector<ToolCallStreamer::Event> evs;
+                state->st.finish(evs);
+                for (const auto& sev : evs) emit_streamer_event(sev);
+                close_block();
+                Json md = Json::objv();
+                md.set("type", Json::strv("message_delta"));
+                Json dlt = Json::objv();
+                dlt.set("stop_reason", Json::strv(
+                    state->used_tool && e.finish == "stop" ? "tool_use"
+                                                           : (e.finish == "length" ? "max_tokens" : "end_turn")));
+                dlt.set("stop_sequence", Json::nullv());
+                md.set("delta", std::move(dlt));
+                Json us = Json::objv();
+                us.set("output_tokens", Json::numv(static_cast<double>(job->n_gen)));
+                md.set("usage", std::move(us));
+                enqueue("message_delta", std::move(md));
+                Json stop = Json::objv();
+                stop.set("type", Json::strv("message_stop"));
+                enqueue("message_stop", std::move(stop));
+                state->done = true;
+                continue;
+            }
+            // kError：Anthropic 用 error 事件收尾（形状与事件流其他帧一致）。
+            Json er = Json::objv();
+            Json inner = Json::objv();
+            inner.set("type", Json::strv("server_error"));
+            inner.set("message", Json::strv(e.err.empty() ? "生成失败" : e.err));
+            er.set("type", Json::strv("error"));
+            er.set("error", std::move(inner));
+            enqueue("error", std::move(er));
+            state->done = true;
+            state->final_status = 500;
+            continue;
         }
-        if (e.kind == EventKind::kDone) {
-            Json s1 = Json::objv();
-            s1.set("type", Json::strv("content_block_stop"));
-            s1.set("index", Json::numv(0.0));
-            if (!ev("content_block_stop", std::move(s1))) return false;
-            Json md = Json::objv();
-            md.set("type", Json::strv("message_delta"));
-            Json dlt = Json::objv();
-            dlt.set("stop_reason", Json::strv(job->finish == "length" ? "max_tokens" : "end_turn"));
-            dlt.set("stop_sequence", Json::nullv());
-            md.set("delta", std::move(dlt));
-            Json us = Json::objv();
-            us.set("output_tokens", Json::numv(static_cast<double>(job->n_gen)));
-            md.set("usage", std::move(us));
-            if (!ev("message_delta", std::move(md))) return false;
-            record_request(job, 200, false);
-            Json stop = Json::objv();
-            stop.set("type", Json::strv("message_stop"));
-            return ev("message_stop", std::move(stop));
+        if (state->pending.empty()) {
+            // 全部帧已送出（或事件缓冲异常终止）：记账收尾，provider 结束。
+            if (!state->recorded) { record_request(job, state->final_status, false); state->recorded = true; }
+            return false;
         }
-        // kError：Anthropic 用 error 事件收尾（形状与事件流其他帧一致）。
-        Json er = Json::objv();
-        Json inner = Json::objv();
-        inner.set("type", Json::strv("server_error"));
-        inner.set("message", Json::strv(e.err.empty() ? "生成失败" : e.err));
-        er.set("type", Json::strv("error"));
-        er.set("error", std::move(inner));
-        record_request(job, 500, false);
-        return ev("error", std::move(er));
+        const std::string frame = state->pending.front();
+        state->pending.erase(state->pending.begin());
+        if (!w(frame)) return false;
+        // 终帧落地后才记账：断连/中途失败时 w 内已按 499 记，这里不得叠记。
+        if (state->pending.empty() && state->done && !state->recorded) {
+            record_request(job, state->final_status, false);
+            state->recorded = true;
+        }
+        return true;
     };
     res.set_chunked_content_provider("text/event-stream", provider);
 }
@@ -659,6 +988,16 @@ void Serve::handle_messages(const httplib::Request& req, httplib::Response& res)
         send_json(res, 400, anthropic_err("invalid_request_error", "没有可渲染的消息内容"));
         return;
     }
+    // tools → 内部工具形状（normalize_tools 的 Anthropic 改名：input_schema → parameters）。
+    std::vector<Json> tools;
+    const Json* tv = body.find("tools");
+    if (tv != nullptr) {
+        std::string terr;
+        if (!normalize_tools(*tv, /*anthropic=*/true, tools, terr)) {
+            send_json(res, 400, anthropic_err("invalid_request_error", "tools 解析失败：" + terr));
+            return;
+        }
+    }
     GenOptions opts;
     double t = 0.0, p = 0.0;
     bool numeric_ok = num_param(body, "temperature", 0.8, t) && num_param(body, "top_p", 0.95, p);
@@ -676,7 +1015,9 @@ void Serve::handle_messages(const httplib::Request& req, httplib::Response& res)
         }
     }
     std::string prompt, rerr;
-    if (!render_chat(eng_->chat_template(), conv, /*add_generation_prompt=*/true, prompt, rerr)) {
+    Json tj = tools_array(tools);
+    if (!render_chat(eng_->chat_template(), conv, /*add_generation_prompt=*/true, prompt, rerr,
+                     tools.empty() ? nullptr : &tj)) {
         send_json(res, 500, anthropic_err("server_error", "chat 模板不支持的结构：" + rerr));
         return;
     }
@@ -690,7 +1031,7 @@ void Serve::handle_messages(const httplib::Request& req, httplib::Response& res)
         return;
     }
     job->raw_body = req.body;   // T14：原始请求体进 Records（流式请求也要带）
-    if (stream) { serve_anthropic_sse(job, res); return; }
+    if (stream) { serve_anthropic_sse(job, tools, res); return; }
     std::string text, drain_err;
     if (!drain_nonstream(job, text, drain_err)) {
         // 记账与 chat 域同款：每个退出路径恰好一次（kError 记 500 写体；客户端断开记 499 不写体）。
@@ -704,13 +1045,31 @@ void Serve::handle_messages(const httplib::Request& req, httplib::Response& res)
     r.set("type", Json::strv("message"));
     r.set("role", Json::strv("assistant"));
     r.set("model", Json::strv(job->model));
-    Json block = Json::objv();
-    block.set("type", Json::strv("text"));
-    block.set("text", Json::strv(text));
+    // 生成文本拆事件：文本块与 tool_use 块保持生成顺序（Anthropic 官方块形状）。
+    std::vector<GenEvent> events;
+    split_generation(text, tools, events);
     Json content = Json::arrv();
-    content.push(std::move(block));
+    bool used_tool = false;
+    int call_idx = 0;
+    for (const GenEvent& ev : events) {
+        if (ev.call) {
+            used_tool = true;
+            content.push(anthropic_tool_use(
+                "toolu_" + std::to_string(job->id) + "_" + std::to_string(call_idx),
+                ev.call->name, ev.call->arguments));
+            ++call_idx;
+        } else if (!ev.text.empty()) {
+            Json blk = Json::objv();
+            blk.set("type", Json::strv("text"));
+            blk.set("text", Json::strv(ev.text));
+            content.push(std::move(blk));
+        }
+    }
     r.set("content", std::move(content));
-    r.set("stop_reason", Json::strv(job->finish == "length" ? "max_tokens" : "end_turn"));
+    // stop_reason：有调用且自然停 → tool_use（Strata anthropic 口径）。
+    r.set("stop_reason", Json::strv(
+        used_tool && job->finish == "stop" ? "tool_use"
+                                           : (job->finish == "length" ? "max_tokens" : "end_turn")));
     r.set("stop_sequence", Json::nullv());
     Json usage = Json::objv();
     usage.set("input_tokens", Json::numv(static_cast<double>(job->n_prompt)));
@@ -737,8 +1096,20 @@ void Serve::handle_count_tokens(const httplib::Request& req, httplib::Response& 
         send_json(res, 400, anthropic_err("invalid_request_error", "没有可渲染的消息内容"));
         return;
     }
+    // tools 同样归一（Anthropic 形状），渲染时才与真实请求同口径（count 与补全同 prompt）。
+    std::vector<Json> tools;
+    const Json* tv = body.find("tools");
+    if (tv != nullptr) {
+        std::string terr;
+        if (!normalize_tools(*tv, /*anthropic=*/true, tools, terr)) {
+            send_json(res, 400, anthropic_err("invalid_request_error", "tools 解析失败：" + terr));
+            return;
+        }
+    }
     std::string prompt, rerr;
-    if (!render_chat(eng_->chat_template(), conv, /*add_generation_prompt=*/true, prompt, rerr)) {
+    Json tj = tools_array(tools);
+    if (!render_chat(eng_->chat_template(), conv, /*add_generation_prompt=*/true, prompt, rerr,
+                     tools.empty() ? nullptr : &tj)) {
         send_json(res, 500, anthropic_err("server_error", "chat 模板不支持的结构：" + rerr));
         return;
     }

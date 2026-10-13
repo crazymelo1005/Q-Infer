@@ -47,6 +47,7 @@ add_library(qinfer_serve
   src/serve/records.cpp
   src/serve/prompt_cache.cpp
   src/serve/prometheus.cpp
+  src/serve/toolcall.cpp
 )
 target_include_directories(qinfer_serve PUBLIC src)
 target_link_libraries(qinfer_serve PUBLIC qinfer_text qinfer_dense qinfer_ple qinfer_storage qinfer_kernels)
@@ -182,6 +183,11 @@ target_link_libraries(test_prompt_cache PRIVATE qinfer_serve)
 # /metrics 的 Prometheus text 端口（M2 监控）：内容协商 + 三直方图 + vLLM/qinfer 家族映射。
 add_executable(test_prometheus tests/test_prometheus.cpp)
 target_link_libraries(test_prometheus PRIVATE qinfer_serve)
+
+# 工具调用域（T18）：输出标记解析、OpenAI/Anthropic 工具形状、tools 归一化与生成拆分。
+add_executable(test_toolcall tests/test_toolcall.cpp)
+target_link_libraries(test_toolcall PRIVATE qinfer_serve)
+add_test(NAME toolcall COMMAND test_toolcall)
 
 add_executable(test_iq4nl tests/test_iq4nl.cpp)
 target_link_libraries(test_iq4nl PRIVATE qinfer_kernels)

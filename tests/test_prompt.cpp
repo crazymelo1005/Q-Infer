@@ -1,5 +1,6 @@
 // -*- coding: utf-8 -*-
 #include "check.hpp"
+#include "serve/json.hpp"
 #include "serve/prompt.hpp"
 #include <cstdio>
 #include <string>
@@ -15,6 +16,12 @@ const char* kQwenTemplate =
     "{%- for message in messages -%}{{'<|im_start|>' + message['role'] + '\\n' + message['content'] + "
     "'<|im_end|>' + '\\n'}}{%- endfor -%}"
     "{% if add_generation_prompt %}{{ '<|im_start|>assistant\\n' }}{% endif %}";
+
+// 主案例模板 reasoning_instructions 的 xhigh 文案（向量 9/10 对拍复用）。
+const char* kXhigh =
+    "Reasoning effort is set to xhigh. Please think carefully through the task, validate key "
+    "assumptions, consider plausible alternatives, and prioritize correctness, consistency, and "
+    "clarity in the final answer.";
 
 // 主案例 GGUF 的 tokenizer.chat_template 原文（170 行 8953 字节，逐字嵌入；
 // 字节以 .superpowers/sdd/2026-10-12-serve-layer/task-18a-template.txt 为准）。
@@ -321,6 +328,137 @@ int main() {
                           {{"user", "a"}}, false, out, err));
         CHECK(out == "1|2");
         std::printf("set 已存在属性：写回不追加重复键（|length 恒 1）\n");
+    }
+    // === 向量 7：tojson 过滤器（Strata 的 json.dumps(ensure_ascii=False) 同款：默认分隔符、UTF-8 原样）===
+    {
+        std::string out, err;
+        CHECK(render_chat("{% set ns = namespace(a=1, b='x') %}{{ ns|tojson }}",
+                          {{"user", "a"}}, false, out, err));
+        CHECK(out == R"({"a": 1, "b": "x"})");
+        std::printf("向量 7a：tojson 字典（Python 默认分隔符、保序）\n");
+    }
+    {
+        std::string out, err;
+        CHECK(render_chat("{{ [1, 'a', true, none]|tojson }}", {{"user", "a"}}, false, out, err));
+        CHECK(out == R"([1, "a", true, null])");
+        std::printf("向量 7b：tojson 列表（数字/字符串引号/布尔/空）\n");
+    }
+    {
+        std::string out, err;
+        CHECK(render_chat("{{ '说\"hi\"\n'|tojson }}", {{"user", "a"}}, false, out, err));
+        CHECK(out == "\"说\\\"hi\\\"\\n\"");
+        std::printf("向量 7c：tojson 字符串（UTF-8 原样、引号与换行转义）\n");
+    }
+    // === 向量 8：items 过滤器（对象 → 键值对列表）===
+    {
+        std::string out, err;
+        CHECK(render_chat("{% set ns = namespace(x=1, y=2) %}{% for kv in ns|items %}{{ kv[0] }}={{ kv[1] }};{% endfor %}",
+                          {{"user", "a"}}, false, out, err));
+        CHECK(out == "x=1;y=2;");
+        std::printf("向量 8a：items 保序展开成键值对\n");
+    }
+    {
+        std::string out, err;
+        CHECK(!render_chat("{{ m|items }}", {{"user", "a"}}, false, out, err));
+        CHECK(!err.empty());
+        std::printf("向量 8b：items 作用于未定义 → 报错（%s）\n", err.c_str());
+    }
+    // === 向量 9：tools 注入——真模板 tools 分支整段逐字符对拍（Qwen 模板 57-95 行）===
+    {
+        Json tools = Json::arrv();
+        Json tool = Json::objv();
+        tool.set("name", Json::strv("get_weather"));
+        tool.set("description", Json::strv("查询城市天气"));
+        Json params = Json::objv();
+        params.set("type", Json::strv("object"));
+        Json props = Json::objv();
+        Json city = Json::objv();
+        city.set("type", Json::strv("string"));
+        props.set("city", std::move(city));
+        params.set("properties", std::move(props));
+        tool.set("parameters", std::move(params));
+        tools.push(std::move(tool));
+        const std::string want =
+            std::string("<|im_start|>system\n") + kXhigh + "\n\n"
+            "# Tools\n\nYou have access to the following functions:\n\n<tools>\n"
+            "{\"name\": \"get_weather\", \"description\": \"查询城市天气\", \"parameters\": "
+            "{\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\"}}}}\n"
+            "</tools>\n\n"
+            "If you choose to call a function ONLY reply in the following format with NO suffix:\n\n"
+            "<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n"
+            "</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\n"
+            "that can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\n"
+            "Reminder:\n- Function calls MUST follow the specified format: an inner "
+            "<function=...></function> block must be nested within <tool_call></tool_call> XML tags\n"
+            "- Required parameters MUST be specified\n"
+            "- You may provide optional reasoning for your function call in natural language BEFORE "
+            "the function call, but NOT after\n"
+            "- If there is no function call available, answer the question like normal with your "
+            "current knowledge and do not tell the user about function calls\n"
+            "</IMPORTANT>\n\n"
+            "You are helpful.<|im_end|>\n"
+            "<|im_start|>user\nhi<|im_end|>\n"
+            "<|im_start|>assistant\n<think>\n";
+        std::string out, err;
+        CHECK(render_chat(kMainCaseTemplate, {{"system", "You are helpful."}, {"user", "hi"}},
+                          /*add_gen=*/true, out, err, &tools));
+        if (out != want) {
+            FILE* f = std::fopen("/tmp/tools_want.txt", "w");
+            const std::size_t nw = want.size();
+            fwrite(want.data(), 1, nw, f);
+            std::fclose(f);
+            f = std::fopen("/tmp/tools_out.txt", "w");
+            const std::size_t no = out.size();
+            fwrite(out.data(), 1, no, f);
+            std::fclose(f);
+            std::fprintf(stderr, "向量 9 对拍失败：want %zu / out %zu 字节\n", nw, no);
+        }
+        CHECK(out == want);
+        std::printf("向量 9：tools 分支逐字符一致（%zu 字节）\n", want.size());
+    }
+    // === 向量 10：assistant tool_calls 渲染 <tool_call> 标记；tool 角色渲染 <tool_response> ===
+    {
+        Json call = Json::objv();
+        Json fn = Json::objv();
+        fn.set("name", Json::strv("get_weather"));
+        Json args = Json::objv();
+        args.set("city", Json::strv("北京"));
+        fn.set("arguments", std::move(args));
+        call.set("function", std::move(fn));
+        Message ast;
+        ast.role = "assistant";
+        ast.tool_calls.push_back(std::move(call));
+        const std::vector<Message> msgs = {ast, {"tool", "晴"}, {"user", "结果如何？"}};
+        const std::string want =
+            std::string("<|im_start|>system\n") + kXhigh + "<|im_end|>\n"
+            "<|im_start|>assistant\n<think>\n\n</think>\n\n<tool_call>\n<function=get_weather>\n"
+            "<parameter=city>\n北京\n</parameter>\n</function>\n</tool_call><|im_end|>\n"
+            "<|im_start|>user\n<tool_response>\n晴\n</tool_response><|im_end|>\n"
+            "<|im_start|>user\n结果如何？<|im_end|>\n";
+        std::string out, err;
+        CHECK(render_chat(kMainCaseTemplate, msgs, /*add_gen=*/false, out, err));
+        CHECK(out == want);
+        std::printf("向量 10：tool_calls/tool 角色逐字符一致（%zu 字节）\n", want.size());
+    }
+    // === 向量 10b：数字参数过 string/tojson 组装（整数值走整数、浮点走最短表示）===
+    {
+        Json call = Json::objv();
+        Json fn = Json::objv();
+        fn.set("name", Json::strv("calc"));
+        Json args = Json::objv();
+        args.set("pi", Json::numv(3.5));
+        args.set("n", Json::numv(42.0));
+        fn.set("arguments", std::move(args));
+        call.set("function", std::move(fn));
+        Message ast;
+        ast.role = "assistant";
+        ast.tool_calls.push_back(std::move(call));
+        const std::vector<Message> msgs = {ast, {"user", "算一下"}};
+        std::string out, err;
+        CHECK(render_chat(kMainCaseTemplate, msgs, /*add_gen=*/false, out, err));
+        CHECK(out.find("<parameter=pi>\n3.5\n</parameter>") != std::string::npos);
+        CHECK(out.find("<parameter=n>\n42\n</parameter>") != std::string::npos);
+        std::printf("向量 10b：数字参数渲染（3.5 / 42）正确\n");
     }
     std::puts("prompt: 通过");
     return 0;

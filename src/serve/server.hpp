@@ -23,6 +23,7 @@
 #include "serve/records.hpp"
 #include "serve/scheduler.hpp"
 #include "serve/telemetry.hpp"
+#include "serve/toolcall.hpp"
 
 namespace httplib {
 class Server;
@@ -64,8 +65,10 @@ private:
     void handle_completions(const httplib::Request& req, httplib::Response& res);
     void handle_messages(const httplib::Request& req, httplib::Response& res);
     void handle_count_tokens(const httplib::Request& req, httplib::Response& res);
-    void serve_sse(const std::shared_ptr<Job>& job, bool include_usage, httplib::Response& res);
-    void serve_anthropic_sse(const std::shared_ptr<Job>& job, httplib::Response& res);
+    void serve_sse(const std::shared_ptr<Job>& job, bool include_usage,
+                   const std::vector<Json>& tools, httplib::Response& res);
+    void serve_anthropic_sse(const std::shared_ptr<Job>& job, const std::vector<Json>& tools,
+                             httplib::Response& res);
     std::shared_ptr<Job> launch(const std::string& path, std::string prompt,
                                 const GenOptions& opts, bool stream);
     void record_request(const std::shared_ptr<Job>& job, int http_status, bool disconnected);   // T12：填 last_timings 计时；T13：gen 累计；T14：Records 环

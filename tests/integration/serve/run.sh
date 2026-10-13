@@ -452,6 +452,89 @@ else
 fi
 rm -f "$R.hdr" "$R.body"
 
+# 21. 工具（OpenAI 域）：21a 正规 tools 包装生成 200 且 content 非空；21b 历史 assistant
+#      tool_calls（content null）+ tool 消息走通渲染管道（夹具模板只出 content——本用例是管线
+#      验证：消息过滤与工具定义注入不丢）；21c 坏 tools 形状一律 400（"auto"/空名字/非数组）。
+code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
+  -X POST "http://$HOST:$PORT/v1/chat/completions" \
+  -d '{"model":"x","messages":[{"role":"user","content":"c"}],"max_tokens":8,"temperature":0,
+       "tools":[{"type":"function","function":{"name":"get_weather","description":"查天气","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]}')
+if [ "$code" = 200 ] && [ -n "$(jget "$R" "d['choices'][0]['message']['content']")" ]; then
+  ok "21a OpenAI tools 渲染（200 + content 非空）"
+else
+  bad "21a tools：状态 $code，体 $(head -c 200 "$R")"
+fi
+code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
+  -X POST "http://$HOST:$PORT/v1/chat/completions" \
+  -d '{"model":"x",
+       "messages":[{"role":"user","content":"c"},
+                   {"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"c\"}"}}]},
+                   {"role":"tool","tool_call_id":"call_1","content":"c"}],
+       "max_tokens":8,"temperature":0}')
+if [ "$code" = 200 ]; then
+  ok "21b tool 历史（assistant tool_calls + tool 消息）"
+else
+  bad "21b tool 历史：状态 $code，体 $(head -c 200 "$R")"
+fi
+for bad_tools in '"auto"' '[{"type":"function","function":{"name":""}}]' '123'; do
+  code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
+    -X POST "http://$HOST:$PORT/v1/chat/completions" \
+    -d "{\"model\":\"x\",\"messages\":[{\"role\":\"user\",\"content\":\"c\"}],\"max_tokens\":4,\"temperature\":0,\"tools\":$bad_tools}")
+  [ "$code" = 400 ] || break
+done
+if [ "$code" = 400 ]; then
+  ok "21c 坏 tools 形状 → 400（\"auto\"/空名字/非数组）"
+else
+  bad "21c 坏 tools 应 400：得 $code，体 $(head -c 200 "$R")"
+fi
+
+# 22. 工具（Anthropic 域）：tools 的 input_schema 改名 parameters、tool_use/tool_result 历史
+#      走消息组装管道 → 200；生成块是 text（夹具不真产 <tool_call>）、input_tokens ≥ 1。
+code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
+  -X POST "http://$HOST:$PORT/v1/messages" \
+  -d '{"model":"x",
+       "messages":[{"role":"assistant","content":[{"type":"text","text":"c"},
+                                                  {"type":"tool_use","id":"toolu_1","name":"get_weather","input":{"city":"c"}}]},
+                   {"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"c"}]}],
+       "tools":[{"name":"get_weather","description":"查天气","input_schema":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}],
+       "max_tokens":8,"temperature":0}')
+if [ "$code" = 200 ] && [ "$(jget "$R" "d['content'][0]['type']")" = text ] \
+   && [ "$(jget "$R" "d['stop_reason']")" = max_tokens ] \
+   && [ "$(jget "$R" "d['usage']['input_tokens']")" -ge 1 ]; then
+  ok "22 Anthropic tools（input_schema/历史/usage/stop_reason）"
+else
+  bad "22 Anthropic tools：状态 $code，体 $(head -c 200 "$R")"
+fi
+
+# 23. count_tokens 带 tools：input_schema 归一进渲染，计数 ≥ 1（与补全同 prompt 口径）。
+code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
+  -X POST "http://$HOST:$PORT/v1/messages/count_tokens" \
+  -d '{"model":"x","messages":[{"role":"user","content":"c"}],
+       "tools":[{"name":"get_weather","description":"查天气","input_schema":{"type":"object","properties":{"city":{"type":"string"}}}}]}')
+if [ "$code" = 200 ] && [ "$(jget "$R" "d['input_tokens']")" -ge 1 ]; then
+  ok "23 count_tokens 带 tools"
+else
+  bad "23 count_tokens+tools：状态 $code，体 $(head -c 200 "$R")"
+fi
+
+# 24. OpenAI 流式带 tools：SSE 角色首帧 + 拼文非空 + [DONE]（夹具不真产 <tool_call>，验证
+#     tools 形状穿过流式管道不破帧）。
+curl -sN -H "$H" -H 'Content-Type: application/json' -X POST "http://$HOST:$PORT/v1/chat/completions" \
+  -d '{"model":"x","messages":[{"role":"user","content":"c"}],"max_tokens":8,"temperature":0,
+       "stream":true,
+       "tools":[{"type":"function","function":{"name":"get_weather","description":"查天气","parameters":{"type":"object","properties":{"city":{"type":"string"}}}}}]}' \
+  | python3 -c '
+import json, sys
+raw = sys.stdin.read()
+objs = [json.loads(l[6:]) for l in raw.splitlines() if l.startswith("data: ") and l != "data: [DONE]"]
+assert objs, "无帧"
+assert objs[0]["choices"][0]["delta"].get("role") == "assistant", "首帧缺 role"
+text = "".join(o["choices"][0]["delta"].get("content", "") for o in objs)
+assert text, "拼文空"
+print("stream-tools-ok")' | grep -q stream-tools-ok \
+  && ok "24 OpenAI 流式带 tools（角色首帧 + 拼文非空 + [DONE]）" \
+  || bad "24 流式带 tools"
+
 stop
 
 # ---- 503：--reject-after 1 → 第 1 个请求正常，之后一律队列满 ----

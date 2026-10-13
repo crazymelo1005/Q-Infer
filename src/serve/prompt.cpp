@@ -1,6 +1,8 @@
 #include "serve/prompt.hpp"
 
 #include <cctype>
+#include <charconv>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -31,10 +33,12 @@ struct Jv {
     K k = K::kUndef;
     bool b = false;                  // kBool
     long long n = 0;                 // kNum（kBool 也借住在这里）
+    double nd = 0.0;                 // kNum 非整数值（整数值仍走 n，输出不带小数点）
+    bool is_float = false;           // kNum 是否来自 JSON 的非整数值（is_float 时用 nd）
     std::string s;                   // kStr
     std::shared_ptr<std::vector<Jv>> list;                        // kList
     std::shared_ptr<std::vector<std::pair<std::string, Jv>>> dict;  // kDict（namespace）
-    const Message* msg = nullptr;    // kMsg（消息代理：role/content 可读，其余属性未定义）
+    const Message* msg = nullptr;    // kMsg（消息代理：role/content/tool_calls 可读，其余属性未定义）
 
     struct Macro {
         std::string name;
@@ -48,6 +52,20 @@ struct Jv {
 
 Jv jv_str(std::string v) { Jv j; j.k = Jv::K::kStr; j.s = std::move(v); return j; }
 Jv jv_num(long long v) { Jv j; j.k = Jv::K::kNum; j.n = v; return j; }
+// JSON 数字 → 值：整数值（|x|<9.2e18）走整数位（Python json.loads("123") 是 int，渲染输出 "123"）；
+// 非整数值走 nd 位（to_chars 最短表示，"3.5" 不截断）。显式 "1.0" 也整化（Python 会输出 "1.0"，
+// 这是记录的裁剪差异：整数值一律不带小数点）。
+Jv jv_json_num(double v) {
+    Jv j;
+    j.k = Jv::K::kNum;
+    if (v == std::trunc(v) && v > -9.2e18 && v < 9.2e18) {
+        j.n = static_cast<long long>(v);
+    } else {
+        j.nd = v;
+        j.is_float = true;
+    }
+    return j;
+}
 Jv jv_bool(bool v) { Jv j; j.k = Jv::K::kBool; j.b = v; j.n = v; return j; }
 Jv jv_null() { Jv j; j.k = Jv::K::kNull; return j; }
 Jv jv_list() { Jv j; j.k = Jv::K::kList; j.list = std::make_shared<std::vector<Jv>>(); return j; }
@@ -65,13 +83,82 @@ Jv jv_bound(std::string base, std::string method) {
     return j;
 }
 
+// serve::Json → 值（tools 参数与消息 tool_calls 的入值路径）。
+Jv json_to_jv(const Json& j) {
+    switch (j.kind) {
+        case Json::kNull: return jv_null();
+        case Json::kBool: return jv_bool(j.b);
+        case Json::kNum: return jv_json_num(j.num);
+        case Json::kStr: return jv_str(j.str);
+        case Json::kArr: {
+            Jv l = jv_list();
+            for (const Json& e : j.arr) l.list->push_back(json_to_jv(e));
+            return l;
+        }
+        case Json::kObj: {
+            Jv d = jv_dict();
+            for (const auto& kv : j.obj) d.dict->emplace_back(kv.first, json_to_jv(kv.second));
+            return d;
+        }
+    }
+    return Jv();
+}
+
+// 双精度最短表示（to_chars；与 Python repr/json.dumps 的默认格式一致，1e-07 → "1e-07"）。
+std::string json_num_str(double x) {
+    char buf[64];
+    const auto r = std::to_chars(buf, buf + 64, x);
+    return std::string(buf, r.ptr);
+}
+
+// 值 → JSON 文本（tojson 过滤器；Strata 的 json.dumps(ensure_ascii=False) 同款：Python 默认
+// 分隔符 ", " / ": "，UTF-8 字节原样，整数值不带小数点）。未定义与其他值类型 → 报错。
+bool jv_to_json(const Jv& v, std::string& s, std::string& err) {
+    switch (v.k) {
+        case Jv::K::kUndef: err = "未定义值不能转 JSON"; return false;
+        case Jv::K::kNull: s = "null"; return true;
+        case Jv::K::kBool: s = v.b ? "true" : "false"; return true;
+        case Jv::K::kNum:
+            s = v.is_float ? json_num_str(v.nd) : std::to_string(v.n);
+            return true;
+        case Jv::K::kStr: s = "\"" + json_escape(v.s) + "\""; return true;
+        case Jv::K::kList: {
+            s = "[";
+            bool first = true;
+            for (const Jv& e : *v.list) {
+                std::string part;
+                if (!jv_to_json(e, part, err)) return false;
+                if (!first) s += ", ";
+                s += part;
+                first = false;
+            }
+            s += "]";
+            return true;
+        }
+        case Jv::K::kDict: {
+            s = "{";
+            bool first = true;
+            for (const auto& kv : *v.dict) {
+                std::string part;
+                if (!jv_to_json(kv.second, part, err)) return false;
+                if (!first) s += ", ";
+                s += "\"" + json_escape(kv.first) + "\": " + part;
+                first = false;
+            }
+            s += "}";
+            return true;
+        }
+        default: err = "该值类型不能转 JSON"; return false;
+    }
+}
+
 // 真值语义与 Jinja 一致：未定义/空/零/空串/空列表/空对象为假。
 bool jv_truthy(const Jv& v) {
     switch (v.k) {
         case Jv::K::kUndef:
         case Jv::K::kNull: return false;
         case Jv::K::kBool: return v.b;
-        case Jv::K::kNum: return v.n != 0;
+        case Jv::K::kNum: return v.is_float ? v.nd != 0 : v.n != 0;
         case Jv::K::kStr: return !v.s.empty();
         case Jv::K::kList: return v.list && !v.list->empty();
         case Jv::K::kDict: return v.dict && !v.dict->empty();
@@ -85,7 +172,13 @@ bool jv_equal(const Jv& a, const Jv& b) {
         case Jv::K::kUndef:
         case Jv::K::kNull: return true;
         case Jv::K::kBool: return a.b == b.b;
-        case Jv::K::kNum: return a.n == b.n;
+        case Jv::K::kNum:
+            if (a.is_float || b.is_float) {
+                const double x = a.is_float ? a.nd : static_cast<double>(a.n);
+                const double y = b.is_float ? b.nd : static_cast<double>(b.n);
+                return x == y;   // 与 Python 一致：1 == 1.0
+            }
+            return a.n == b.n;
         case Jv::K::kStr: return a.s == b.s;
         default: return false;
     }
@@ -95,7 +188,7 @@ bool jv_equal(const Jv& a, const Jv& b) {
 bool jv_to_str(const Jv& v, std::string& s, std::string& err) {
     switch (v.k) {
         case Jv::K::kStr: s = v.s; return true;
-        case Jv::K::kNum: s = std::to_string(v.n); return true;
+        case Jv::K::kNum: s = v.is_float ? json_num_str(v.nd) : std::to_string(v.n); return true;
         case Jv::K::kBool: s = v.b ? "True" : "False"; return true;
         case Jv::K::kNull: s = "None"; return true;
         case Jv::K::kUndef: err = "未定义值不能转字符串"; return false;
@@ -873,7 +966,14 @@ Jv get_attr(const Jv& v, const std::string& name) {
         case Jv::K::kMsg:
             if (name == "role") return jv_str(v.msg->role);
             if (name == "content") return jv_str(v.msg->content);
-            return Jv();   // reasoning_content / tool_calls 等 → 未定义
+            if (name == "tool_calls") {
+                // 无调用 → 未定义（模板工具分支的 `message.tool_calls and ...` 判假，语义同 Strata 缺键）。
+                if (v.msg->tool_calls.empty()) return Jv();
+                Jv l = jv_list();
+                for (const Json& c : v.msg->tool_calls) l.list->push_back(json_to_jv(c));
+                return l;
+            }
+            return Jv();   // reasoning_content 等 → 未定义
         case Jv::K::kStr:
             if (name == "startswith" || name == "endswith") return jv_bound(v.s, name);
             return Jv();
@@ -914,8 +1014,26 @@ bool eval_filter(const std::string& name, const Jv& v, const std::vector<std::sh
         return true;
     }
     if (name == "tojson" || name == "items") {
-        err = "过滤器 " + name + " 未实现（仅工具/视觉分支出现，文本输入不执行）——遇执行即报错，不静默错译";
-        return false;
+        if (!args.empty()) { err = "过滤器 " + name + " 不支持参数"; return false; }
+        if (name == "tojson") {
+            std::string s;
+            if (!jv_to_json(v, s, err)) return false;
+            out = jv_str(std::move(s));
+            return true;
+        }
+        // items：对象 → 键值对列表（保序），模板工具分支逐参数展开依赖。
+        if (v.k != Jv::K::kDict) { err = "items 只能作用于对象"; return false; }
+        Jv l = jv_list();
+        if (v.dict) {
+            for (const auto& kv : *v.dict) {
+                Jv pair = jv_list();
+                pair.list->push_back(jv_str(kv.first));
+                pair.list->push_back(kv.second);
+                l.list->push_back(std::move(pair));
+            }
+        }
+        out = std::move(l);
+        return true;
     }
     err = "不认识的过滤器：" + name;
     return false;
@@ -1013,7 +1131,15 @@ bool eval_expr(const Expr& e, Env& env, Jv& out, std::string& err) {
             Jv a, b;
             if (!eval_expr(*e.kids[0], env, a, err) || !eval_expr(*e.kids[1], env, b, err)) return false;
             if (a.k == Jv::K::kStr && b.k == Jv::K::kStr) { out = jv_str(a.s + b.s); return true; }
-            if (a.k == Jv::K::kNum && b.k == Jv::K::kNum) { out = jv_num(a.n + b.n); return true; }
+            if (a.k == Jv::K::kNum && b.k == Jv::K::kNum) {
+                if (a.is_float || b.is_float) {
+                    out = jv_json_num((a.is_float ? a.nd : static_cast<double>(a.n)) +
+                                      (b.is_float ? b.nd : static_cast<double>(b.n)));
+                } else {
+                    out = jv_num(a.n + b.n);
+                }
+                return true;
+            }
             if (a.k == Jv::K::kUndef || b.k == Jv::K::kUndef) { err = "未定义值参与加法"; return false; }
             err = "加法两侧类型不一致（与 Jinja 一致：字符串只拼字符串、数字加法）";
             return false;
@@ -1021,7 +1147,15 @@ bool eval_expr(const Expr& e, Env& env, Jv& out, std::string& err) {
         case ET::kSub: {
             Jv a, b;
             if (!eval_expr(*e.kids[0], env, a, err) || !eval_expr(*e.kids[1], env, b, err)) return false;
-            if (a.k == Jv::K::kNum && b.k == Jv::K::kNum) { out = jv_num(a.n - b.n); return true; }
+            if (a.k == Jv::K::kNum && b.k == Jv::K::kNum) {
+                if (a.is_float || b.is_float) {
+                    out = jv_json_num((a.is_float ? a.nd : static_cast<double>(a.n)) -
+                                      (b.is_float ? b.nd : static_cast<double>(b.n)));
+                } else {
+                    out = jv_num(a.n - b.n);
+                }
+                return true;
+            }
             if (a.k == Jv::K::kUndef || b.k == Jv::K::kUndef) { err = "未定义值参与减法"; return false; }
             err = "减法两侧必须是数字";
             return false;
@@ -1050,7 +1184,15 @@ bool eval_expr(const Expr& e, Env& env, Jv& out, std::string& err) {
             Jv a, b;
             if (!eval_expr(*e.kids[0], env, a, err) || !eval_expr(*e.kids[1], env, b, err)) return false;
             int cmp = 0;
-            if (a.k == Jv::K::kNum && b.k == Jv::K::kNum) cmp = (a.n > b.n) - (a.n < b.n);
+            if (a.k == Jv::K::kNum && b.k == Jv::K::kNum) {
+                if (a.is_float || b.is_float) {
+                    const double x = a.is_float ? a.nd : static_cast<double>(a.n);
+                    const double y = b.is_float ? b.nd : static_cast<double>(b.n);
+                    cmp = (x > y) - (x < y);
+                } else {
+                    cmp = (a.n > b.n) - (a.n < b.n);
+                }
+            }
             else if (a.k == Jv::K::kStr && b.k == Jv::K::kStr) cmp = (a.s > b.s) - (a.s < b.s);
             else { err = "比较两侧类型不一致"; return false; }
             const bool r = e.t == ET::kGt ? cmp > 0 : e.t == ET::kLt ? cmp < 0 :
@@ -1122,6 +1264,13 @@ bool eval_expr(const Expr& e, Env& env, Jv& out, std::string& err) {
             if (a.k == Jv::K::kMsg && key.k == Jv::K::kStr) {
                 if (key.s == "role") { out = jv_str(a.msg->role); return true; }
                 if (key.s == "content") { out = jv_str(a.msg->content); return true; }
+                if (key.s == "tool_calls") {
+                    if (a.msg->tool_calls.empty()) { out = Jv(); return true; }
+                    Jv l = jv_list();
+                    for (const Json& c : a.msg->tool_calls) l.list->push_back(json_to_jv(c));
+                    out = std::move(l);
+                    return true;
+                }
                 err = "未知消息键：" + key.s;
                 return false;
             }
@@ -1359,7 +1508,7 @@ bool run(const std::vector<Op>& ops, std::size_t from, std::size_t to, Env& env,
 }  // namespace
 
 bool render_chat(const std::string& tpl, const std::vector<Message>& msgs, bool add_generation_prompt,
-                 std::string& out, std::string& err) {
+                 std::string& out, std::string& err, const Json* tools) {
     std::vector<Op> ops;
     if (!compile(tpl, ops, err)) return false;
     Env env;
@@ -1372,6 +1521,8 @@ bool render_chat(const std::string& tpl, const std::vector<Message>& msgs, bool 
     global["add_generation_prompt"] = jv_bool(add_generation_prompt);
     global["bos_token"] = jv_str("");
     global["eos_token"] = jv_str("");
+    // 工具列表（服务层已解析成模板形状）注入 tools 变量；缺省不注入 → 模板 tools 分支不进入。
+    if (tools != nullptr) global["tools"] = json_to_jv(*tools);
     // 宏登记到全局作用域（定义位置之后调用，编译期一次性收起）。
     for (std::size_t idx = 0; idx < ops.size(); ++idx) {
         if (ops[idx].kind != Kind::kMacro) continue;
