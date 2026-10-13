@@ -65,9 +65,10 @@ struct ServeConfig {
                                          // tokens (reversed semantics: 0 = all-resident; above N
                                          // the oldest pages stream back to the host store)
     std::uint64_t reject_after = 0;      // 0 = off; >0 = 503 every request from the Nth (integration tests; see main)
-    // Compute backend (P2, ADR-017): "inhouse" = the in-house Engine (default), "strata" = the
-    // vendored engine driven over its line protocol. engine_exe/engine_args are strata-only.
-    std::string backend = "inhouse";
+    // Compute backend (P2, ADR-017): "strata" = the vendored engine driven over its line protocol
+    // (the default now that P2's end-to-end A/B is green), "inhouse" = the in-house Engine.
+    // strata needs engine_exe; engine_args are strata-only.
+    std::string backend = "strata";
     std::string engine_exe;                  // --engine-exe: path to the vendored engine binary
     std::vector<std::string> engine_args;    // --engine-arg ARG, repeatable (order preserved)
     // Facade geometry passthrough (defaults = real-model derived values; integration tests override).

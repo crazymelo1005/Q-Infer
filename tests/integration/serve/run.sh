@@ -21,7 +21,8 @@ bad()  { FAIL=$((FAIL+1)); echo "FAIL  $1"; }
 
 # Start the server; wait for /health.
 start() {   # start <extra args...>
-  "$SERVER" --model "$FIX" --host "$HOST" --port "$PORT" --n-embd 256 --hc 2 --hc-lr 3 \
+  "$SERVER" --model "$FIX" --host "$HOST" --port "$PORT" --backend inhouse \
+            --n-embd 256 --hc 2 --hc-lr 3 \
             --layers 2 --top-k 2 --gdn-head-dim 32 --qsa-head-dim 32 --n-rot 4 \
             --idx-dim 4 --idx-top-k 2048 --idx-block 4 --max-context 4096 "$@" >"$LOG" 2>&1 &
   PID=$!
@@ -643,7 +644,8 @@ stop
 #     active; both *_cuda paths of layer 0 GDN + layer 1 QSA run), and one request verifies the device-inference
 #     output; on a CUDA-less build startup must be rejected (an explicit error, no silent fallback). Without
 #     --gpu the server starts as usual (pure-CPU path unchanged; the other cases in this script exercise it).
-timeout 8 "$SERVER" --model "$FIX" --host "$HOST" --port "$PORT" --n-embd 256 --hc 2 --hc-lr 3 \
+timeout 8 "$SERVER" --model "$FIX" --host "$HOST" --port "$PORT" --backend inhouse \
+          --n-embd 256 --hc 2 --hc-lr 3 \
           --layers 2 --top-k 2 --gdn-head-dim 32 --qsa-head-dim 32 --n-rot 4 --idx-dim 4 \
           --idx-top-k 2048 --idx-block 4 --max-context 4096 --api-key testkey --kv-slots 8 \
           --kv-resident 4 --gpu 0 \
@@ -724,6 +726,17 @@ else
   bad "P2 --backend strata without --engine-exe: exit=$rc (124=hung), log $(tail -2 /tmp/backend-strata.log)"
 fi
 rm -f /tmp/backend-strata.log
+
+# ---- P2: the default backend is strata, so a bare start must be refused with an actionable message
+timeout 10 "$SERVER" --model "$FIX" --port "$PORT" >/tmp/backend-default.log 2>&1
+rc=$?
+if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && grep -q -- "--engine-exe" /tmp/backend-default.log \
+   && grep -q -- "--backend inhouse" /tmp/backend-default.log; then
+  ok "P2 default --backend is strata: a bare start is refused and names both remedies (exit=$rc)"
+else
+  bad "P2 default backend: exit=$rc (124=hung), log $(tail -2 /tmp/backend-default.log)"
+fi
+rm -f /tmp/backend-default.log
 
 echo "serve integration: passed $PASS, failed $FAIL"
 [ "$FAIL" = 0 ]

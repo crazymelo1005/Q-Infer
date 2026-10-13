@@ -160,7 +160,8 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     if (a.count("--engine-exe")) c.engine_exe = a["--engine-exe"];
     c.engine_args = std::move(engine_args);
     if (c.backend == "strata" && c.engine_exe.empty()) {
-        err = "--backend strata needs --engine-exe <path to the vendored engine binary>";
+        err = "--backend defaults to strata, which needs --engine-exe <path to the vendored "
+              "engine binary>; pass --backend inhouse to use the in-house engine instead";
         return {};
     }
     if (c.backend != "strata" && !c.engine_args.empty()) {
@@ -218,7 +219,9 @@ int main(int argc, char** argv) {
                              "inference thread pool (default: half the physical cores, capped at 8; "
                              "1 or negative = single-threaded); --lang selects the startup-log language "
                              "(en default, zh optional); --gpu selects CUDA devices (auto = all, "
-                             "0,1 = explicit; requires a CUDA-enabled build)\n");
+                             "0,1 = explicit; requires a CUDA-enabled build); --backend defaults to "
+                             "strata and then needs --engine-exe (pass --backend inhouse to run the "
+                             "in-house engine)\n");
         return 2;
     }
     // --reject-after: integration-test-only knob for deterministic 503s (reject every
@@ -234,8 +237,8 @@ int main(int argc, char** argv) {
 #endif
     if (cfg.backend == "strata" && (cfg.gpu_auto || !cfg.gpu_devices.empty())) {
         std::fprintf(stderr,
-                     "--gpu applies to --backend inhouse; the strata engine manages its own devices "
-                     "(pass them through --engine-arg instead)\n");
+                     "--gpu applies to the in-house backend only; pass --backend inhouse, or give "
+                     "the strata engine its devices through --engine-arg\n");
         return 1;
     }
     std::shared_ptr<Backend> eng;

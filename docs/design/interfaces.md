@@ -190,7 +190,7 @@ KV 的设备侧同样走这条缝（阶段 B 落法）：`DenseExec.kv`（`KvDev
 
 计算后端可换成厂商化的 Strata 引擎（[ADR-016](adr/ADR-016-vendored-strata-backend.md)、[ADR-017](adr/ADR-017-serve-engine-seam.md)），以子进程形态接入：驱动层驱动它的 stdin/stdout 行协议，不共享地址空间，故引擎的 CUDA 依赖不进入本仓库的链接面（ADR-008）。驱动接口在 `src/engine`：`EngineProcess`（起进程、按行读写、`wait_timeout` / `kill`）与 `EngineDriver`（`start` 握手、`generate` 单请求、`acquire_slot` / `generate_batch` / `cancel_slot` 批槽位、`stop_and_recover` 重启）。
 
-服务层只依赖纯虚接口 `Backend`（`src/serve/facade.hpp`）：`generate`（已编码 id 进、逐 token 文本出）、`tokenizer` / `chat_template` / `model_name` / `config` 与三个 KV 统计。自研 `Engine` 与 `StrataBackend`（`src/serve/backend_strata.hpp`）各实现它；后者持 `EngineDriver` 与词表，负责 id→文本、stop 截断与中断映射，KV 统计恒 0（引擎自管）。`--backend inhouse|strata` 选择实现，默认 `inhouse`；`strata` 由 `--engine-exe` / `--engine-arg` 指向引擎与其参数。真机 A/B 判据见 ADR-017 后果。
+服务层只依赖纯虚接口 `Backend`（`src/serve/facade.hpp`）：`generate`（已编码 id 进、逐 token 文本出）、`tokenizer` / `chat_template` / `model_name` / `config` 与三个 KV 统计。自研 `Engine` 与 `StrataBackend`（`src/serve/backend_strata.hpp`）各实现它；后者持 `EngineDriver` 与词表，负责 id→文本、stop 截断与中断映射，KV 统计恒 0（引擎自管）。`--backend inhouse|strata` 选择实现，默认 `strata`（[ADR-018](adr/ADR-018-default-backend-strata.md)）；`strata` 由 `--engine-exe` / `--engine-arg` 指向引擎与其参数。真机 A/B 判据见 ADR-017 后果。
 
 ## 9. 尚未定义
 

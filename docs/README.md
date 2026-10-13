@@ -39,6 +39,7 @@
 | [`design/adr/ADR-014-gpu-igpu-serve.md`](design/adr/ADR-014-gpu-igpu-serve.md) | GPU/核显服务接入：分工求解器 + 阶段化迁移（A dense 上卡已交付） | 接受 |
 | [`design/adr/ADR-016-vendored-strata-backend.md`](design/adr/ADR-016-vendored-strata-backend.md) | 计算后端：厂商化 Strata 引擎作后端（进程边界=依赖边界） | 接受 |
 | [`design/adr/ADR-017-serve-engine-seam.md`](design/adr/ADR-017-serve-engine-seam.md) | 服务层引擎缝：`Backend` 接口与 `--backend strata|inhouse` | 接受 |
+| [`design/adr/ADR-018-default-backend-strata.md`](design/adr/ADR-018-default-backend-strata.md) | 默认计算后端切到厂商化引擎（P2 验收后） | 接受 |
 | [glossary.md](glossary.md) | 术语的唯一口径 | 完成 |
 | [hardware.md](hardware.md) | 两套测试环境的硬件规格 | 完成 |
 | [research/01-strata-engine.md](research/01-strata-engine.md) | 参考范本引擎的原理与边界 | 完成 |
