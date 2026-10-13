@@ -4,9 +4,11 @@
 
 #if defined(__unix__)
 #include <cerrno>
+#include <chrono>
 #include <csignal>
 #include <cstring>
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -180,6 +182,37 @@ bool EngineProcess::read_line(std::string& line, std::string& err) {
     }
 }
 
+bool EngineProcess::read_line_timeout(std::string& line, std::string& err, int ms) {
+    err.clear();
+    const std::chrono::steady_clock::time_point deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(ms > 0 ? ms : 0);
+    for (;;) {
+        if (out_buf_.find('\n') != std::string::npos || eof_) return read_line(line, err);
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline) {
+            err = "timed out waiting for a line";
+            return false;
+        }
+        const int remaining = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count());
+        pollfd pfd;
+        pfd.fd = out_fd_;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        const int r = ::poll(&pfd, 1, remaining > 0 ? remaining : 1);
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            err = std::string("poll: ") + std::strerror(errno);
+            return false;
+        }
+        if (r == 0) {
+            err = "timed out waiting for a line";
+            return false;
+        }
+        return read_line(line, err);  // data (or EOF) is ready; the read returns promptly
+    }
+}
+
 bool EngineProcess::alive() const {
     if (pid_ <= 0) return false;
     const pid_t pid = static_cast<pid_t>(pid_);
@@ -255,6 +288,11 @@ bool EngineProcess::write_line(const std::string&, std::string& err) {
 }
 
 bool EngineProcess::read_line(std::string&, std::string& err) {
+    err = "EngineProcess is POSIX-only in this build";
+    return false;
+}
+
+bool EngineProcess::read_line_timeout(std::string&, std::string& err, int) {
     err = "EngineProcess is POSIX-only in this build";
     return false;
 }

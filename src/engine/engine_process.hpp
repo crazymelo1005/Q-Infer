@@ -30,6 +30,9 @@ public:
 
     bool write_line(const std::string& line, std::string& err);   // appends '\n', writes all
     bool read_line(std::string& line, std::string& err);          // blocking; false at EOF
+    // Like read_line, but returns false with a "timed out" err if no line arrives within ms.
+    // false with an empty err still means EOF. Used for the engine's bounded READY handshake.
+    bool read_line_timeout(std::string& line, std::string& err, int ms);
     bool alive() const;                 // false once the child has exited (reaps a zombie)
     int wait_timeout(int ms);           // -1 still running / error, else exit code; reaps
     void kill();                        // SIGKILL then reap; idempotent

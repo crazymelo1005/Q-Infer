@@ -61,7 +61,11 @@ void do_bgen(int slot, int64_t max_new) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    const std::string scenario = argc > 1 ? argv[1] : "basic";
+    // The driver spawns the engine as [exe, "--serve", *args]; skip that flag and take the next
+    // argument as the scenario (the mock stands in for the engine, which also takes --serve).
+    int idx = 1;
+    if (argc > idx && std::string(argv[idx]) == "--serve") ++idx;
+    const std::string scenario = argc > idx ? argv[idx] : "basic";
 
     if (scenario == "never_ready") {
         emit("INFO engine=mock");
