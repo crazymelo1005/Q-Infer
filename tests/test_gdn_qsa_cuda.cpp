@@ -2,6 +2,9 @@
 // 本文件由 measure/ 的 oracle 工具生成的 .inc 提供真字节（部署 GGUF 的投影权重前若干块），
 // 目标判据照 ADR-009 分布级口径：位相同比例 + L1 相对差小（h 量化在舍入边界可差一步）。
 // 后续内核（gdn_proj_gemv / gdn_preprocess_cuda / gdn_step_cuda / qsa_*_cuda）逐个在这里对照。
+#include "artifact/gguf_table.hpp"
+#include "dense/gdn_layer.hpp"
+#include "dense/gdn_layer_cuda.hpp"
 #include "dense/gdn_preprocess.hpp"
 #include "dense/gdn_preprocess_cuda.hpp"
 #include "dense/gdn_recurrence.hpp"
@@ -16,6 +19,7 @@
 #include <cstdio>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -309,16 +313,77 @@ int test_gdn_closing_cuda() {
     return worst < 1e-5 ? 0 : 1;
 }
 
+// 真模型整层对照（Task 5）：环境2 上 `--model <部署 GGUF> [--layer N]` 时，主机 run_gdn_layer
+// 对设备 run_gdn_layer_cuda 同输入对照；2 步连跑（状态跨 token）。判据 ADR-009 分布级。
+int manual_gdn_layer_entry(const char* model, int layer) {
+    qinfer::artifact::GgufFile g;
+    std::string err;
+    if (!g.open(model, err)) {
+        std::printf("打不开模型：%s（%s）\n", model, err.c_str());
+        return 1;
+    }
+    qinfer::dense::GdnLayer gl;
+    if (!qinfer::dense::build_gdn_layer(g, layer, 2560, 128, 4, gl, err)) {
+        std::printf("层 %d 建不起来：%s\n", layer, err.c_str());
+        return 1;
+    }
+    std::printf("层 %d：conv_dim %llu、value_dim %llu、q/k 各 %llu 头、v %llu 头、头宽 %llu；档 ",
+                layer, static_cast<unsigned long long>(gl.qkv.rows),
+                static_cast<unsigned long long>(gl.gate.rows),
+                static_cast<unsigned long long>(gl.pre.n_q_head),
+                static_cast<unsigned long long>(gl.pre.n_v_head),
+                static_cast<unsigned long long>(gl.pre.head_dim));
+    std::printf("%s / %s / %s\n", qinfer::experts::format_name(gl.qkv.format),
+                qinfer::experts::format_name(gl.gate.format),
+                qinfer::experts::format_name(gl.out.format));
+    std::vector<float> x(static_cast<std::size_t>(gl.pre.n_embd), 0.5f);
+    double worst = 0.0;
+    qinfer::dense::GdnScratch host_s, dev_s;
+    std::vector<float> host_out(gl.pre.n_embd), dev_out(gl.pre.n_embd);
+    for (int step = 0; step < 2; ++step) {  // 2 步：状态跨 token
+        if (!qinfer::dense::run_gdn_layer(g, gl, x.data(), host_out.data(), host_s, err)) {
+            std::printf("主机层 %d 跑不动（step %d）：%s\n", layer, step, err.c_str());
+            return 1;
+        }
+        if (!qinfer::dense::run_gdn_layer_cuda(g, gl, x.data(), dev_out.data(), dev_s, err)) {
+            std::printf("设备层 %d 跑不动（step %d）：%s\n", layer, step, err.c_str());
+            return 1;
+        }
+        double d = 0.0, mag = 0.0;
+        for (std::size_t i = 0; i < host_out.size(); ++i) {
+            d += std::fabs(static_cast<double>(host_out[i]) - static_cast<double>(dev_out[i]));
+            mag += std::fabs(static_cast<double>(host_out[i]));
+        }
+        worst = std::max(worst, d / (mag > 1e-30 ? mag : 1e-30));
+    }
+    std::printf("  整层 2 步（状态跨 token）主机 vs 设备最差相对 L1 %.3e\n", worst);
+    return worst < 1e-4 ? 0 : 1;
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
     test_oracle_fixtures_load();
     int rc = test_dense_proj_formats();
     rc += test_gdn_preprocess_cuda();
     rc += test_gdn_recurrence_cuda();
     rc += test_gdn_closing_cuda();
+    // --model <GGUF> [--layer N]：真权重整层对照（环境2 用；无参数时合成用例已覆盖各段）。
+    int layer = 1;
+    for (int i = 1; i + 1 < argc; ++i) {
+        if (std::string(argv[i]) == "--model") {
+        }
+    }
+    if (argc >= 3 && std::string(argv[1]) == "--model") {
+        for (int i = 2; i < argc; ++i) {
+            if (std::string(argv[i]) == "--layer" && i + 1 < argc) {
+                layer = std::atoi(argv[++i]);
+            }
+        }
+        rc += manual_gdn_layer_entry(argv[2], layer);
+    }
     if (rc == 0) {
-        std::puts("gdn_qsa_cuda: 稠密投影 + GDN 前段/递推/收尾设备对照全部通过");
+        std::puts("gdn_qsa_cuda: 稠密投影 + GDN 前段/递推/收尾/整层设备对照全部通过");
     }
     return rc;
 }
