@@ -465,6 +465,11 @@ if(QINFER_ENABLE_CUDA)
   target_link_libraries(test_iq_gemv_cuda PRIVATE qinfer_kernels_cuda)
   add_test(NAME iq_gemv_cuda COMMAND test_iq_gemv_cuda)
 
+  # 阶段 A：GDN/QSA 稠密段设备路径的对照载体（真字节夹具 + 各内核判据）。
+  add_executable(test_gdn_qsa_cuda tests/test_gdn_qsa_cuda.cpp)
+  target_link_libraries(test_gdn_qsa_cuda PRIVATE qinfer_kernels_cuda)
+  add_test(NAME gdn_qsa_cuda COMMAND test_gdn_qsa_cuda)
+
   # 设备侧的专家前馈（权重常驻）住在 experts 一侧：它要按档分派、并复用主机的激活量化器，
   # 故不能塞进只依赖 kernels 的那个库里。
   add_library(qinfer_experts_cuda
