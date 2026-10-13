@@ -1,7 +1,10 @@
 #include "engine/engine_protocol.hpp"
 
+#include <cctype>
 #include <charconv>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 
 namespace qinfer::engine {
 namespace {
@@ -28,6 +31,43 @@ std::string join_ids(const std::vector<int32_t>& ids) {
         out += std::to_string(ids[i]);
     }
     return out;
+}
+
+std::vector<std::string> split_ws(const std::string& s) {
+    std::vector<std::string> out;
+    std::size_t i = 0;
+    while (i < s.size()) {
+        while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+        std::size_t j = i;
+        while (j < s.size() && !std::isspace(static_cast<unsigned char>(s[j]))) ++j;
+        if (j > i) out.emplace_back(s.substr(i, j - i));
+        i = j;
+    }
+    return out;
+}
+
+// These never throw on malformed input: strtoull/strtod return 0 on no-conversion, which is
+// the same default the field already carries, so a short or odd line degrades rather than aborts.
+uint64_t to_u64(const std::string& s) { return std::strtoull(s.c_str(), nullptr, 10); }
+double to_f64(const std::string& s) { return std::strtod(s.c_str(), nullptr); }
+int to_int(const std::string& s) { return static_cast<int>(std::strtoll(s.c_str(), nullptr, 10)); }
+int32_t to_i32(const std::string& s) { return static_cast<int32_t>(std::strtoll(s.c_str(), nullptr, 10)); }
+
+// Join tokens [from, end) back with single spaces (the message text of READY/ERR/...).
+std::string tail(const std::vector<std::string>& t, std::size_t from) {
+    std::string out;
+    for (std::size_t i = from; i < t.size(); ++i) {
+        if (i > from) out += ' ';
+        out += t[i];
+    }
+    return out;
+}
+
+void read_fields(const std::vector<std::string>& t, std::map<std::string, std::string>& out) {
+    for (std::size_t i = 1; i < t.size(); ++i) {
+        const std::size_t eq = t[i].find('=');
+        if (eq != std::string::npos) out[t[i].substr(0, eq)] = t[i].substr(eq + 1);
+    }
 }
 
 }  // namespace
@@ -60,5 +100,94 @@ std::string build_bstop(int slot) { return "BSTOP " + std::to_string(slot); }
 std::string build_stop() { return "STOP"; }
 std::string build_quit() { return "QUIT"; }
 std::string build_vram() { return "VRAM"; }
+
+EngineEvent parse_event(const std::string& line) {
+    EngineEvent e;
+    const std::vector<std::string> t = split_ws(line);
+    if (t.empty()) return e;
+    const std::string& cmd = t[0];
+
+    if (cmd == "READY") {
+        e.kind = EventKind::kReady;
+        if (t.size() > 1) e.u = to_u64(t[1]);
+        e.raw = tail(t, 2);
+    } else if (cmd == "INFO") {
+        e.kind = EventKind::kInfo;
+        read_fields(t, e.fields);
+    } else if (cmd == "VRAM") {
+        e.kind = EventKind::kVram;
+        read_fields(t, e.fields);
+    } else if (cmd == "T") {
+        e.kind = EventKind::kToken;
+        if (t.size() > 1) e.token = to_i32(t[1]);
+    } else if (cmd == "PP") {
+        e.kind = EventKind::kPrefill;
+        if (t.size() > 1) e.u = to_u64(t[1]);
+        if (t.size() > 2) e.prompt_tokens = to_u64(t[2]);
+        if (t.size() > 3) e.d = to_f64(t[3]);
+        if (t.size() > 4) e.tok_s = to_f64(t[4]);
+    } else if (cmd == "RESUME") {
+        e.kind = EventKind::kResume;
+        if (t.size() > 1) e.u = to_u64(t[1]);
+    } else if (cmd == "DONE") {
+        e.kind = EventKind::kDone;
+        const std::size_t n = t.size() - 1;  // field count after the command word
+        auto u_at = [&](std::size_t k, uint64_t& out) { if (k < n) out = to_u64(t[k + 1]); };
+        auto f_at = [&](std::size_t k, double& out) { if (k < n) out = to_f64(t[k + 1]); };
+        u_at(0, e.done.generated);
+        u_at(1, e.done.prompt_tokens);
+        f_at(2, e.done.prompt_ms);
+        f_at(3, e.done.decode_ms);
+        if (n > 4) e.done.finish = t[5];
+        u_at(5, e.done.drafts_accepted);
+        u_at(6, e.done.drafts_offered);
+        u_at(7, e.done.reused);
+        u_at(8, e.done.hits);
+        u_at(9, e.done.lookups);
+        u_at(10, e.done.ram_blobs);
+        u_at(11, e.done.file_blobs);
+        f_at(12, e.done.file_mb);
+        u_at(13, e.done.prompt_read);
+        u_at(14, e.done.offloaded);
+    } else if (cmd == "BADM") {
+        e.kind = EventKind::kBadm;
+        if (t.size() > 1) e.slot = to_int(t[1]);
+        if (t.size() > 2) e.admitted = (t[2] == "1");
+    } else if (cmd == "BT") {
+        e.kind = EventKind::kBatchToken;
+        if (t.size() > 1) e.slot = to_int(t[1]);
+        if (t.size() > 2) e.token = to_i32(t[2]);
+    } else if (cmd == "BDONE") {
+        e.kind = EventKind::kBatchDone;
+        if (t.size() > 1) e.slot = to_int(t[1]);
+        if (t.size() > 2) e.done.generated = to_u64(t[2]);
+        if (t.size() > 3) e.done.finish = t[3];
+        if (t.size() > 4) e.d = to_f64(t[4]);
+    } else if (cmd == "YIELDED" || cmd == "BYIELDED") {
+        e.kind = EventKind::kYielded;
+        if (t.size() > 1) e.u = to_u64(t[1]);
+    } else if (cmd == "SESSION") {
+        e.kind = EventKind::kSession;
+        e.raw = tail(t, 1);
+    } else if (cmd == "SWAIT") {
+        e.kind = EventKind::kSwait;
+        e.raw = tail(t, 1);
+    } else if (cmd == "SERR") {
+        e.kind = EventKind::kSerr;
+        e.raw = tail(t, 1);
+    } else if (cmd == "FATAL") {
+        e.kind = EventKind::kFatal;
+        e.raw = tail(t, 1);
+    } else if (cmd == "ERR") {
+        e.kind = EventKind::kErr;
+        e.raw = tail(t, 1);
+    } else {
+        // Any other word (INFO-adjacent lines, SAVED/RESTORED, RESUME's sibling RESUED, ...) is
+        // not a failure: the protocol grows, so unknown lines are kOther with their text in raw.
+        e.kind = EventKind::kOther;
+        e.raw = tail(t, 1);
+    }
+    return e;
+}
 
 }  // namespace qinfer::engine

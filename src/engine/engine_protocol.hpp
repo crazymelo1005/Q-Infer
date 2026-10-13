@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -35,5 +36,43 @@ std::string build_bstop(int slot);   // "BSTOP <slot>"
 std::string build_stop();            // "STOP"
 std::string build_quit();            // "QUIT"
 std::string build_vram();            // "VRAM"
+
+// ---- parsing the engine's stdout ----------------------------------------------------------
+
+// One parsed stdout line. An unrecognized command is kOther, never a failure: the protocol
+// grows (0.1.43.1 already emits RESUME and REUSED, which the driver does not act on).
+enum class EventKind {
+    kReady, kInfo, kVram, kToken, kPrefill, kResume, kDone,
+    kBadm, kBatchToken, kBatchDone, kYielded, kSession, kSwait,
+    kSerr, kFatal, kErr, kOther
+};
+
+// The DONE line, in field order. A line with fewer fields than a later engine version emits
+// still parses: missing trailing fields stay at their zero default (never index past present).
+struct DoneInfo {
+    uint64_t generated = 0, prompt_tokens = 0;
+    double prompt_ms = 0, decode_ms = 0;
+    std::string finish;              // stop | length | cancel | nonfinite
+    uint64_t drafts_accepted = 0, drafts_offered = 0, reused = 0,
+             hits = 0, lookups = 0, ram_blobs = 0, file_blobs = 0,
+             prompt_read = 0, offloaded = 0;
+    double file_mb = 0;
+};
+
+struct EngineEvent {
+    EventKind kind = EventKind::kOther;
+    std::string raw;                 // unparsed remainder / message text
+    uint64_t u = 0;                  // READY ctx, PP position, RESUME n, BADM/YIELDED count
+    int slot = -1;
+    int32_t token = 0;               // T / BT
+    double d = 0;                    // PP ms / BDONE ms
+    double tok_s = 0;                // PP tok/s
+    uint64_t prompt_tokens = 0;      // PP
+    bool admitted = false;           // BADM <slot> 1|0
+    DoneInfo done;
+    std::map<std::string, std::string> fields;   // INFO / VRAM key=value pairs
+};
+
+EngineEvent parse_event(const std::string& line);
 
 }  // namespace qinfer::engine

@@ -458,6 +458,10 @@ target_include_directories(qinfer_engine PUBLIC src)
 add_executable(test_engine_protocol tests/test_engine_protocol.cpp)
 target_link_libraries(test_engine_protocol PRIVATE qinfer_engine)
 add_test(NAME engine_protocol COMMAND test_engine_protocol)
+# The same binary re-run with the recorded transcript: parses every line and checks the
+# driver-critical shapes (READY/T/DONE) against the real engine's bytes.
+add_test(NAME engine_protocol_transcript COMMAND test_engine_protocol
+         ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/strata_transcript_gen.txt)
 
 # ---- CUDA 内核（默认关闭）----
 # ADR-008 第 2 条：骨架不依赖 CUDA，CI 在没有 GPU 的 runner 上只编主机侧、照样跑测试。
