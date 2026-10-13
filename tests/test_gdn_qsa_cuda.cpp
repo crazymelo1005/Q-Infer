@@ -36,6 +36,9 @@
 #include "gdn_iq3s_oracle_data.inc"
 #include "gdn_iq4xs_oracle_data.inc"
 #include "gdn_q6k_oracle_data.inc"
+// Q8_0 档（合成夹具的稠密权重正是这个档，dense 设备入口必须覆盖）复用专家侧的
+// q8_0_oracle_data.inc（真字节，16 块），不与主机 test_q8_0 冲突（只读符号，两个目标各编一份）。
+#include "q8_0_oracle_data.inc"
 
 namespace {
 
@@ -89,15 +92,18 @@ void test_oracle_fixtures_load() {
                 iq3s.size(), q6k.size());
 }
 
-// 一个档的一次对照：oracle 真字节（64 块）循环 tile 成 rows × blocks 矩阵，
+// 一个档的一次对照：oracle 真字节（前 src_blocks 块）循环 tile 成 rows × blocks 矩阵，
 // 主机 quantize_input + run_gemv 对设备 gdn_proj_gemv，compare_rows 判据。
 int gemv_against_host(qinfer::experts::Format fmt, const std::string& hex, std::uint64_t cols,
-                      std::uint64_t rows, std::uint64_t blocks_per_row) {
-    std::printf("== %s: cols %llu rows %llu 块/行 %llu ==\n", qinfer::experts::format_name(fmt),
-                static_cast<unsigned long long>(cols), static_cast<unsigned long long>(rows),
-                static_cast<unsigned long long>(blocks_per_row));
+                      std::uint64_t rows, std::uint64_t blocks_per_row,
+                      std::uint64_t src_blocks = 64) {
+    std::printf("== %s: cols %llu rows %llu 块/行 %llu（夹具 %llu 块）==\n",
+                qinfer::experts::format_name(fmt), static_cast<unsigned long long>(cols),
+                static_cast<unsigned long long>(rows),
+                static_cast<unsigned long long>(blocks_per_row),
+                static_cast<unsigned long long>(src_blocks));
     const std::vector<std::uint8_t> src = from_hex(hex);
-    constexpr std::uint64_t kSrcBlocks = 64;
+    const std::uint64_t kSrcBlocks = src_blocks;
     const std::uint64_t blk_bytes = src.size() / kSrcBlocks;
     CHECK(src.size() % kSrcBlocks == 0);
     const std::uint64_t n_blk = rows * blocks_per_row;
@@ -112,7 +118,13 @@ int gemv_against_host(qinfer::experts::Format fmt, const std::string& hex, std::
     m.experts = 1;
     m.cols = cols;
     m.rows = rows;
-    std::vector<float> x(static_cast<std::size_t>(cols), 0.5f);
+    // 激活给非均匀分布（不是全 0.5）：常值激活会让各块的整数码趋同，弱化对照强度——某些错读法
+    // （如激活尺度泄漏/码字节偏移）在常值下可能被遮掩，变值分布是为了让它们必然现形。
+    std::vector<float> x(static_cast<std::size_t>(cols));
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        x[i] = 0.5f + 0.01f * static_cast<float>((i * 7 + 3) % 11) *
+                          (static_cast<float>(i % 2) * 2.0f - 1.0f);
+    }
     std::vector<float> host_out(static_cast<std::size_t>(rows), 0.0f);
     std::vector<float> dev_out(static_cast<std::size_t>(rows), 0.0f);
     qinfer::experts::FfnScratch sc;
@@ -136,6 +148,10 @@ int test_dense_proj_formats() {
     bad += gemv_against_host(qinfer::experts::Format::kIq4Xs, kIq4xsRealHex, 2560, 10240, 10);
     bad += gemv_against_host(qinfer::experts::Format::kIq3S, kIq3sRealHex, 2560, 6144, 10);
     bad += gemv_against_host(qinfer::experts::Format::kQ6K, kQ6kRealHex, 2560, 512, 10);
+    // Q8_0 档：合成夹具（serve_fixture_gen / test_facade）的稠密权重全是它，--gpu 时设备路径必须
+    // 覆盖；oracle 取 q8_0_oracle_data.inc（ffn_down_shexp 真字节，16 块）。Q8_0 的激活搭档是
+    // Q8_0（32 值块，quantize_input 按 activation_format 给 act_32）——与 Q2_0 同款布局。
+    bad += gemv_against_host(qinfer::experts::Format::kQ8_0, kQ80RealHex, 2560, 640, 80, 16);
     // 专家诸档（Q2_0/IQ2_S/IQ2_XXS/IQ1_M）由 test_q2_0_cuda / test_iq2s_cuda / test_iq_gemv_cuda
     // 各自钉位；gdn_proj_gemv 对它们的转发由本档的 kIq4Xs 一条验证分派表入口不破即可。
     return bad;

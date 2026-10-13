@@ -14,6 +14,7 @@
 #include "kernels/cuda/iq4xs_gemv.hpp"
 #include "kernels/cuda/q2_0_gemv.hpp"
 #include "kernels/cuda/q6k_gemv.hpp"
+#include "kernels/cuda/q8_0_gemv.hpp"
 
 namespace qinfer::kernels {
 
@@ -77,6 +78,15 @@ bool gdn_proj_gemv(const experts::MatrixSpec& m, const std::uint8_t* w, const ex
                                  sc.act_32.size() * sizeof(sc.act_32[0]), n_rows, n_blocks,
                                  static_cast<std::size_t>(n_blocks) * kQ20BlockBytes, out,
                                  q2_0_gemv_q8_0_cuda_ddd, err);
+        }
+        case experts::Format::kQ8_0: {
+            // Q8_0 的激活搭档同样是 Q8_0（32 值块、每块一个 fp16 尺度）——与 Q2_0 同款布局，
+            // 但权重块是 34 字节（2 尺度 + 32 int8）。
+            if (sc.act_32.empty()) { err = "gdn_proj_gemv：Q8_0 需要 Q8_0 激活"; return false; }
+            return run_with_copy(w, sc.act_32.data(),
+                                 sc.act_32.size() * sizeof(sc.act_32[0]), n_rows, n_blocks,
+                                 static_cast<std::size_t>(n_blocks) * kQ80BlockBytes, out,
+                                 q8_0_gemv_q8_0_cuda_ddd, err);
         }
         case experts::Format::kIq2S:
         case experts::Format::kIq2Xxs:

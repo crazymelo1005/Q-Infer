@@ -223,13 +223,23 @@ bool run_block_layer(const artifact::GgufFile& gguf, const BlockLayer& layer, fl
     }
     clock::time_point t2 = clock::now();
     if (layer.kind == LayerKind::kGdn) {
-        if (!run_gdn_layer(gguf, layer.gdn, s.mixed.data(), s.block_out.data(), s.gdn, err,
-                           phases != nullptr ? &phases->attn : nullptr)) {
+        if (s.dense != nullptr && s.dense->run_gdn != nullptr) {
+            // 阶段 A dense 接线：整层 GDN 走设备入口（权重常驻由入口内按层缓存；相位计时不填，
+            // 设备路径的相位统计留阶段 D）。
+            if (!s.dense->run_gdn(gguf, layer.gdn, s.mixed.data(), s.block_out.data(), s.gdn, err)) {
+                return false;
+            }
+        } else if (!run_gdn_layer(gguf, layer.gdn, s.mixed.data(), s.block_out.data(), s.gdn, err,
+                                  phases != nullptr ? &phases->attn : nullptr)) {
             return false;
         }
     } else {
-        if (!run_qsa_layer(gguf, layer.qsa, s.mixed.data(), s.block_out.data(), s.qsa, err,
-                           phases != nullptr ? &phases->attn : nullptr)) {
+        if (s.dense != nullptr && s.dense->run_qsa != nullptr) {
+            if (!s.dense->run_qsa(gguf, layer.qsa, s.mixed.data(), s.block_out.data(), s.qsa, err)) {
+                return false;
+            }
+        } else if (!run_qsa_layer(gguf, layer.qsa, s.mixed.data(), s.block_out.data(), s.qsa, err,
+                                  phases != nullptr ? &phases->attn : nullptr)) {
             return false;
         }
     }

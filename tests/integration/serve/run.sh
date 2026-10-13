@@ -602,19 +602,41 @@ half=$(( cores / 2 )); [ "$half" -gt 8 ] && half=8
   || bad "28 默认 compute_threads：得 $ct，期望 1..$half（cores=$cores）"
 stop
 
-# 29. --gpu 在无 CUDA 构建上必须拒绝启动（明确报错不静默回退）；不带 --gpu 服务照常起（纯 CPU 路径零变化）。
+# 29. --gpu 语义按构建分野：CUDA 构建下 --gpu 0 正常拉起（dense 设备执行激活，层 0 GDN + 层 1 QSA
+#     两条 *_cuda 路径都会跑到），并发一个请求验证设备推理产出；无 CUDA 构建必须拒绝启动（明确报错
+#     不静默回退）。不带 --gpu 服务照常起（纯 CPU 路径零变化，本脚本其它用例就是那条路）。
 timeout 8 "$SERVER" --model "$FIX" --host "$HOST" --port "$PORT" --n-embd 256 --hc 2 --hc-lr 3 \
           --layers 2 --top-k 2 --gdn-head-dim 32 --qsa-head-dim 32 --n-rot 4 --idx-dim 4 \
           --idx-top-k 2048 --idx-block 4 --max-context 4096 --api-key testkey --gpu 0 \
-          >/tmp/gpu-reject.log 2>&1
-rc=$?
-pkill -9 -x qinfer-server 2>/dev/null
-sleep 1
-if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && grep -q "CUDA 未启用" /tmp/gpu-reject.log; then
-  ok "29 --gpu 在无 CUDA 构建上拒绝启动（exit=$rc，错误体含 CUDA 未启用）"
+          >/tmp/gpu-reject.log 2>&1 &
+BPID=$!
+up=0
+for _ in $(seq 1 30); do
+  curl -sf "http://$HOST:$PORT/health" >/dev/null 2>&1 && { up=1; break; }
+  sleep 0.25
+done
+if [ "$up" = 1 ]; then
+  # CUDA 构建：--gpu 0 激活 dense 设备执行。请求走完整推理（token embd → GDN → MoE → QSA → 头），
+  # 任一设备内核炸（非法访问/分派落空）都会在服务端现形（400/500/坠）。
+  code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
+    -X POST "http://$HOST:$PORT/v1/chat/completions" \
+    -d '{"model":"x","messages":[{"role":"system","content":"c"},{"role":"user","content":"d"}],"max_tokens":8,"temperature":0}')
+  if [ "$code" = 200 ] && [ -n "$(jget "$R" "d['choices'][0]['message']['content']")" ]; then
+    ok "29 --gpu 0 拉起且设备推理正常（双子层 *_cuda 路径）"
+  else
+    bad "29 --gpu 0 服务起来但设备推理失败：http=$code，$(head -c 200 "$R")"
+  fi
 else
-  bad "29 --gpu 拒绝启动：exit=$rc（124=静默卡住），日志 $(tail -2 /tmp/gpu-reject.log)"
+  wait "$BPID" 2>/dev/null; rc=$?
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && grep -q "CUDA 未启用" /tmp/gpu-reject.log; then
+    ok "29 --gpu 在无 CUDA 构建上拒绝启动（exit=$rc，错误体含 CUDA 未启用）"
+  else
+    bad "29 --gpu 拒绝启动：exit=$rc（124=静默卡住），日志 $(tail -2 /tmp/gpu-reject.log)"
+  fi
 fi
+pkill -9 -x qinfer-server 2>/dev/null
+wait "$BPID" 2>/dev/null
+sleep 1
 rm -f /tmp/gpu-reject.log
 
 stop

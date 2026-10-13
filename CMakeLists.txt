@@ -454,6 +454,7 @@ if(QINFER_ENABLE_CUDA)
     src/kernels/cuda/q6k_gemv.cu
     src/kernels/cuda/iq3s_gemv.cu
     src/kernels/cuda/iq4xs_gemv.cu
+    src/kernels/cuda/q8_0_gemv.cu
     src/kernels/cuda/gdn_proj_gemv.cu
   )
   target_include_directories(qinfer_kernels_cuda PUBLIC src)
@@ -496,9 +497,13 @@ if(QINFER_ENABLE_CUDA)
     src/dense/qsa_qk_prep_cuda.cu
     src/dense/qsa_index_attend_cuda.cu
     src/dense/qsa_layer_cuda.cu
+    src/dense/dense_exec_cuda.cu
   )
   target_include_directories(qinfer_dense_cuda PUBLIC src)
   target_link_libraries(qinfer_dense_cuda PUBLIC qinfer_kernels_cuda qinfer_dense)
+  # 阶段 A dense 接线：qinfer-server 的 main 在 --gpu 时调 dense_exec_cuda() 填执行器；
+  # 只有 CUDA 构建才链这一支（主机构建不引用任何 CUDA 符号）。
+  target_link_libraries(qinfer-server PRIVATE qinfer_dense_cuda)
 
   add_executable(test_expert_ffn_cuda tests/test_expert_ffn_cuda.cpp)
   # 这个入口还要跑整模型一步（`run_step_model`），故另连 dense 与 artifact。

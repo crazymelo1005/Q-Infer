@@ -16,6 +16,7 @@
 
 #include "artifact/gguf_table.hpp"
 #include "dense/attn_phases.hpp"
+#include "dense/dense_exec.hpp"
 #include "dense/gated_residual.hpp"
 #include "dense/gdn_layer.hpp"
 #include "dense/layer_map.hpp"
@@ -93,6 +94,11 @@ struct BlockScratch {
     // 可选的「把未命中专家这批算力交出去」（interfaces §8）。为空就走逐专家的主机路径。
     // 由调用方按本层的档给候选组与字节来源；见 `experts/moe_layer.hpp` 的 MoeOffload。
     const experts::MoeOffload* offload = nullptr;
+
+    // 可选的 dense 设备执行器（阶段 A dense 接线）：非空时 GDN/QSA 整层走对应的 *_cuda 入口，
+    // 否则（默认）走主机 run_gdn_layer / run_qsa_layer。由调用方（step_loop 挂 StepConfig.dense_exec）
+    // 逐层挂上；主机构建该指针恒空（DenseExec 是函数指针结构，主机构建不填即不引用 CUDA 符号）。
+    const DenseExec* dense = nullptr;
 
     // 可选的 PLE：只在 `ple->layer` 那一层挂上（由 `prepare_step_scratch` 挂），别的层为空。
     const PleRun* ple = nullptr;

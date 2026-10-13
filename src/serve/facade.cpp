@@ -40,6 +40,11 @@ bool Engine::open(const FacadeConfig& cfg, Engine& out, std::string& err) {
     out.step_cfg_.idx_block = cfg.idx_block;
     out.step_cfg_.cache_slots = cfg.cache_slots;
     out.step_cfg_.cache_byte_budget = cfg.cache_byte_budget;
+    // 阶段 A dense 接线：给了 dense 执行器（--gpu；run_gdn/run_qsa 至少一个非空）就让 step_loop
+    // 每层 GDN/QSA 走 *_cuda 入口；为空保持全主机路径（主机构建恒空 → 零行为变化）。
+    if (cfg.dense_exec.run_gdn != nullptr || cfg.dense_exec.run_qsa != nullptr) {
+        out.step_cfg_.dense_exec = &out.cfg_.dense_exec;   // 指向 Engine 自己的副本，生存期同 Engine
+    }
     if (!cfg.ple_table.empty()) {
         if (!out.table_.open(cfg.ple_table, err)) {
             err = "PLE 表打不开：" + err;

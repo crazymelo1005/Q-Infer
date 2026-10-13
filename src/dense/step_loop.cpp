@@ -70,6 +70,10 @@ bool prepare_step_scratch(const StepModel& model, std::uint64_t n_pages, std::ui
             out.blocks[l].offload = &(*model.cfg.offload_layers)[l];
         }
     }
+    // dense 设备执行器（阶段 A dense 接线）：非空则逐层生效（GDN/QSA 整层走 *_cuda）。
+    for (std::size_t l = 0; l < n; ++l) {
+        out.blocks[l].dense = model.cfg.dense_exec;
+    }
     // PLE（[S-63]）：配置只挂到它自己那一层，别的层保持为空——于是「挂错层」不可能悄悄发生。
     if (model.cfg.ple != nullptr) {
         const PleRun& pr = *model.cfg.ple;

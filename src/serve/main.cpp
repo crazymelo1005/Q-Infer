@@ -3,6 +3,9 @@
 #include "scheduling/thread_pool.hpp"
 #include "serve/facade.hpp"
 #include "serve/server.hpp"
+#ifdef QINFER_CUDA_BUILD
+#include "dense/dense_exec_cuda.hpp"
+#endif
 
 #include <algorithm>
 #include <cerrno>
@@ -144,6 +147,13 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     f.ple_budget_bytes = static_cast<std::uint64_t>(arg_int(a, "--ple-budget-bytes", 0, err));
     if (a.count("--ple-table")) f.ple_table = a["--ple-table"];
     f.kv_slots = static_cast<std::uint64_t>(arg_int(a, "--kv-slots", 0, err));
+#ifdef QINFER_CUDA_BUILD
+    // --gpu 激活 dense 设备执行（阶段 A dense 接线）：把 CUDA 整层入口填进门面，step_loop 每层走 *_cuda。
+    // 没给 --gpu 时保持空 → 全主机路径（与主机构建行为一致）。
+    if (c.gpu_auto || !c.gpu_devices.empty()) {
+        c.facade.dense_exec = dense::dense_exec_cuda();
+    }
+#endif
     return c;
 }
 

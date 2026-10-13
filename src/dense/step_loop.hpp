@@ -19,6 +19,7 @@
 
 #include "artifact/gguf_table.hpp"
 #include "dense/block_layer.hpp"
+#include "dense/dense_exec.hpp"
 #include "dense/layer_map.hpp"
 #include "dense/model_head.hpp"
 #include "dense/token_embed.hpp"
@@ -56,6 +57,11 @@ struct StepConfig {
     // 调用方按层的档建好每层一份（长度须等于 n_layers），每层一份字节来源；不给就还是逐专家的
     // 主机路径。两条路的归并顺序相同，故逐位一样（见 experts/moe_layer.hpp 的 MoeOffload）。
     const std::vector<experts::MoeOffload>* offload_layers = nullptr;
+
+    // 可选的 dense 设备执行器（阶段 A dense 接线）：非空时每层 GDN/QSA 走 *_cuda 入口。
+    // 由调用方（facade）在 --gpu 时填 CUDA 侧的 DenseExec；主机构建保持空 → run_block_layer
+    // 全走主机路径，零行为变化。
+    const DenseExec* dense_exec = nullptr;
 
     // 可选的 PLE（第 1 层那一步，[S-63]）：给了就在 `ple->layer` 那一层、第一段门控残差之前把它并进
     // 残差栈。配置由调用方建（六张张力 + 表行来源 + 行缓存），**本步的 token 要靠 `run_token_step` 喂**
