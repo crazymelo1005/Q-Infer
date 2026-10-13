@@ -26,6 +26,8 @@ namespace qinfer::serve {
 struct Message {
     std::string role;
     std::string content;
+    // 助手消息的推理内容（Qwen 系模板在 assistant 分支读它）。空 = 未定义，同「无该键」。
+    std::string reasoning_content;
     // 助手消息的工具调用（Strata openai_to_messages 形状）：
     // 每条 {"function": {"name": str, "arguments": 参数对象 | {"arguments": 原文字符串}}}。
     // 空 = 无调用（渲染时该属性未定义，模板工具分支不进入）。
@@ -37,8 +39,11 @@ bool chat_template_from_gguf(const artifact::GgufFile& g, std::string& out, std:
 
 // 渲染。tpl 为模板原文；add_generation_prompt 决定是否追加生成提示段；tools 为服务层解析好的
 // 工具列表（模板形状 [{"name", "description", "parameters"}]，逐条 |tojson 进 system 块），
-// 缺省 nullptr = 不注入。任何不支持的结构、未闭合块、未知变量 → 返回假并写 err。
+// 缺省 nullptr = 不注入。vars 为额外的顶层模板变量（对象，如 {"enable_thinking": false}），
+// 缺省 nullptr = 不注入（模板里它保持 undefined）。任何不支持的结构、未闭合块、未知变量 →
+// 返回假并写 err。
 bool render_chat(const std::string& tpl, const std::vector<Message>& msgs, bool add_generation_prompt,
-                 std::string& out, std::string& err, const Json* tools = nullptr);
+                 std::string& out, std::string& err, const Json* tools = nullptr,
+                 const Json* vars = nullptr);
 
 }  // namespace qinfer::serve

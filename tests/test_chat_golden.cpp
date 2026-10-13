@@ -41,10 +41,9 @@ int main(int argc, char** argv) {
     CHECK(json_parse(golden_text, root, err));
     CHECK(root.is_arr());
 
-    // Renderer gaps, all of one kind: the template reads inputs our Message/render_chat API does
-    // not carry yet -- `enable_thinking` (a render option) and an assistant's `reasoning_content`.
-    // Recorded in ADR-017; when the API grows them, delete them here (this test then proves it).
-    const std::set<std::string> known_gaps = {"assistant with thinking", "thinking disabled"};
+    // The renderer carries every input the template reads (it grew `reasoning_content` and the
+    // extra top-level variables to close these cases), so nothing may be skipped here anymore.
+    const std::set<std::string> known_gaps = {};
 
     std::set<std::string> gaps;
     int matched = 0;
@@ -60,18 +59,27 @@ int main(int argc, char** argv) {
             Message mm;
             const Json* r = jm.find("role");
             const Json* ct = jm.find("content");
+            const Json* rc = jm.find("reasoning_content");
             const Json* tc = jm.find("tool_calls");
             mm.role = r && r->is_str() ? r->str : "";
             mm.content = ct && ct->is_str() ? ct->str : "";
+            if (rc && rc->is_str()) mm.reasoning_content = rc->str;
             if (tc && tc->is_arr()) mm.tool_calls = tc->arr;
             m.push_back(std::move(mm));
         }
         const Json* agp = c.find("add_generation_prompt");
         const bool gen = agp ? agp->b : true;
         const Json* tools = c.find("tools");
+        // enable_thinking and friends are plain template variables, handed in as `vars`.
+        const Json* et = c.find("enable_thinking");
+        Json vars;
+        if (et) {
+            vars = Json::objv();
+            vars.set("enable_thinking", *et);
+        }
 
         std::string out;
-        if (!render_chat(tpl, m, gen, out, err, tools)) {
+        if (!render_chat(tpl, m, gen, out, err, tools, et ? &vars : nullptr)) {
             std::fprintf(stderr, "chat_golden: case '%s' failed to render: %s\n", name.c_str(),
                          err.c_str());
             gaps.insert(name);

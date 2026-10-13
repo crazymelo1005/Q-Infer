@@ -247,7 +247,7 @@ bool messages_to_conversation(const Json& body, std::vector<Message>& conv, std:
         // Uniform empty filter: the whole message is skipped only when both text and calls are empty
         // (same as the OpenAI domain).
         if (text.empty() && calls.empty()) continue;
-        conv.emplace_back(Message{r, std::move(text), std::move(calls)});
+        conv.emplace_back(Message{.role = r, .content = std::move(text), .tool_calls = std::move(calls)});
     }
     return true;
 }
@@ -427,7 +427,7 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
             }
         }
         if (text.empty() && calls.empty()) continue;   // empty messages (tool placeholders etc.) are filtered; the templater ignores them
-        conv.emplace_back(Message{r, std::move(text), std::move(calls)});
+        conv.emplace_back(Message{.role = r, .content = std::move(text), .tool_calls = std::move(calls)});
     }
     // tools → internal tool shape (normalize_tools' OpenAI unwrapping); a bad one is 400 (errors must come before enqueue).
     std::vector<Json> tools;

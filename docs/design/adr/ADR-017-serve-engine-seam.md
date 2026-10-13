@@ -34,7 +34,7 @@
 
 - `strata` 下 `kv_misses` / `kv_evictions` / `kv_bytes_moved` 恒为 0——KV 由引擎自管，`/metrics` 里这几项在该后端下不具意义，读的人要按后端解读。
 - 真机批处理与驱动层模型有差（首词元先走单请求再 `BADM`，见 ADR-016 后果），本阶段未解；服务层目前只用单请求路径。
-- 渲染器还差两个模板输入：渲染级 `enable_thinking` 与助手消息的 `reasoning_content`（golden 的 2/10 缺口）。补齐它们才谈得上与参考端逐字节完全一致。
+- 渲染器与参考端逐字节对齐：`tests/data/chat_golden.json` 的 10 个用例全部相同（早先缺的渲染级 `enable_thinking` 与助手 `reasoning_content` 已补进 `Message`/`render_chat` 的变量注入，缺口表因此清空——那条断言现在钉的就是「10/10」）。
 - 真机 A/B 已跑：同一提示（`Hello`，渲染后 53 个 token id）与同一组采样键（`temperature=0 top_p=0.95`、`max_new=8`），在独立限内存 scope 内起 `--backend strata` 服务，输出与直接用同一串 id 驱动引擎的参考结果逐字节相同（`We need to respond to user "Hello`），usage 的 prompt 53 / completion 8 也一致；重复请求输出相同，流式分片拼接后与整段一致。判据满足于确定性档；不同采样档位下的分布级对拍未做。
 - 一处报告口径不一致：`/props` 的 `n_ctx` 取自 CLI 的 `--max-context`（默认 262144），不是后端 `config()` 里引擎上报的 65536。生成不受影响，但读 `/props` 的人会误判上下文容量，待修。
 

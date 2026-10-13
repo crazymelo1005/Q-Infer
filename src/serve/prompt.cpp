@@ -966,6 +966,9 @@ Jv get_attr(const Jv& v, const std::string& name) {
         case Jv::K::kMsg:
             if (name == "role") return jv_str(v.msg->role);
             if (name == "content") return jv_str(v.msg->content);
+            if (name == "reasoning_content") {
+                return v.msg->reasoning_content.empty() ? Jv() : jv_str(v.msg->reasoning_content);
+            }
             if (name == "tool_calls") {
                 // 无调用 → 未定义（模板工具分支的 `message.tool_calls and ...` 判假，语义同 Strata 缺键）。
                 if (v.msg->tool_calls.empty()) return Jv();
@@ -973,7 +976,7 @@ Jv get_attr(const Jv& v, const std::string& name) {
                 for (const Json& c : v.msg->tool_calls) l.list->push_back(json_to_jv(c));
                 return l;
             }
-            return Jv();   // reasoning_content 等 → 未定义
+            return Jv();   // 其余属性 → 未定义
         case Jv::K::kStr:
             if (name == "startswith" || name == "endswith") return jv_bound(v.s, name);
             return Jv();
@@ -1264,6 +1267,10 @@ bool eval_expr(const Expr& e, Env& env, Jv& out, std::string& err) {
             if (a.k == Jv::K::kMsg && key.k == Jv::K::kStr) {
                 if (key.s == "role") { out = jv_str(a.msg->role); return true; }
                 if (key.s == "content") { out = jv_str(a.msg->content); return true; }
+                if (key.s == "reasoning_content") {
+                    out = a.msg->reasoning_content.empty() ? Jv() : jv_str(a.msg->reasoning_content);
+                    return true;
+                }
                 if (key.s == "tool_calls") {
                     if (a.msg->tool_calls.empty()) { out = Jv(); return true; }
                     Jv l = jv_list();
@@ -1508,7 +1515,7 @@ bool run(const std::vector<Op>& ops, std::size_t from, std::size_t to, Env& env,
 }  // namespace
 
 bool render_chat(const std::string& tpl, const std::vector<Message>& msgs, bool add_generation_prompt,
-                 std::string& out, std::string& err, const Json* tools) {
+                 std::string& out, std::string& err, const Json* tools, const Json* vars) {
     std::vector<Op> ops;
     if (!compile(tpl, ops, err)) return false;
     Env env;
@@ -1523,6 +1530,10 @@ bool render_chat(const std::string& tpl, const std::vector<Message>& msgs, bool 
     global["eos_token"] = jv_str("");
     // 工具列表（服务层已解析成模板形状）注入 tools 变量；缺省不注入 → 模板 tools 分支不进入。
     if (tools != nullptr) global["tools"] = json_to_jv(*tools);
+    // 额外的顶层模板变量（如 enable_thinking）；缺省不注入 → 模板里保持 undefined。
+    if (vars != nullptr && vars->is_obj()) {
+        for (const auto& kv : vars->obj) global[kv.first] = json_to_jv(kv.second);
+    }
     // 宏登记到全局作用域（定义位置之后调用，编译期一次性收起）。
     for (std::size_t idx = 0; idx < ops.size(); ++idx) {
         if (ops[idx].kind != Kind::kMacro) continue;
