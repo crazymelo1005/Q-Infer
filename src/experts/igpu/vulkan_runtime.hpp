@@ -42,6 +42,8 @@ struct VulkanRuntime {
                                             std::uint32_t n, std::string& err);
     vk::DescriptorSet make_set(vk::DescriptorSetLayout layout, const vk::Buffer* buffers,
                                std::uint32_t n, std::string& err);
+    // Repoint an existing set at new buffers (avoids allocating a set per call).
+    void update_set(vk::DescriptorSet set, const vk::Buffer* buffers, std::uint32_t n);
     // One dispatch: binds pipeline+set, pushes `push` (push_size bytes), dispatches
     // (x,y,z), waits on a fence.
     bool dispatch(vk::Pipeline pipeline, vk::PipelineLayout layout, vk::DescriptorSet set,

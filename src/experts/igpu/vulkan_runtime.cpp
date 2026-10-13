@@ -595,6 +595,24 @@ vk::DescriptorSet VulkanRuntime::make_set(vk::DescriptorSetLayout layout, const 
     return set;
 }
 
+void VulkanRuntime::update_set(vk::DescriptorSet set, const vk::Buffer* buffers, std::uint32_t n) {
+    std::vector<vk::DescriptorBufferInfo> infos(n);
+    std::vector<vk::WriteDescriptorSet> writes(n);
+    for (std::uint32_t i = 0; i < n; ++i) {
+        infos[i].buffer = buffers[i];
+        infos[i].offset = 0;
+        infos[i].range = vk::WHOLE_SIZE;
+        writes[i] = vk::WriteDescriptorSet{};
+        writes[i].sType = vk::ST_WRITE_DESCRIPTOR_SET;
+        writes[i].dstSet = set;
+        writes[i].dstBinding = i;
+        writes[i].descriptorCount = 1;
+        writes[i].descriptorType = vk::DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[i].pBufferInfo = &infos[i];
+    }
+    UpdateDescriptorSets_(device_, n, writes.data(), 0, nullptr);
+}
+
 bool VulkanRuntime::dispatch(vk::Pipeline pipeline, vk::PipelineLayout layout,
                              vk::DescriptorSet set, const void* push, std::uint32_t push_size,
                              std::uint32_t gx, std::uint32_t gy, std::uint32_t gz,
