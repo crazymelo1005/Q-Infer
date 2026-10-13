@@ -1,9 +1,13 @@
 // Entry point: command-line parsing (hand-rolled key/value scan, zero deps) ->
 // load the facade -> run Serve.
 #include "httplib.h"
+#include "artifact/gguf_table.hpp"
 #include "scheduling/thread_pool.hpp"
+#include "serve/backend_strata.hpp"
 #include "serve/facade.hpp"
+#include "serve/prompt.hpp"
 #include "serve/server.hpp"
+#include "text/tokenizer.hpp"
 #ifdef QINFER_CUDA_BUILD
 #include "dense/dense_exec_cuda.hpp"
 #endif
@@ -13,6 +17,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <map>
 #include <string>
 #include <thread>
@@ -104,6 +109,7 @@ namespace qinfer::serve {
 
 ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     std::map<std::string, std::string> a;
+    std::vector<std::string> engine_args;  // --engine-arg is repeatable; the map keeps only one value
     for (int i = 1; i < argc; ++i) {
         std::string s = argv[i];
         if (s.rfind("--", 0) != 0) { err = "unexpected positional argument: " + s; return {}; }
@@ -111,6 +117,7 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
         const std::string k = eq == std::string::npos ? s : s.substr(0, eq);
         const std::string v = eq == std::string::npos ? (i + 1 < argc ? argv[++i] : std::string{}) : s.substr(eq + 1);
         if (v.empty()) { err = "argument " + k + " needs a value"; return {}; }
+        if (k == "--engine-arg") { engine_args.push_back(v); continue; }
         a[k] = v;
     }
     ServeConfig c;
@@ -141,6 +148,25 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     c.kv_resident = static_cast<std::uint64_t>(arg_int(a, "--kv-resident", 0, err));
     if (!parse_gpu(a, c.gpu_auto, c.gpu_devices, err)) return {};
     c.reject_after = static_cast<std::uint64_t>(arg_int(a, "--reject-after", 0, err));
+    // --backend strata|inhouse (P2): strata drives the vendored engine over its line protocol.
+    if (a.count("--backend")) {
+        const std::string v = a["--backend"];
+        if (v != "inhouse" && v != "strata") {
+            err = "--backend needs inhouse or strata, got \"" + v + "\"";
+            return {};
+        }
+        c.backend = v;
+    }
+    if (a.count("--engine-exe")) c.engine_exe = a["--engine-exe"];
+    c.engine_args = std::move(engine_args);
+    if (c.backend == "strata" && c.engine_exe.empty()) {
+        err = "--backend strata needs --engine-exe <path to the vendored engine binary>";
+        return {};
+    }
+    if (c.backend != "strata" && !c.engine_args.empty()) {
+        err = "--engine-arg is only used with --backend strata";
+        return {};
+    }
     FacadeConfig& f = c.facade;
     f.model_path = c.model_path;
     f.n_embd = static_cast<std::uint64_t>(arg_int(a, "--n-embd", 2560, err));
@@ -186,7 +212,8 @@ int main(int argc, char** argv) {
                              "[--idx-dim N] [--idx-top-k N] [--idx-block N] [--max-context N] "
                              "[--cache-slots N] [--cache-byte-budget N] [--ple-table P] "
                              "[--ple-budget-bytes N] [--kv-slots N] [--kv-resident N] "
-                             "[--conversation-cache N]\n"
+                             "[--conversation-cache N] [--backend inhouse|strata] "
+                             "[--engine-exe P] [--engine-arg A]...\n"
                              "        --threads N is the HTTP thread pool; --compute-threads N is the "
                              "inference thread pool (default: half the physical cores, capped at 8; "
                              "1 or negative = single-threaded); --lang selects the startup-log language "
@@ -205,10 +232,48 @@ int main(int argc, char** argv) {
         return 1;
     }
 #endif
-    std::shared_ptr<Engine> eng = std::make_shared<Engine>();
-    if (!Engine::open(cfg.facade, *eng, err)) {
-        std::fprintf(stderr, "Load failed: %s\n", err.c_str());
+    if (cfg.backend == "strata" && (cfg.gpu_auto || !cfg.gpu_devices.empty())) {
+        std::fprintf(stderr,
+                     "--gpu applies to --backend inhouse; the strata engine manages its own devices "
+                     "(pass them through --engine-arg instead)\n");
         return 1;
+    }
+    std::shared_ptr<Backend> eng;
+    if (cfg.backend == "strata") {
+        // The vendored engine owns the weights; the GGUF here is read for metadata only
+        // (tokenizer + chat template + a display name) -- no tensors are touched.
+        qinfer::artifact::GgufFile g;
+        if (!g.open(cfg.facade.model_path, err)) {
+            std::fprintf(stderr, "Load failed: %s\n", err.c_str());
+            return 1;
+        }
+        StrataBackendConfig sc;
+        sc.facade = cfg.facade;
+        sc.driver.exe = cfg.engine_exe;
+        sc.driver.engine_args = cfg.engine_args;
+        sc.driver.ready_timeout_ms = 180000;  // a real engine loads weights for seconds
+        if (!qinfer::text::Tokenizer::from_gguf(g, sc.tokenizer, err) ||
+            !chat_template_from_gguf(g, sc.chat_template, err)) {
+            std::fprintf(stderr, "Load failed: %s\n", err.c_str());
+            return 1;
+        }
+        const std::string* nm = g.meta_str("general.name");
+        sc.model_name = (nm != nullptr && !nm->empty())
+                            ? *nm
+                            : std::filesystem::path(cfg.facade.model_path).stem().string();
+        auto b = std::make_shared<StrataBackend>();
+        if (!StrataBackend::open(std::move(sc), *b, err)) {
+            std::fprintf(stderr, "Engine start failed: %s\n", err.c_str());
+            return 1;
+        }
+        eng = b;
+    } else {
+        auto e = std::make_shared<Engine>();
+        if (!Engine::open(cfg.facade, *e, err)) {
+            std::fprintf(stderr, "Load failed: %s\n", err.c_str());
+            return 1;
+        }
+        eng = e;
     }
     const bool zh = cfg.lang == "zh";
     if (zh) {

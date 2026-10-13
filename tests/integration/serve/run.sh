@@ -703,5 +703,27 @@ else
 fi
 stop
 
+# ---- P2: --backend inhouse is the explicit default; it behaves like passing no flag ----
+start --backend inhouse || exit 1
+code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
+  -X POST "http://$HOST:$PORT/v1/chat/completions" \
+  -d '{"messages":[{"role":"user","content":"e"}],"max_tokens":4,"temperature":0}')
+if [ "$code" = 200 ]; then
+  ok "P2 --backend inhouse serves a chat completion"
+else
+  bad "P2 --backend inhouse: http=$code body=$(head -c 200 "$R")"
+fi
+stop
+
+# ---- P2: --backend strata without --engine-exe is refused before spawning anything ----
+timeout 10 "$SERVER" --model "$FIX" --backend strata --port "$PORT" >/tmp/backend-strata.log 2>&1
+rc=$?
+if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && grep -q -- "--engine-exe" /tmp/backend-strata.log; then
+  ok "P2 --backend strata without --engine-exe is refused (exit=$rc)"
+else
+  bad "P2 --backend strata without --engine-exe: exit=$rc (124=hung), log $(tail -2 /tmp/backend-strata.log)"
+fi
+rm -f /tmp/backend-strata.log
+
 echo "serve integration: passed $PASS, failed $FAIL"
 [ "$FAIL" = 0 ]
