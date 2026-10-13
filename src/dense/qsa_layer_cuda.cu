@@ -78,11 +78,14 @@ bool run_qsa_layer_cuda(const artifact::GgufFile& gguf, const QsaLayer& layer, c
     const std::uint64_t idx_dim = layer.idx_dim;
     const bool reload = s.w_layer != layer.layer;
 
-    // Stage B: lazily reserve the device KV pool on first entry into this layer
-    // (geometry comes from the page cache; without a window n_pages is 0 and
-    // the device path stays off -> host path). Released by StepScratch.
-    if (s.dev_kv != nullptr && s.dev_pool == nullptr && s.kv.n_pages > 0) {
-        if (!s.dev_kv->reserve(s.dev_pool, s.kv.n_pages, s.kv.n_head_kv, s.kv.page_size,
+    // Stage B: lazily reserve the device KV pool on first entry into this layer.
+    // Capacity is the session's LOGICAL page count (dev_kv_pages), not the
+    // physical slot count: the device pool is an identity-mapped mirror of the
+    // logical space, and using kv_slots here made any session longer than
+    // kv_slots*page_size cells fail with "logical page N out of range".
+    const std::uint64_t dev_pages = s.dev_kv_pages > 0 ? s.dev_kv_pages : s.kv.n_pages;
+    if (s.dev_kv != nullptr && s.dev_pool == nullptr && dev_pages > 0) {
+        if (!s.dev_kv->reserve(s.dev_pool, dev_pages, s.kv.n_head_kv, s.kv.page_size,
                                s.kv.head_dim, err)) {
             err = "QSA layer " + std::to_string(layer.layer) + " device KV reserve: " + err;
             return false;
@@ -136,7 +139,15 @@ bool run_qsa_layer_cuda(const artifact::GgufFile& gguf, const QsaLayer& layer, c
     for (std::size_t i = 0; i < s.v_raw.size(); ++i) s.v_f16[i] = kernels::f32_to_f16_bits(s.v_raw[i]);
     bool append_pinned = false;
     std::uint64_t append_page = 0;
-    if (s.window != nullptr) {
+    // Device path (stage B): the device pool is an identity-mapped mirror of the
+    // whole logical space, so it does NOT depend on the host window's physical
+    // slots. Skipping the window here is what lets a long session work at all:
+    // QSA's selection width can reach ~514 pages while the host window holds
+    // only kv_slots (e.g. 64), and pinning for a host-side admission that never
+    // happens would fail with "window full and all pinned". The host store write
+    // below stays — it is the authoritative copy the --kv-resident miss path
+    // reads from.
+    if (s.window != nullptr && !dev_kv) {
         if (s.kv.page_size == 0) {
             err = "挂了常驻窗口但 page_size 是 0";
             return false;
@@ -150,7 +161,9 @@ bool run_qsa_layer_cuda(const artifact::GgufFile& gguf, const QsaLayer& layer, c
         err = "写 KV 权威副本失败：" + err;
         return false;
     }
-    if (!kv_append(s.kv, s.pos, KvCell{s.k_f16.data(), s.v_f16.data()}, err)) return false;
+    if (!dev_kv && !kv_append(s.kv, s.pos, KvCell{s.k_f16.data(), s.v_f16.data()}, err)) {
+        return false;  // host pool only matters on the host path
+    }
     // Device KV (stage B): also write the cell into the device pool. The host
     // store/window writes above stay for now (task 4 switches them off in the
     // all-resident mode); the twin write is what keeps the two paths comparable.
@@ -165,7 +178,7 @@ bool run_qsa_layer_cuda(const artifact::GgufFile& gguf, const QsaLayer& layer, c
     if (dev_kv && s.resident_tokens > 0 && s.pos >= s.resident_tokens) {
         const std::uint64_t old = (s.pos - s.resident_tokens) / s.kv.page_size;
         const std::uint64_t cur = s.pos / s.kv.page_size;
-        if (old < s.kv.n_pages && old != cur) {
+        if (old < dev_pages && old != cur) {
             bool res = false;
             if (!s.dev_kv->resident(s.dev_pool, old, res, err) ||
                 (res && !s.dev_kv->evict(s.dev_pool, old, err))) {
@@ -207,7 +220,7 @@ bool run_qsa_layer_cuda(const artifact::GgufFile& gguf, const QsaLayer& layer, c
     if (!qsa_select(s.scores.data(), n_kv, width, s.ids, err)) return false;
     const std::uint64_t n_ids = s.ids.size();
     std::vector<std::uint64_t> gather_pages;
-    if (s.window != nullptr) {
+    if (s.window != nullptr && !dev_kv) {  // device path gathers from its own pool
         for (std::uint64_t id : s.ids) {
             const std::uint64_t pg = id / s.kv.page_size;
             bool seen = false;

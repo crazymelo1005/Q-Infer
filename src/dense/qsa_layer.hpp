@@ -81,6 +81,13 @@ struct QsaScratch {
     // StepScratch's destructor). Host builds keep both null -> host path.
     const KvDeviceExec* dev_kv = nullptr;
     KvDevicePool* dev_pool = nullptr;
+    // Device pool capacity in LOGICAL pages (the window's logical_blocks, not
+    // the physical slot count): the host path's 64 slots and the session's
+    // logical length are two different numbers, and the device pool is an
+    // identity-mapped mirror of the logical space. Set by attach_kv_windows;
+    // 0 falls back to the physical n_pages (and disables the device path when
+    // that is 0 too).
+    std::uint64_t dev_kv_pages = 0;
     // Device residency cap in tokens (--kv-resident; 0 = all-resident). Only
     // meaningful when dev_kv is active: above the cap the oldest logical page is
     // evicted on append and readmitted from the host store on gather misses.

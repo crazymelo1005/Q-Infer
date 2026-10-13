@@ -88,6 +88,11 @@ void Engine::attach_kv_windows(dense::StepScratch& s, std::uint64_t logical_bloc
         if (m_.map[l].kind != dense::LayerKind::kQsa) continue;
         dense::QsaScratch& q = s.blocks[l].qsa;
         q.kv.n_pages = cfg_.kv_slots;      // 常驻槽位只给这么多（逻辑容量在副本里）
+        // The device KV pool mirrors the LOGICAL space, so it needs the logical
+        // page count (not kv_slots, which is the physical slot count) — passing
+        // the slot count made sessions longer than kv_slots*page_size cells die
+        // with "logical page N out of range".
+        q.dev_kv_pages = logical_blocks;
         q.kv.reset();
         stores_.emplace_back();
         stores_.back().init(q.kv.page_size, q.kv.n_head_kv, q.kv.head_dim, logical_blocks);
