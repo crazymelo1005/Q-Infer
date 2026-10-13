@@ -1343,7 +1343,7 @@ void Serve::register_routes() {
         Json h = Json::objv();
         h.set("status", Json::strv("ok"));
         h.set("model", Json::strv(eng_->model_name()));
-        h.set("max_context", Json::numv(static_cast<double>(cfg_.facade.max_context)));
+        h.set("max_context", Json::numv(static_cast<double>(eng_->config().max_context)));
         h.set("images", Json::boolv(false));
         h.set("api_key", Json::boolv(!cfg_.api_key.empty()));
         h.set("loaded", Json::boolv(true));
@@ -1358,7 +1358,7 @@ void Serve::register_routes() {
         st.set("value", Json::strv("loaded"));
         model.set("status", std::move(st));
         Json meta = Json::objv();
-        meta.set("n_ctx", Json::numv(static_cast<double>(cfg_.facade.max_context)));
+        meta.set("n_ctx", Json::numv(static_cast<double>(eng_->config().max_context)));
         model.set("meta", std::move(meta));
         Json arch = Json::objv();
         Json in = Json::arrv(); in.push(Json::strv("text"));
@@ -1396,7 +1396,7 @@ void Serve::register_routes() {
     // discovery, /slots the context ring.
     svr.Get("/v1/status", [this](const httplib::Request&, httplib::Response& res) {
         const auto now = std::time(nullptr);
-        const std::uint64_t ctx = cfg_.facade.max_context;
+        const std::uint64_t ctx = eng_->config().max_context;
         const bool busy = sched_.any_busy();
         Json r = Json::objv();
         r.set("service", Json::strv("qinfer"));
@@ -1502,7 +1502,7 @@ void Serve::register_routes() {
     });
     svr.Get("/props", [this](const httplib::Request&, httplib::Response& res) {
         Json dg = Json::objv();
-        dg.set("n_ctx", Json::numv(static_cast<double>(cfg_.facade.max_context)));
+        dg.set("n_ctx", Json::numv(static_cast<double>(eng_->config().max_context)));
         Json prm = Json::objv();
         prm.set("temperature", Json::numv(0.8));
         prm.set("top_p", Json::numv(0.95));
@@ -1548,7 +1548,7 @@ void Serve::register_routes() {
         for (const SlotView& v : views) {
             Json s = Json::objv();
             s.set("id", Json::numv(static_cast<double>(v.index)));
-            s.set("n_ctx", Json::numv(static_cast<double>(cfg_.facade.max_context)));
+            s.set("n_ctx", Json::numv(static_cast<double>(eng_->config().max_context)));
             s.set("is_processing", Json::boolv(v.busy));
             s.set("n_prompt_tokens", Json::numv(0.0));
             list.push(std::move(s));
@@ -1557,7 +1557,7 @@ void Serve::register_routes() {
     });
     svr.Get("/metrics", [this](const httplib::Request& req, httplib::Response& res) {
         const auto now = std::time(nullptr);
-        const std::uint64_t ctx = cfg_.facade.max_context;
+        const std::uint64_t ctx = eng_->config().max_context;
         const bool busy = sched_.any_busy();
         Json r = Json::objv();
         Json eng = Json::objv();
