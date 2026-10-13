@@ -449,6 +449,10 @@ if(QINFER_ENABLE_CUDA)
     src/kernels/cuda/q2_0_gemv.cu
     src/kernels/cuda/iq2s_gemv.cu
     src/kernels/cuda/iq_gemv.cu
+    src/kernels/cuda/q6k_gemv.cu
+    src/kernels/cuda/iq3s_gemv.cu
+    src/kernels/cuda/iq4xs_gemv.cu
+    src/kernels/cuda/gdn_proj_gemv.cu
   )
   target_include_directories(qinfer_kernels_cuda PUBLIC src)
   target_link_libraries(qinfer_kernels_cuda PUBLIC qinfer_kernels CUDA::cudart)
@@ -466,8 +470,9 @@ if(QINFER_ENABLE_CUDA)
   add_test(NAME iq_gemv_cuda COMMAND test_iq_gemv_cuda)
 
   # 阶段 A：GDN/QSA 稠密段设备路径的对照载体（真字节夹具 + 各内核判据）。
+  # 链 qinfer_experts（非 CUDA 版）：对照要用主机 quantize_input / run_gemv / format_name。
   add_executable(test_gdn_qsa_cuda tests/test_gdn_qsa_cuda.cpp)
-  target_link_libraries(test_gdn_qsa_cuda PRIVATE qinfer_kernels_cuda)
+  target_link_libraries(test_gdn_qsa_cuda PRIVATE qinfer_kernels_cuda qinfer_experts)
   add_test(NAME gdn_qsa_cuda COMMAND test_gdn_qsa_cuda)
 
   # 设备侧的专家前馈（权重常驻）住在 experts 一侧：它要按档分派、并复用主机的激活量化器，

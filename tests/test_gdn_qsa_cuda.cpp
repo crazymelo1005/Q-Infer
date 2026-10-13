@@ -2,10 +2,15 @@
 // 本文件由 measure/ 的 oracle 工具生成的 .inc 提供真字节（部署 GGUF 的投影权重前若干块），
 // 目标判据照 ADR-009 分布级口径：位相同比例 + L1 相对差小（h 量化在舍入边界可差一步）。
 // 后续内核（gdn_proj_gemv / gdn_preprocess_cuda / gdn_step_cuda / qsa_*_cuda）逐个在这里对照。
+#include "experts/ffn.hpp"
+#include "kernels/cuda/gdn_proj_gemv.hpp"
+#include "check.hpp"
+
 #include <bit>
 #include <cstdint>
 #include <cstdio>
 #include <cmath>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -14,7 +19,6 @@
 #include "gdn_iq3s_oracle_data.inc"
 #include "gdn_iq4xs_oracle_data.inc"
 #include "gdn_q6k_oracle_data.inc"
-#include "check.hpp"
 
 namespace {
 
@@ -55,7 +59,7 @@ int compare_rows(const std::vector<float>& a, const std::vector<float>& b, doubl
     return bit_ratio >= bit_ratio_threshold && l1 <= l1_threshold ? 0 : 1;
 }
 
-// 夹具可用性：三个新档的 oracle .inc 能解码、块数与字节数自洽（Task 1 RED 基线，只钉数据本身）。
+// 夹具可用性：三个新档的 oracle .inc 能解码、块数与字节数自洽（Task 1 基线，只钉数据本身）。
 void test_oracle_fixtures_load() {
     const auto iq4xs = from_hex(kIq4xsRealHex);
     const auto iq3s = from_hex(kIq3sRealHex);
@@ -68,10 +72,65 @@ void test_oracle_fixtures_load() {
                 iq3s.size(), q6k.size());
 }
 
+// 一个档的一次对照：oracle 真字节（64 块）循环 tile 成 rows × blocks 矩阵，
+// 主机 quantize_input + run_gemv 对设备 gdn_proj_gemv，compare_rows 判据。
+int gemv_against_host(qinfer::experts::Format fmt, const std::string& hex, std::uint64_t cols,
+                      std::uint64_t rows, std::uint64_t blocks_per_row) {
+    std::printf("== %s: cols %llu rows %llu 块/行 %llu ==\n", qinfer::experts::format_name(fmt),
+                static_cast<unsigned long long>(cols), static_cast<unsigned long long>(rows),
+                static_cast<unsigned long long>(blocks_per_row));
+    const std::vector<std::uint8_t> src = from_hex(hex);
+    constexpr std::uint64_t kSrcBlocks = 64;
+    const std::uint64_t blk_bytes = src.size() / kSrcBlocks;
+    CHECK(src.size() % kSrcBlocks == 0);
+    const std::uint64_t n_blk = rows * blocks_per_row;
+    std::vector<std::uint8_t> w(static_cast<std::size_t>(n_blk * blk_bytes));
+    for (std::uint64_t i = 0; i < n_blk; ++i) {
+        std::memcpy(w.data() + static_cast<std::size_t>(i) * blk_bytes,
+                    src.data() + static_cast<std::size_t>(i % kSrcBlocks) * blk_bytes,
+                    static_cast<std::size_t>(blk_bytes));
+    }
+    qinfer::experts::MatrixSpec m;
+    m.format = fmt;
+    m.experts = 1;
+    m.cols = cols;
+    m.rows = rows;
+    std::vector<float> x(static_cast<std::size_t>(cols), 0.5f);
+    std::vector<float> host_out(static_cast<std::size_t>(rows), 0.0f);
+    std::vector<float> dev_out(static_cast<std::size_t>(rows), 0.0f);
+    qinfer::experts::FfnScratch sc;
+    std::string err;
+    if (!qinfer::experts::quantize_input(m, x.data(), sc, err) ||
+        !qinfer::experts::run_gemv(m, w.data(), sc, host_out.data(), err)) {
+        std::printf("主机 run_gemv: %s\n", err.c_str());
+        return 1;
+    }
+    if (!qinfer::kernels::gdn_proj_gemv(m, w.data(), sc, dev_out.data(), nullptr, err)) {
+        std::printf("设备 gdn_proj_gemv: %s\n", err.c_str());
+        return 1;
+    }
+    return compare_rows(host_out, dev_out, 1e-4, 0.99);
+}
+
+// 真几何（部署 GGUF 稠密投影，2026-10-13 gguf-py 实测）：GDN attn_qkv 10240×2560 IQ4_XS
+// （10 块/行）；GDN attn_gate 6144×2560 IQ3_S（10 块/行）；QSA attn_k 512×2560 Q6_K（10 块/行）。
+int test_dense_proj_formats() {
+    int bad = 0;
+    bad += gemv_against_host(qinfer::experts::Format::kIq4Xs, kIq4xsRealHex, 2560, 10240, 10);
+    bad += gemv_against_host(qinfer::experts::Format::kIq3S, kIq3sRealHex, 2560, 6144, 10);
+    bad += gemv_against_host(qinfer::experts::Format::kQ6K, kQ6kRealHex, 2560, 512, 10);
+    // 专家诸档（Q2_0/IQ2_S/IQ2_XXS/IQ1_M）由 test_q2_0_cuda / test_iq2s_cuda / test_iq_gemv_cuda
+    // 各自钉位；gdn_proj_gemv 对它们的转发由本档的 kIq4Xs 一条验证分派表入口不破即可。
+    return bad;
+}
+
 }  // namespace
 
 int main() {
     test_oracle_fixtures_load();
-    std::puts("gdn_qsa_cuda: 真字节夹具工程就绪（IQ4_XS/IQ3_S/Q6_K oracle 自洽）");
-    return 0;
+    const int rc = test_dense_proj_formats();
+    if (rc == 0) {
+        std::puts("gdn_qsa_cuda: 稠密投影档（IQ4_XS/IQ3_S/Q6_K）设备/主机逐行对照通过");
+    }
+    return rc;
 }
