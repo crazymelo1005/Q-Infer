@@ -70,7 +70,27 @@ struct GenResult {
     std::vector<std::int32_t> tokens;   // 已生成 token id（不含被 stop 截掉的后缀）
 };
 
-class Engine {
+// The engine seam the service layer depends on (P2, ADR-017). Implemented by the in-house
+// Engine and by StrataBackend (the vendored engine behind EngineDriver); Serve holds only this.
+class Backend {
+public:
+    virtual ~Backend() = default;
+    // Synchronous generation. `prompt` is pre-encoded ids (the caller renders the chat template
+    // and encodes). on_token receives each token's decoded bytes; returning false = client
+    // disconnect, generate returns false with err set. Same contract as Engine::generate.
+    virtual bool generate(const std::vector<std::int32_t>& prompt, const GenOptions& opt,
+                          const std::function<bool(const std::string&)>& on_token, GenResult& res,
+                          std::string& err) = 0;
+    virtual const text::Tokenizer& tokenizer() const = 0;
+    virtual const std::string& chat_template() const = 0;
+    virtual const std::string& model_name() const = 0;
+    virtual const FacadeConfig& config() const = 0;
+    virtual std::uint64_t kv_misses() const = 0;
+    virtual std::uint64_t kv_evictions() const = 0;
+    virtual std::uint64_t kv_bytes_moved() const = 0;
+};
+
+class Engine : public Backend {
 public:
     // 装载：GGUF 打开、分词器、chat 模板（缺失即失败——拒绝裸拼接）、token embedding、步模型，
     // 以及（给了 ple_table 时）第 1 层 PLE 的登记/权重/表行来源。任一步失败都返回假并写 err。
@@ -81,16 +101,16 @@ public:
     // 回调返回 false = 客户端中断，generate 立即返回假、err 说明。
     bool generate(const std::vector<std::int32_t>& prompt, const GenOptions& opt,
                   const std::function<bool(const std::string&)>& on_token, GenResult& res,
-                  std::string& err);
+                  std::string& err) override;
 
-    const text::Tokenizer& tokenizer() const { return tokenizer_; }
-    const std::string& chat_template() const { return chat_template_; }
-    const std::string& model_name() const { return model_name_; }
-    const FacadeConfig& config() const { return cfg_; }
+    const text::Tokenizer& tokenizer() const override { return tokenizer_; }
+    const std::string& chat_template() const override { return chat_template_; }
+    const std::string& model_name() const override { return model_name_; }
+    const FacadeConfig& config() const override { return cfg_; }
     // 上次 generate 的 KV 窗口统计（未配窗口时全为 0）。只读标量，不碰窗口内部指针。
-    std::uint64_t kv_misses() const;
-    std::uint64_t kv_evictions() const;
-    std::uint64_t kv_bytes_moved() const;
+    std::uint64_t kv_misses() const override;
+    std::uint64_t kv_evictions() const override;
+    std::uint64_t kv_bytes_moved() const override;
 
 private:
     // KV 窗口接线（cfg_.kv_slots > 0 时由 generate 每次装配）：与真权重入口同一套字段公式。

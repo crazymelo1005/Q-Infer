@@ -261,7 +261,7 @@ static Json scaled_mib_gib(const std::optional<double>& v, double unit, int digi
 
 }  // namespace
 
-Serve::Serve(ServeConfig cfg, std::shared_ptr<Engine> eng)
+Serve::Serve(ServeConfig cfg, std::shared_ptr<Backend> eng)
     : cfg_(std::move(cfg)),
       eng_(std::move(eng)),
       sched_(cfg_.slots, cfg_.queue_capacity == 0 ? 2 * cfg_.slots : cfg_.queue_capacity),
