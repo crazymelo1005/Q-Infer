@@ -453,6 +453,15 @@ G-14 已经测得：四档 KV 的 decode 吞吐几乎相同（±2%），即该�
 
 工作量估算需要人工输入：仓库没有历史速度数据，此处不给出无依据的数字，上表"要新写"的六项即为估算输入。
 
+## 18. 计算后端（厂商化的 Strata 引擎）
+
+计算后端有两条并存：自研引擎与厂商化的 Strata 引擎（[ADR-016](adr/ADR-016-vendored-strata-backend.md)）。后者以子进程形态接入，本仓库只通过 stdin/stdout 行协议驱动它，故它自带的重型 CUDA 栈不进本仓库的链接面（ADR-008）。
+
+- 入库与构建：`third_party/strata`（tag v0.1.43.1，MIT）冻结入库；`tools/build_engine.sh` 编出 `build-engine/strata`，只在构建目录的副本上做，不改入库源码。
+- 驱动层 `src/engine`：`engine_protocol` 造命令（`GEN` / `BGEN` / `BSTOP` / `STOP` / `QUIT` / `VRAM`）与解析事件行（`READY` / `INFO` / `T` / `PP` / `RESUME` / `DONE` / `BADM` / `BT` / `BDONE` / `ERR` / `FATAL` 等）；`engine_process` 起进程与按行 IO；`engine_driver` 负责握手（读至 `READY`，带超时）、单请求生成（回调回 `false` 即写 `STOP` 取消）、批槽位（`acquire_slot` / `generate_batch` / `cancel_slot`）与重启（`stop_and_recover`）。
+- 协议字面量以真实引擎转录为唯一口径：`tests/data/strata_transcript_gen.txt`（引擎 0.1.43.1）。`DONE` 为 15 字段；真机的批处理会先出一个单请求首词元再 `BADM`，与驱动的简化模型有差，见 ADR-016 后果。
+- 本阶段不接服务层：`qinfer_engine` 只依赖标准库与 pthreads，不并入 `qinfer_serve`，`src/serve` 不动；服务层接线与真机 A/B 是 P2。
+
 ## 附录 A 数据交换优化清单
 
 把每一次数据搬动归入五类，逐类找漏。

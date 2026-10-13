@@ -37,6 +37,7 @@
 | [`design/adr/ADR-011`](design/adr/ADR-011-compute-group-abstraction.md) | 后端以计算组为单位（设备、队列、内存池、能力表） | 接受 |
 | `design/adr/ADR-012-http-transport-and-serving-stack.md` | HTTP 传输、单进程服务栈与监控形态 | 接受 |
 | [`design/adr/ADR-014-gpu-igpu-serve.md`](design/adr/ADR-014-gpu-igpu-serve.md) | GPU/核显服务接入：分工求解器 + 阶段化迁移（A dense 上卡已交付） | 接受 |
+| [`design/adr/ADR-016-vendored-strata-backend.md`](design/adr/ADR-016-vendored-strata-backend.md) | 计算后端：厂商化 Strata 引擎作后端（进程边界=依赖边界） | 接受 |
 | [glossary.md](glossary.md) | 术语的唯一口径 | 完成 |
 | [hardware.md](hardware.md) | 两套测试环境的硬件规格 | 完成 |
 | [research/01-strata-engine.md](research/01-strata-engine.md) | 参考范本引擎的原理与边界 | 完成 |

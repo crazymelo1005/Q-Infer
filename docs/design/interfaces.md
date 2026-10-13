@@ -186,6 +186,10 @@ KV 的设备侧同样走这条缝（阶段 B 落法）：`DenseExec.kv`（`KvDev
 
 能力表只是**必要**条件：能不能算还取决于角色——gate/up 与 down 的激活搭档不同（前者 Q8_K、后者 Q8_0）。角色不对时档掩码会放它进来，由工人自己的 init 挡住，再按 §8.5 改派给兜底组。
 
+### 8.8 引擎后端驱动（厂商化）
+
+计算后端可换成厂商化的 Strata 引擎（[ADR-016](adr/ADR-016-vendored-strata-backend.md)），以子进程形态接入：驱动层驱动它的 stdin/stdout 行协议，不共享地址空间，故引擎的 CUDA 依赖不进入本仓库的链接面（ADR-008）。驱动接口在 `src/engine`，只依赖标准库与 pthreads：`EngineProcess`（起进程、按行读写、`wait_timeout` / `kill`）与 `EngineDriver`（`start` 握手、`generate` 单请求、`acquire_slot` / `generate_batch` / `cancel_slot` 批槽位、`stop_and_recover` 重启）。词元以 id 过边界，反词元化留服务层。该库不并入 `qinfer_serve`；服务层如何选用它（`--backend strata|inhouse`）留 P2。
+
 ## 9. 尚未定义
 
 以下部分需要随实现决策确定，本阶段不虚构：

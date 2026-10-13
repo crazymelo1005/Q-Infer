@@ -134,7 +134,7 @@ Qwen3.8-Flash-Next 的官方 vLLM 部署配方：<https://recipes.vllm.ai/Qwen/Q
 
 ## 许可
 
-采用 MIT，全文见 [LICENSE](LICENSE)。
+采用 MIT，全文见 [LICENSE](LICENSE)。`third_party/strata` 为厂商化引入的参考引擎源码（MIT © 2026 Niko1221 and the Strata contributors），来源、取舍与厂商化决策见 [NOTICE](NOTICE) 与 [design/adr/ADR-016](docs/design/adr/ADR-016-vendored-strata-backend.md)。
 
 ## 引用
 
