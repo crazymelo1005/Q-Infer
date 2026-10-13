@@ -30,3 +30,6 @@ build-*/
 models/
 datasets/
 cache/
+
+# git worktrees (isolated feature workspaces)
+.worktrees/
