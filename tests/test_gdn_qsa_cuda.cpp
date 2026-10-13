@@ -4,6 +4,8 @@
 // 后续内核（gdn_proj_gemv / gdn_preprocess_cuda / gdn_step_cuda / qsa_*_cuda）逐个在这里对照。
 #include "dense/gdn_preprocess.hpp"
 #include "dense/gdn_preprocess_cuda.hpp"
+#include "dense/gdn_recurrence.hpp"
+#include "dense/gdn_recurrence_cuda.hpp"
 #include "experts/ffn.hpp"
 #include "kernels/bf16.hpp"
 #include "kernels/cuda/gdn_proj_gemv.hpp"
@@ -221,14 +223,102 @@ int test_gdn_preprocess_cuda() {
     return worst < 1e-5 ? 0 : 1;
 }
 
+// ---- GDN 递推与收尾设备对照（Task 4）----
+// 几何：S 8、h_k 2、h_v 4（h_v 是 h_k 的 2 倍，覆盖取模配对），真模型 128/16/48 的形状在
+// test_gdn_recurrence 里用人手几何即可；这里用 8/2/4 便于全状态可见。
+
+// 合成输入（每步同一份，决定性强）。
+int test_gdn_recurrence_cuda() {
+    constexpr std::uint64_t kS = 8, kHk = 2, kHv = 4;
+    const qinfer::dense::GdnRecShapes s{kS, kHk, kHv};
+    std::vector<float> q(static_cast<std::size_t>(kHk * kS)), k(static_cast<std::size_t>(kHk * kS)),
+        v(static_cast<std::size_t>(kHv * kS));
+    PrepLcg g;
+    for (float& t : q) t = 0.25f + 0.1f * g.next();  // 已归一（合成，不真归一）
+    for (float& t : k) t = 0.25f + 0.1f * g.next();
+    for (float& t : v) t = g.next();
+    std::vector<float> gate(kHv), beta(kHv), beta_sig(kHv);
+    for (std::uint64_t h = 0; h < kHv; ++h) {
+        gate[h] = -0.3f + 0.1f * static_cast<float>(h);
+        beta[h] = g.next();
+    }
+    qinfer::dense::GdnState host_st, dev_st;
+    host_st.resize(s);
+    dev_st.resize(s);
+    std::vector<float> host_o(static_cast<std::size_t>(kHv * kS)),
+        dev_o(static_cast<std::size_t>(kHv * kS));
+    double worst = 0.0;
+    for (int step = 0; step < 3; ++step) {  // 3 步：状态跨 token 累积
+        // 主机：beta 需先 sigmoid（层契约），设备同。
+        beta_sig = beta;
+        std::string beta_err;
+        CHECK(qinfer::dense::gdn_beta_gate(beta_sig.data(), kHv, beta_err));
+        CHECK(beta_err.empty());
+        std::string err;
+        CHECK(qinfer::dense::gdn_step(host_st, s, q.data(), k.data(), v.data(), gate.data(),
+                                      beta_sig.data(), host_o.data(), err));
+        CHECK(err.empty());
+        std::vector<float> dev_beta = beta;
+        std::string dev_beta_err;
+        CHECK(qinfer::dense::gdn_beta_gate(dev_beta.data(), kHv, dev_beta_err));
+        CHECK(qinfer::dense::gdn_step_cuda(dev_st, s, q.data(), k.data(), v.data(), gate.data(),
+                                           dev_beta.data(), dev_o.data(), nullptr, err));
+        CHECK(!dev_beta.empty());
+        CHECK(err.empty());
+        // o 与状态逐元素对照。
+        for (std::size_t i = 0; i < host_o.size(); ++i) {
+            const double d = std::fabs(static_cast<double>(host_o[i]) - static_cast<double>(dev_o[i]));
+            worst = std::max(worst, d / (std::fabs(host_o[i]) > 1e-30 ? std::fabs(host_o[i]) : 1e-30));
+        }
+        for (std::size_t i = 0; i < host_st.data.size(); ++i) {
+            const double d = std::fabs(static_cast<double>(host_st.data[i]) -
+                                       static_cast<double>(dev_st.data[i]));
+            worst = std::max(worst,
+                             d / (std::fabs(host_st.data[i]) > 1e-30 ? std::fabs(host_st.data[i])
+                                                                     : 1e-30));
+        }
+    }
+    std::printf("  GDN 递推 3 步（状态跨 token 累积）o+state 最差相对 L1 %.3e\n", worst);
+    return worst < 1e-5 ? 0 : 1;
+}
+
+// 收尾对照：设备 gdn_closing_norm_cuda vs 主机 gdn_closing_norm。
+int test_gdn_closing_cuda() {
+    constexpr std::uint64_t kS = 8, kHk = 2, kHv = 4;
+    const qinfer::dense::GdnRecShapes s{kS, kHk, kHv};
+    std::vector<float> o(static_cast<std::size_t>(kHv * kS)), z(static_cast<std::size_t>(kHv * kS)),
+        norm(kS), host_y(static_cast<std::size_t>(kHv * kS)),
+        dev_y(static_cast<std::size_t>(kHv * kS));
+    PrepLcg g;
+    for (float& t : o) t = g.next();
+    for (float& t : z) t = g.next();
+    for (float& t : norm) t = 0.5f + 0.1f * g.next();
+    std::string err;
+    CHECK(qinfer::dense::gdn_closing_norm(s, o.data(), z.data(), norm.data(), 1e-6f,
+                                          host_y.data(), err));
+    CHECK(err.empty());
+    CHECK(qinfer::dense::gdn_closing_norm_cuda(s, o.data(), z.data(), norm.data(), 1e-6f,
+                                               dev_y.data(), nullptr, err));
+    CHECK(err.empty());
+    double worst = 0.0;
+    for (std::size_t i = 0; i < host_y.size(); ++i) {
+        const double d = std::fabs(static_cast<double>(host_y[i]) - static_cast<double>(dev_y[i]));
+        worst = std::max(worst, d / (std::fabs(host_y[i]) > 1e-30 ? std::fabs(host_y[i]) : 1e-30));
+    }
+    std::printf("  GDN 收尾设备 vs 主机最差相对 L1 %.3e\n", worst);
+    return worst < 1e-5 ? 0 : 1;
+}
+
 }  // namespace
 
 int main() {
     test_oracle_fixtures_load();
     int rc = test_dense_proj_formats();
     rc += test_gdn_preprocess_cuda();
+    rc += test_gdn_recurrence_cuda();
+    rc += test_gdn_closing_cuda();
     if (rc == 0) {
-        std::puts("gdn_qsa_cuda: 稠密投影档 + GDN 前段设备/主机对照通过");
+        std::puts("gdn_qsa_cuda: 稠密投影 + GDN 前段/递推/收尾设备对照全部通过");
     }
     return rc;
 }

@@ -489,6 +489,7 @@ if(QINFER_ENABLE_CUDA)
   # 头（GdnShapes/GdnPreWeights 等）与主机侧对照对象（对照组在测试里链 qinfer_dense 即可）。
   add_library(qinfer_dense_cuda
     src/dense/gdn_preprocess_cuda.cu
+    src/dense/gdn_recurrence_cuda.cu
   )
   target_include_directories(qinfer_dense_cuda PUBLIC src)
   target_link_libraries(qinfer_dense_cuda PUBLIC qinfer_kernels_cuda qinfer_dense)
