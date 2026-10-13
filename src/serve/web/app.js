@@ -79,6 +79,7 @@ const I18N = {
     "hw.diskRead": "磁盘读",
     "hw.tokS": "tok/s",
     "hw.prefill": "prefill tok/s",
+    "hw.igpuFreq": "核显频率",
     "state.loaded": "已加载",
     "state.unloaded": "未加载",
     "mon.lastDecode": "上次请求解码速度",
@@ -169,6 +170,7 @@ const I18N = {
     "hw.diskRead": "Disk read",
     "hw.tokS": "tok/s",
     "hw.prefill": "prefill tok/s",
+    "hw.igpuFreq": "iGPU freq",
     "state.loaded": "Loaded",
     "state.unloaded": "Not loaded",
     "mon.lastDecode": "Last request decode speed",
@@ -877,6 +879,9 @@ async function refreshAbout() {
       ["gpu_name", hs.gpu_name || "—"],
       ["gpu_count", hs.gpu_count === undefined ? "—" : String(hs.gpu_count)],
       ["gpu_note", hs.gpu_note || "—"],
+      ["igpu_name", hs.igpu_name || "—"],
+      ["igpu_available", hs.igpu_available === undefined ? "—" : String(hs.igpu_available)],
+      ["igpu_note", hs.igpu_note || "—"],
       ["cpu_name", hs.cpu_name || "—"],
       ["cores", hs.cores === undefined ? "—" : String(hs.cores)],
       ["threads", hs.threads === undefined ? "—" : String(hs.threads)],
@@ -898,6 +903,7 @@ const SPARK_SERIES = [
   { key: "disk_read_mb", i18n: "hw.diskRead", fmt: function (v) { return v.toFixed(1) + " MB/s"; } },
   { key: "tok_s", i18n: "hw.tokS", fmt: function (v) { return v.toFixed(1); } },
   { key: "prefill_tok_s_mean", i18n: "hw.prefill", fmt: function (v) { return v.toFixed(1); } },
+  { key: "igpu_freq_mhz", i18n: "hw.igpuFreq", fmt: function (v) { return v.toFixed(0) + " MHz"; } },
 ];
 
 function renderSparklines(h) {

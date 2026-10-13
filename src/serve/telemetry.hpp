@@ -54,6 +54,12 @@ struct TelemetryStatic {
     std::string cpu_name;   // /proc/cpuinfo "model name"
     int cores = 0;          // v0 恒 0（Strata 无 psutil 时 cores 也是 null；M2 按拓扑填）
     int threads = 0;        // std::thread::hardware_concurrency()
+    // Stage C: the integrated GPU (Vulkan compute for unhit experts). name from
+    // the runtime probe, note carries its reason when unavailable; freq series
+    // come from the i915/xe sysfs (gt/gt0/rps_*_freq_mhz).
+    std::string igpu_name;
+    bool igpu_available = false;
+    std::string igpu_note;
 };
 
 // 快照：snapshot() 签出拷贝，读线程安全。now 的键集固定为 Strata telemetry.py 的 now 字典
@@ -100,6 +106,8 @@ private:
     bool disk_prev_valid_ = false;   // /proc/diskstats 差值法的前一时刻
     double disk_prev_t_ = 0.0;
     std::uint64_t disk_prev_r_ = 0, disk_prev_w_ = 0;
+    std::string igpu_freq_path_;     // gt/gt0/rps_act_freq_mhz (i915) when found
+    std::string igpu_freq_max_path_;
 
     std::thread thread_;
     std::mutex cv_mu_;

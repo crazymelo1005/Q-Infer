@@ -21,6 +21,8 @@
 // - gpu_note/cores 在 v0 恒空/恒 0（见头文件注释），但键位保留，T14 照常序列化。
 #include "serve/telemetry.hpp"
 
+#include "experts/igpu/vulkan_runtime.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -355,6 +357,35 @@ Telemetry::Telemetry(ExtraFn extra) : extra_(std::move(extra)) {
         }
     }
     stat_.threads = static_cast<int>(std::thread::hardware_concurrency());
+
+    // Stage C: the integrated GPU. Availability and the device name come from
+    // the Vulkan runtime probe (the same one the expert worker uses); the load
+    // proxy is the i915/xe sysfs frequency pair — this kernel exposes no
+    // busyness counter that user-space can read.
+    {
+        experts::igpu::VulkanRuntime& rt = experts::igpu::igpu_runtime();
+        std::string ig_err;
+        if (rt.load(ig_err) && rt.init_device(ig_err) && rt.available()) {
+            stat_.igpu_available = true;
+            stat_.igpu_name = rt.device_name();
+        } else {
+            stat_.igpu_note = rt.reason().empty() ? ig_err : rt.reason();
+        }
+        for (int i = 0; i < 8; ++i) {
+            const std::string card = "/sys/class/drm/card" + std::to_string(i);
+            std::error_code e;
+            const auto drv = std::filesystem::read_symlink(card + "/device/driver", e);
+            if (e) continue;
+            const std::string dn = drv.filename().string();
+            if (dn != "i915" && dn != "xe") continue;
+            const std::string base = card + "/gt/gt0/";
+            if (std::filesystem::exists(base + "rps_act_freq_mhz", e)) {
+                igpu_freq_path_ = base + "rps_act_freq_mhz";
+                igpu_freq_max_path_ = base + "rps_max_freq_mhz";
+            }
+            break;
+        }
+    }
 }
 
 Telemetry::~Telemetry() {
@@ -447,6 +478,20 @@ void Telemetry::sample_now() {
     now["tok_s"] = ex.tok_s;
     now["tok_s_mean"] = ex.tok_s_mean;
     now["prefill_tok_s_mean"] = ex.prefill_tok_s_mean;
+
+    // iGPU frequency pair (stage C load proxy); keys stay present (null when
+    // there is no i915/xe card), matching this file's fixed-key convention.
+    {
+        const auto read_num = [](const std::string& p) -> std::optional<double> {
+            if (p.empty()) return std::nullopt;
+            std::ifstream f(p);
+            double v = 0.0;
+            if (!(f >> v)) return std::nullopt;
+            return v;
+        };
+        now["igpu_freq_mhz"] = read_num(igpu_freq_path_);
+        now["igpu_freq_max_mhz"] = read_num(igpu_freq_max_path_);
+    }
 
     collect_cpu_ram_disk(now);
     {

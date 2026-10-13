@@ -471,6 +471,18 @@ else
 fi
 rm -f "$R.hdr" "$R.body"
 
+# 20b. iGPU telemetry (stage C): /metrics carries the availability flag, the
+#      device name slot and the frequency pair (the fixture host may or may not
+#      have an iGPU; both answers are valid, the keys must exist).
+curl -s -H "$H" "http://$HOST:$PORT/metrics" > "$R"
+ig=$(jget "$R" "d['hardware_static']['igpu_available']")
+kf=$(jget "$R" "'igpu_freq_mhz' in d['hardware']")
+if { [ "$ig" = "True" ] || [ "$ig" = "False" ]; } && [ "$kf" = "True" ]; then
+  ok "20b iGPU telemetry present (igpu_available=$ig, igpu_freq key present)"
+else
+  bad "20b iGPU telemetry missing: igpu_available=$ig freq_key=$kf"
+fi
+
 # 21. Tools (OpenAI domain): 21a a well-formed tools wrapper yields 200 with non-empty content; 21b historical
 #      assistant tool_calls (content null) + tool messages go through the render pipeline (the fixture template
 #      only emits content — this case validates the pipeline: message filtering and tool-definition injection

@@ -1667,6 +1667,10 @@ void Serve::register_routes() {
         hs.set("cpu_name", Json::strv(ts.stat.cpu_name));
         hs.set("cores", Json::numv(static_cast<double>(ts.stat.cores)));
         hs.set("threads", Json::numv(static_cast<double>(ts.stat.threads)));
+        // Stage C: the integrated GPU (Vulkan compute path for unhit experts).
+        hs.set("igpu_name", Json::strv(ts.stat.igpu_name));
+        hs.set("igpu_available", Json::boolv(ts.stat.igpu_available));
+        hs.set("igpu_note", Json::strv(ts.stat.igpu_note));
         r.set("hardware_static", std::move(hs));
         Json hist = Json::objv();
         for (const auto& [k, vec] : ts.history) hist.set(k, series_json(vec));
