@@ -468,6 +468,11 @@ add_executable(test_engine_process tests/test_engine_process.cpp)
 target_link_libraries(test_engine_process PRIVATE qinfer_engine)
 add_test(NAME engine_process COMMAND test_engine_process)
 
+# Protocol-level test double (no add_test: a mock is not a test). EngineDriver tests locate it
+# via a MOCK_ENGINE_PATH compile definition, so they need no arguments.
+add_executable(mock_strata_engine tests/mock_strata_engine.cpp)
+target_link_libraries(mock_strata_engine PRIVATE qinfer_engine)
+
 # ---- CUDA 内核（默认关闭）----
 # ADR-008 第 2 条：骨架不依赖 CUDA，CI 在没有 GPU 的 runner 上只编主机侧、照样跑测试。
 # 打开时才需要 nvcc，且要单独一份构建目录（例如 -B build/cuda -DQINFER_ENABLE_CUDA=ON）。
