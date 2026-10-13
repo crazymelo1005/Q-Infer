@@ -48,9 +48,10 @@ add_library(qinfer_serve
   src/serve/prompt_cache.cpp
   src/serve/prometheus.cpp
   src/serve/toolcall.cpp
+  src/serve/backend_strata.cpp
 )
 target_include_directories(qinfer_serve PUBLIC src)
-target_link_libraries(qinfer_serve PUBLIC qinfer_text qinfer_dense qinfer_ple qinfer_storage qinfer_kernels)
+target_link_libraries(qinfer_serve PUBLIC qinfer_text qinfer_dense qinfer_ple qinfer_storage qinfer_kernels qinfer_engine)
 # third_party/httplib/httplib.h = cpp-httplib v0.18.6（整份入库，SHA-256 见提交说明）。
 # 「裁剪」落实为不定义 CPPHTTPLIB_OPENSSL_SUPPORT 与 CPPHTTPLIB_ZLIB_SUPPORT；线程池由入口按槽位配置。
 target_include_directories(qinfer_serve PUBLIC third_party/httplib)
@@ -472,6 +473,13 @@ add_test(NAME engine_process COMMAND test_engine_process)
 # via a MOCK_ENGINE_PATH compile definition, so they need no arguments.
 add_executable(mock_strata_engine tests/mock_strata_engine.cpp)
 target_link_libraries(mock_strata_engine PRIVATE qinfer_engine)
+
+# The service-layer backend that wraps the driver; unit-tested against the mock engine (no GPU).
+add_executable(test_backend_strata tests/test_backend_strata.cpp)
+target_link_libraries(test_backend_strata PRIVATE qinfer_serve)
+target_compile_definitions(test_backend_strata PRIVATE
+                           MOCK_ENGINE_PATH="$<TARGET_FILE:mock_strata_engine>")
+add_test(NAME backend_strata COMMAND test_backend_strata)
 
 target_sources(qinfer_engine PRIVATE src/engine/engine_driver.cpp)
 add_executable(test_engine_driver tests/test_engine_driver.cpp)
