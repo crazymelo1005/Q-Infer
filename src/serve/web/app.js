@@ -69,6 +69,35 @@ const I18N = {
     "theme.title": "浅色 / 深色",
     "theme.dark": "深色主题",
     "theme.light": "浅色主题",
+    "hw.gpuUtil": "GPU 利用率",
+    "hw.gpuMem": "GPU 显存",
+    "hw.gpuTemp": "GPU 温度",
+    "hw.gpuPower": "GPU 功率",
+    "hw.pcieRx": "PCIe RX",
+    "hw.cpu": "CPU",
+    "hw.ram": "内存",
+    "hw.diskRead": "磁盘读",
+    "hw.tokS": "tok/s",
+    "hw.prefill": "prefill tok/s",
+    "state.loaded": "已加载",
+    "state.unloaded": "未加载",
+    "mon.lastDecode": "上次请求解码速度",
+    "mon.noDone": "尚无完成请求",
+    "err.keyInvalid": "API key 无效或未设置",
+    "err.aboutLoad": "About 信息加载失败：",
+    "req.yes": "是",
+    "req.no": "否",
+    "req.truncated": "（已截断）",
+    "req.empty": "（空）",
+    "req.none": "（无）",
+    "req.apiResp": "API response（按记录重建）",
+    "about.tempDefault": "temperature 默认",
+    "about.topPDefault": "top_p 默认",
+    "about.seedDefault": "seed 默认",
+    "state.inFlight": " · 进行中 ",
+    "state.unreachable": "不可达",
+    "state.noResponse": "服务无响应",
+
     "apiMon.title": "请求检查",
     "apiMon.keyLabel": "API 密钥",
     "apiMon.keyPh": "可选",
@@ -130,6 +159,35 @@ const I18N = {
     "theme.title": "Light / dark theme",
     "theme.dark": "Dark theme",
     "theme.light": "Light theme",
+    "hw.gpuUtil": "GPU load",
+    "hw.gpuMem": "VRAM",
+    "hw.gpuTemp": "GPU temp",
+    "hw.gpuPower": "GPU power",
+    "hw.pcieRx": "PCIe RX",
+    "hw.cpu": "CPU",
+    "hw.ram": "RAM",
+    "hw.diskRead": "Disk read",
+    "hw.tokS": "tok/s",
+    "hw.prefill": "prefill tok/s",
+    "state.loaded": "Loaded",
+    "state.unloaded": "Not loaded",
+    "mon.lastDecode": "Last request decode speed",
+    "mon.noDone": "No completed requests yet",
+    "err.keyInvalid": "API key invalid or not set",
+    "err.aboutLoad": "Failed to load About info: ",
+    "req.yes": "Yes",
+    "req.no": "No",
+    "req.truncated": " (truncated)",
+    "req.empty": " (empty)",
+    "req.none": " (none)",
+    "req.apiResp": "API response (rebuilt from the record)",
+    "about.tempDefault": "temperature default",
+    "about.topPDefault": "top_p default",
+    "about.seedDefault": "seed default",
+    "state.inFlight": " · in flight ",
+    "state.unreachable": "Unreachable",
+    "state.noResponse": "Service not responding",
+
     "apiMon.title": "Request monitor",
     "apiMon.keyLabel": "API key",
     "apiMon.keyPh": "optional",
@@ -458,7 +516,7 @@ async function sendChat() {
       waitRow.remove();
       out.textContent = msg;
       out.parentElement.className = "bubble error";
-      if (res.status === 401) showBanner("API 密钥无效或未设置", "err");
+      if (res.status === 401) showBanner(tr("err.keyInvalid"), "err");
       setPill("error", tr("chat.failed"));
       return;
     }
@@ -601,7 +659,7 @@ window.QinferRequests = {
     if (!records.length) {
       const n = document.createElement("div");
       n.className = "note";
-      n.textContent = "暂无请求记录";
+      n.textContent = tr("mon.noReq");
       listEl.appendChild(n);
       return;
     }
@@ -653,7 +711,7 @@ window.QinferRequests = {
       ["model", rec.model],
       ["state", rec.state],
       ["created", QinferRequests.timeOf(rec.created)],
-      ["stream", rec.stream ? "是" : "否"],
+      ["stream", rec.stream ? tr("req.yes") : tr("req.no")],
       ["response_format", rec.response_format || "—"],
       ["queue_s", QinferRequests.fmtSec(rec.queue_s)],
       ["first_token_s", QinferRequests.fmtSec(rec.first_token_s)],
@@ -672,10 +730,10 @@ window.QinferRequests = {
     });
     el.appendChild(dl);
     const tabs = [
-      ["input", "Input" + (rec.input_truncated ? "（已截断）" : ""), rec.input || "（空）"],
-      ["output", "Output" + (rec.output_truncated ? "（已截断）" : ""), rec.output || "（空）"],
-      ["reasoning", "Reasoning", rec.reasoning || "（无）"],
-      ["response", "API response（按记录重建）", QinferRequests.apiResponseHtml(rec)],
+      ["input", "Input" + (rec.input_truncated ? tr("req.truncated") : ""), rec.input || tr("req.empty")],
+      ["output", "Output" + (rec.output_truncated ? tr("req.truncated") : ""), rec.output || tr("req.empty")],
+      ["reasoning", "Reasoning", rec.reasoning || tr("req.none")],
+      ["response", tr("req.apiResp"), QinferRequests.apiResponseHtml(rec)],
     ];
     const set = document.createElement("div");
     set.className = "tabset";
@@ -809,9 +867,9 @@ async function refreshAbout() {
       ["chat_template", ct.length > 120 ? ct.slice(0, 120) + "…" : ct],
       ["templater", caps.templater || "—"],
       ["vision", p.modalities && p.modalities.vision !== undefined ? String(p.modalities.vision) : "—"],
-      ["temperature 默认", prm.temperature === undefined ? "—" : String(prm.temperature)],
-      ["top_p 默认", prm.top_p === undefined ? "—" : String(prm.top_p)],
-      ["seed 默认", prm.seed === undefined ? "—" : String(prm.seed)],
+      [tr("about.tempDefault"), prm.temperature === undefined ? "—" : String(prm.temperature)],
+      [tr("about.topPDefault"), prm.top_p === undefined ? "—" : String(prm.top_p)],
+      [tr("about.seedDefault"), prm.seed === undefined ? "—" : String(prm.seed)],
       ["build_info", p.build_info || "—"],
     ]);
     const hs = m.hardware_static || {};
@@ -825,21 +883,21 @@ async function refreshAbout() {
     ]);
     $("about-ports").textContent = location.protocol + "//" + location.host;
   } catch (e) {
-    showBanner("About 信息加载失败：" + e.message, "err");
+    showBanner(tr("err.aboutLoad") + e.message, "err");
   }
 }
 
 const SPARK_SERIES = [
-  { key: "gpu_util", label: "GPU 利用率", fmt: function (v) { return v.toFixed(1) + "%"; } },
-  { key: "gpu_mem_used", label: "GPU 显存", fmt: function (v) { return (v / 1073741824).toFixed(2) + " GB"; } },
-  { key: "gpu_temp", label: "GPU 温度", fmt: function (v) { return v.toFixed(0) + " ℃"; } },
-  { key: "gpu_power", label: "GPU 功率", fmt: function (v) { return v.toFixed(0) + " W"; } },
-  { key: "gpu_pcie_rx_mb", label: "PCIe RX", fmt: function (v) { return v.toFixed(1) + " MB/s"; } },
-  { key: "cpu", label: "CPU", fmt: function (v) { return v.toFixed(1) + "%"; } },
-  { key: "ram_used", label: "内存", fmt: function (v) { return (v / 1073741824).toFixed(1) + " GB"; } },
-  { key: "disk_read_mb", label: "磁盘读", fmt: function (v) { return v.toFixed(1) + " MB/s"; } },
-  { key: "tok_s", label: "tok/s", fmt: function (v) { return v.toFixed(1); } },
-  { key: "prefill_tok_s_mean", label: "prefill tok/s", fmt: function (v) { return v.toFixed(1); } },
+  { key: "gpu_util", i18n: "hw.gpuUtil", fmt: function (v) { return v.toFixed(1) + "%"; } },
+  { key: "gpu_mem_used", i18n: "hw.gpuMem", fmt: function (v) { return (v / 1073741824).toFixed(2) + " GB"; } },
+  { key: "gpu_temp", i18n: "hw.gpuTemp", fmt: function (v) { return v.toFixed(0) + " ℃"; } },
+  { key: "gpu_power", i18n: "hw.gpuPower", fmt: function (v) { return v.toFixed(0) + " W"; } },
+  { key: "gpu_pcie_rx_mb", i18n: "hw.pcieRx", fmt: function (v) { return v.toFixed(1) + " MB/s"; } },
+  { key: "cpu", i18n: "hw.cpu", fmt: function (v) { return v.toFixed(1) + "%"; } },
+  { key: "ram_used", i18n: "hw.ram", fmt: function (v) { return (v / 1073741824).toFixed(1) + " GB"; } },
+  { key: "disk_read_mb", i18n: "hw.diskRead", fmt: function (v) { return v.toFixed(1) + " MB/s"; } },
+  { key: "tok_s", i18n: "hw.tokS", fmt: function (v) { return v.toFixed(1); } },
+  { key: "prefill_tok_s_mean", i18n: "hw.prefill", fmt: function (v) { return v.toFixed(1); } },
 ];
 
 function renderSparklines(h) {
@@ -855,7 +913,7 @@ function renderSparklines(h) {
     head.className = "spark-head";
     const name = document.createElement("span");
     name.className = "name";
-    name.textContent = s.label;
+    name.textContent = tr(s.i18n);
     const val = document.createElement("span");
     val.className = "val";
     const cur = hw[s.key];
@@ -909,18 +967,18 @@ async function refreshMonitor() {
     if (!res.ok) throw new Error("HTTP " + res.status);
     const st = await res.json();
     const lt = st.last_timings;
-    $("card-state").textContent = st.loaded ? "已加载" : "未加载";
+    $("card-state").textContent = st.loaded ? tr("state.loaded") : tr("state.unloaded");
     $("card-state-sub").textContent = (st.model || "") +
-      (st.activity && st.activity.in_flight ? " · 进行中 " + st.activity.in_flight : "");
+      (st.activity && st.activity.in_flight ? tr("state.inFlight") + st.activity.in_flight : "");
     $("card-wall").textContent = lt && lt.wallclock_s !== undefined ? lt.wallclock_s.toFixed(2) + "s" : "—";
     $("card-wall-sub").textContent = lt && lt.prompt_tokens !== undefined
-      ? lt.prompt_tokens + " prompt → " + lt.output_tokens + " out" : "尚无完成请求";
+      ? lt.prompt_tokens + " prompt → " + lt.output_tokens + " out" : tr("mon.noDone");
     $("card-tok").textContent = lt && lt.decode_tok_s !== undefined ? lt.decode_tok_s.toFixed(1) + " tok/s" : "—";
-    $("card-tok-sub").textContent = "上次请求解码速度";
+    $("card-tok-sub").textContent = tr("mon.lastDecode");
     setStatusDot(true);
   } catch (e) {
-    $("card-state").textContent = "不可达";
-    $("card-state-sub").textContent = "服务无响应";
+    $("card-state").textContent = tr("state.unreachable");
+    $("card-state-sub").textContent = tr("state.noResponse");
     setStatusDot(false);
   }
   if (window.lastMetrics) renderSparklines(window.lastMetrics);

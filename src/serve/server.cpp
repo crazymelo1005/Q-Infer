@@ -1711,13 +1711,43 @@ void Serve::register_routes() {
     // Static pages (the files landed by T15/T16; 404 is fine at this point — T9 only verifies the API
     // surface).
     svr.Get("/", [this](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Cache-Control", "no-cache");
         res.set_content(web_index_, "text/html; charset=utf-8");
     });
     svr.Get("/api-monitor", [this](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Cache-Control", "no-cache");
         res.set_content(web_monitor_, "text/html; charset=utf-8");
     });
+    // /web/* is served here rather than through set_base_dir so every asset
+    // carries Cache-Control: no-cache: the vendored static handler left the
+    // browsers free to heuristically cache the CSS/JS, which hid frontend
+    // edits behind a stale reload. This is a local tool; revalidation costs
+    // nothing.
     const std::filesystem::path base = std::filesystem::path(__FILE__).parent_path() / "web";
-    svr.set_base_dir(base.string().c_str(), "/web");
+    svr.Get(R"(/web/(.+))", [base](const httplib::Request& req, httplib::Response& res) {
+        std::string rel = req.matches[1].str();
+        if (rel.find("..") != std::string::npos) {
+            res.status = 400;
+            return;
+        }
+        std::ifstream f(base / rel, std::ios::binary);
+        if (!f) {
+            res.status = 404;
+            return;
+        }
+        std::string body((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        const std::size_t dot = rel.rfind('.');
+        const std::string ext = dot == std::string::npos ? "" : rel.substr(dot);
+        const char* ct = ext == ".css"    ? "text/css; charset=utf-8"
+                         : ext == ".js"   ? "text/javascript; charset=utf-8"
+                         : ext == ".html" ? "text/html; charset=utf-8"
+                         : ext == ".svg"  ? "image/svg+xml"
+                         : ext == ".woff2" ? "font/woff2"
+                         : ext == ".json" ? "application/json; charset=utf-8"
+                                          : "application/octet-stream";
+        res.set_header("Cache-Control", "no-cache");
+        res.set_content(body, ct);
+    });
 }
 
 bool Serve::listen(std::string& err) {

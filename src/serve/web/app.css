@@ -12,7 +12,7 @@ main{flex:1;min-height:0;display:flex}
 
 /* ---- Chat ---- */
 .chat-scroll{flex:1;min-height:0;overflow-y:auto}
-.chat{max-width:860px;margin:0 auto;padding:var(--st-s-8) var(--st-s-6) var(--st-s-6);display:flex;flex-direction:column;gap:var(--st-s-6)}
+.chat{max-width:980px;margin:0 auto;padding:var(--st-s-8) var(--st-s-6) var(--st-s-6);display:flex;flex-direction:column;gap:var(--st-s-6)}
 .chat-empty{margin:12vh auto 0;text-align:center}
 .chat-empty__title{font-weight:900;font-size:var(--st-fs-display);line-height:1.1;letter-spacing:-.02em}
 .chat-empty__sub{margin-top:var(--st-s-3);color:var(--st-ink-muted)}
@@ -30,14 +30,18 @@ main{flex:1;min-height:0;display:flex}
 .msg-waiting .spinner{width:12px;height:12px;border-radius:50%;border:2px solid var(--st-line);border-top-color:var(--st-accent);animation:spin .8s linear infinite;flex:none}
 @keyframes spin{to{transform:rotate(360deg)}}
 .composer-wrap{flex:none;padding:0 var(--st-s-6) var(--st-s-6)}
-.st-composer{max-width:860px;margin:0 auto}
-.chat-foot{flex:none;max-width:860px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:var(--st-s-2)}
+/* width:100% explicitly: with width:auto the form shrank to its content
+   (measured 233px inside a 447px parent) and the whole composer read as a
+   small floating box. */
+.st-composer{max-width:980px;width:100%;margin:0 auto}
+.chat-foot{flex:none;max-width:980px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:var(--st-s-2)}
 .drawer summary{cursor:pointer;color:var(--st-ink-muted);font-size:var(--st-fs-sm);user-select:none;display:flex;align-items:center;gap:6px}
 .drawer-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--st-s-3);margin-top:var(--st-s-2);padding:var(--st-s-3);background:var(--st-surface-2);border:1px solid var(--st-line);border-radius:var(--st-r-md)}
 .field{display:flex;flex-direction:column;gap:4px}
 .field label{font-size:var(--st-fs-sm);color:var(--st-ink-muted)}
 .send-row{display:flex;gap:var(--st-s-2)}
-.chat-input{flex:1;resize:none}
+.chat-input{width:100%;resize:none}
+.st-composer textarea.chat-input{height:auto;min-height:64px;max-height:40vh}
 .send-col{display:flex;gap:var(--st-s-1)}
 .chat-status{display:flex;align-items:center;gap:var(--st-s-2);font-size:var(--st-fs-sm);color:var(--st-ink-muted);font-variant-numeric:tabular-nums}
 .status-dot{width:9px;height:9px;border-radius:50%;background:var(--st-ink-muted);display:inline-block}
@@ -47,6 +51,7 @@ main{flex:1;min-height:0;display:flex}
 /* ---- Monitor / About ---- */
 .view--monitor,.view--about{overflow-y:auto}
 .monitor,.about-body{max-width:1240px;width:100%;margin:0 auto;padding:var(--st-s-6);display:flex;flex-direction:column;gap:var(--st-s-5)}
+.monitor{min-height:100%}
 .monitor-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--st-s-4)}
 .card{background:var(--st-surface);border:1px solid var(--st-line);border-radius:var(--st-r-lg);box-shadow:var(--st-sh-card);padding:var(--st-s-4) var(--st-s-5)}
 .card .card-title{font-size:var(--st-fs-sm);font-weight:500;color:var(--st-ink-muted)}
@@ -58,7 +63,7 @@ main{flex:1;min-height:0;display:flex}
 .spark-head{display:flex;justify-content:space-between;gap:var(--st-s-2);font-size:11px}
 .spark-head .name{color:var(--st-ink-muted)}
 .spark-head .val{font-family:var(--st-font-mono);color:var(--st-ink-soft)}
-.req-layout{flex:1;display:flex;gap:var(--st-s-3);padding:0 var(--st-s-6) var(--st-s-6);min-height:0}
+.req-layout{flex:1;display:flex;gap:var(--st-s-3);padding:0 var(--st-s-6) var(--st-s-6);min-height:420px}
 .req-list-pane{width:38%;min-width:340px;background:var(--st-surface);border:1px solid var(--st-line);border-radius:var(--st-r-lg);box-shadow:var(--st-sh-card);display:flex;flex-direction:column;min-height:0;overflow:hidden}
 .req-toolbar{display:flex;gap:var(--st-s-2);padding:var(--st-s-2) var(--st-s-3);border-bottom:1px solid var(--st-line)}
 .req-toolbar .input{flex:1;height:36px}
@@ -105,7 +110,8 @@ main{flex:1;min-height:0;display:flex}
 .key-input{width:220px}
 .tab-btn{cursor:pointer}
 .topbar{align-items:center}
-.brand{display:flex;align-items:baseline;gap:var(--st-s-2);min-width:140px}
+.st-header__brand{white-space:nowrap}
+.brand{display:flex;align-items:baseline;gap:var(--st-s-2);min-width:140px;white-space:nowrap}
 .brand .logo{font-weight:900;font-size:var(--st-fs-lg);letter-spacing:-.01em}
 .brand .model{color:var(--st-ink-muted);font-size:var(--st-fs-xs);font-family:var(--st-font-mono)}
 
@@ -130,4 +136,5 @@ main{flex:1;min-height:0;display:flex}
   .monitor,.about-body{padding:var(--st-s-4)}
   .drawer-grid{grid-template-columns:1fr}
   .keybox label{display:none}
+  .st-header__brand small{display:none}
 }
