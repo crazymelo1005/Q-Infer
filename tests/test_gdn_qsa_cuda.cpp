@@ -9,6 +9,9 @@
 #include "dense/gdn_preprocess_cuda.hpp"
 #include "dense/gdn_recurrence.hpp"
 #include "dense/gdn_recurrence_cuda.hpp"
+#include "dense/qsa_attend.hpp"
+#include "dense/qsa_index.hpp"
+#include "dense/qsa_index_attend_cuda.hpp"
 #include "dense/qsa_qk_prep.hpp"
 #include "dense/qsa_qk_prep_cuda.hpp"
 #include "dense/rope.hpp"  // build_rope_table
@@ -413,6 +416,84 @@ int test_qsa_qk_prep_cuda() {
     return worst < 1e-5 ? 0 : 1;
 }
 
+// ---- QSA 索引器与 attend 设备对照（Task 7）----
+// 合成几何：idx_dim 4、idx_n_head 2、idx_block 2、n_bid 3（4 个块）、n_kv 9（含尾巴一段）。
+int test_qsa_index_cuda() {
+    constexpr std::uint64_t kIdxDim = 4, kIdxNh = 2, kIdxBlock = 2, kNBid = 3, kNKv = 9;
+    std::vector<float> pooled(static_cast<std::size_t>((kNBid + 1) * kIdxDim)),
+        q_idx(static_cast<std::size_t>(kIdxNh * kIdxDim));
+    PrepLcg g;
+    for (float& t : pooled) t = g.next();
+    for (float& t : q_idx) t = g.next();
+    std::vector<float> bias(static_cast<std::size_t>(kNBid + 1));
+    for (float& t : bias) t = 0.1f * g.next();
+    std::vector<float> host(static_cast<std::size_t>(kNKv)), dev(static_cast<std::size_t>(kNKv));
+    // bias 变体 + 无 bias 变体（尾巴 1e9 必须无条件加）。
+    double worst = 0.0;
+    for (int with_bias = 0; with_bias < 2; ++with_bias) {
+        std::string err;
+        CHECK(qinfer::dense::qsa_index(pooled.data(), kNBid, kIdxDim, kIdxNh, q_idx.data(),
+                                       with_bias ? bias.data() : nullptr, kIdxBlock, kNKv,
+                                       host.data(), err));
+        CHECK(err.empty());
+        CHECK(qinfer::dense::qsa_index_cuda(pooled.data(), kNBid, kIdxDim, kIdxNh, q_idx.data(),
+                                            with_bias ? bias.data() : nullptr, kIdxBlock, kNKv,
+                                            dev.data(), nullptr, err));
+        CHECK(err.empty());
+        for (std::size_t i = 0; i < host.size(); ++i) {
+            const double d = std::fabs(static_cast<double>(host[i]) - static_cast<double>(dev[i]));
+            worst = std::max(worst,
+                             d / (std::fabs(host[i]) > 1e-30 ? std::fabs(host[i]) : 1e-30));
+        }
+    }
+    // 尾巴必须加 1e9（差异会被 1e9 放大，验证非零）。
+    std::printf("  QSA 索引器（bias ±、尾巴 1e9）设备 vs 主机最差相对 L1 %.3e\n", worst);
+    return worst < 1e-5 ? 0 : 1;
+}
+
+// attend + gate 对照：QsaShapes{idx_top_k, idx_block, head_dim, n_head, n_head_kv}。
+int test_qsa_attend_cuda() {
+    constexpr std::uint64_t kHd = 8, kNh = 4, kNkv = 2, kNIds = 6;
+    const qinfer::dense::QsaShapes s{2048, 4, kHd, kNh, kNkv};
+    std::vector<float> q(static_cast<std::size_t>(kNh * kHd)), q_full(static_cast<std::size_t>(kNh * 2 * kHd));
+    PrepLcg g;
+    for (float& t : q) t = g.next();
+    for (float& t : q_full) t = g.next();
+    std::vector<std::uint16_t> k(static_cast<std::size_t>(kNIds * kNkv * kHd)),
+        v(static_cast<std::size_t>(kNIds * kNkv * kHd));
+    for (std::size_t i = 0; i < k.size(); ++i) {
+        k[i] = qinfer::kernels::f32_to_bf16_bits(0.5f * g.next());  // fp16 位型（用 bf16 舍入近似无妨）
+        v[i] = qinfer::kernels::f32_to_bf16_bits(0.5f * g.next());
+    }
+    std::vector<float> attn_host(static_cast<std::size_t>(kNh * kHd)),
+        attn_dev(static_cast<std::size_t>(kNh * kHd));
+    std::vector<float> weights_host(static_cast<std::size_t>(kNh * kNIds)),
+        weights_dev(static_cast<std::size_t>(kNh * kNIds));
+    std::string err;
+    // 主机：attend 未过门 → gate_apply 过门（与设备 qsa_attend_cuda 语义一致：attend_cuda 内含 gate）。
+    CHECK(qinfer::dense::qsa_attend(q.data(), k.data(), v.data(), kNIds, s, attn_host.data(),
+                                    weights_host.data(), err));
+    CHECK(err.empty());
+    CHECK(qinfer::dense::qsa_gate_apply_f32(attn_host.data(), q_full.data(), s, attn_host.data(),
+                                            err));
+    CHECK(err.empty());
+    // 设备：attend + gate 一步。
+    CHECK(qinfer::dense::qsa_attend_cuda(q.data(), k.data(), v.data(), kNIds, s, q_full.data(),
+                                         attn_dev.data(), weights_dev.data(), nullptr, err));
+    CHECK(err.empty());
+    double worst_a = 0.0, worst_w = 0.0;
+    for (std::size_t i = 0; i < attn_host.size(); ++i) {
+        const double d = std::fabs(static_cast<double>(attn_host[i]) - static_cast<double>(attn_dev[i]));
+        worst_a = std::max(worst_a, d / (std::fabs(attn_host[i]) > 1e-30 ? std::fabs(attn_host[i]) : 1e-30));
+    }
+    for (std::size_t i = 0; i < weights_host.size(); ++i) {
+        const double d = std::fabs(static_cast<double>(weights_host[i]) - static_cast<double>(weights_dev[i]));
+        worst_w = std::max(worst_w, d / (std::fabs(weights_host[i]) > 1e-30 ? std::fabs(weights_host[i]) : 1e-30));
+    }
+    std::printf("  QSA attend+gate 设备 vs 主机：attn %.3e、weights %.3e\n", worst_a, worst_w);
+    return worst_a < 1e-4 && worst_w < 1e-4 ? 0 : 1;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -422,6 +503,8 @@ int main(int argc, char** argv) {
     rc += test_gdn_recurrence_cuda();
     rc += test_gdn_closing_cuda();
     rc += test_qsa_qk_prep_cuda();
+    rc += test_qsa_index_cuda();
+    rc += test_qsa_attend_cuda();
     // --model <GGUF> [--layer N]：真权重整层对照（环境2 用；无参数时合成用例已覆盖各段）。
     int layer = 1;
     for (int i = 1; i + 1 < argc; ++i) {
