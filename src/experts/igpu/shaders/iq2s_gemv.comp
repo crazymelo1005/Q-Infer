@@ -1,0 +1,90 @@
+// IQ2_S x Q8_K row GEMV (P3a). Mirrors src/kernels/iq2s.cpp's iq2s_dot_q8k line for line:
+// per IQ2_S block (82 B: fp16 d, 32 B qs, 32 B signs, 8 B qh, 8 B scales) and its Q8_K
+// activation block (292 B: float d, int8 qs[256], int16 bsums[16] - bsums are NOT used by the
+// host dot, so they are not read here either), integer MACs into int32, then one fp32 multiply
+// per block and the host's final 0.125 factor.
+//
+// The grid codebook (kIq2sGrid, 1024 x uint64) is a static table: it is uploaded as a storage
+// buffer (binding 3) instead of being hardcoded, which keeps the shader small and avoids relying
+// on the driver accepting an 8 KB constant array.
+//
+// The iGPU has no integer dot product, so the MACs are hand-written, as in q2_0_gemv.comp.
+//
+// Build: glslangValidator -V iq2s_gemv.comp -o iq2s_gemv.spv (see README.md).
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 0) readonly buffer W { uint w[]; };  // n_rows x n_blocks x 82 B
+layout(std430, binding = 1) readonly buffer Y { uint y[]; };  // n_blocks x 292 B (Q8_K)
+layout(std430, binding = 2) writeonly buffer O { float o[]; };
+layout(std430, binding = 3) readonly buffer G { uint g[]; };  // 1024 x 8 B grid codebook
+
+layout(push_constant) uniform Pc {
+    uint n_rows;
+    uint n_blocks;
+} pc;
+
+// Byte access over the uint-backed buffers (little-endian, same as the host).
+uint wbyte(uint off) { return (w[off >> 2] >> ((off & 3u) * 8u)) & 0xFFu; }
+uint ybyte(uint off) { return (y[off >> 2] >> ((off & 3u) * 8u)) & 0xFFu; }
+uint gbyte(uint off) { return (g[off >> 2] >> ((off & 3u) * 8u)) & 0xFFu; }
+
+// fp16 bits -> fp32, matching kernels/fp16.hpp f16_bits_to_f32.
+float f16(uint h) {
+    uint s = (h >> 15) & 1u;
+    uint e = (h >> 10) & 0x1Fu;
+    uint m = h & 0x3FFu;
+    float v = 0.0;
+    if (e == 0u) {
+        v = ldexp(float(m), -24);
+    } else if (e != 31u) {
+        v = ldexp(1.0 + float(m) / 1024.0, int(e) - 15);
+    }
+    return s != 0u ? -v : v;
+}
+
+void main() {
+    uint row = gl_GlobalInvocationID.x;
+    if (row >= pc.n_rows) return;
+    uint row_base = row * pc.n_blocks * 82u;
+    // `precise` forbids contraction/reassociation: without it the Intel compiler folds the
+    // per-block multiply into the accumulator and the last bits leave the host's path.
+    precise float sumf = 0.0;
+    for (uint i = 0u; i < pc.n_blocks; ++i) {
+        uint blk = row_base + i * 82u;
+        uint yb = i * 292u;
+        // The host folds both scales into one float before accumulating (iq2s.cpp:59).
+        precise float d = f16(wbyte(blk) | (wbyte(blk + 1u) << 8)) * uintBitsToFloat(y[yb >> 2u]);
+        precise int bsum = 0;
+        for (uint ib = 0u; ib < 8u; ++ib) {
+            uint sc = wbyte(blk + 74u + ib);
+            precise int ls1 = 1 + 2 * int(sc & 0x0Fu);
+            precise int ls2 = 1 + 2 * int(sc >> 4u);
+            precise int sumi1 = 0;
+            precise int sumi2 = 0;
+            for (uint l = 0u; l < 4u; ++l) {
+                // grid_index(): qs[4*ib+l] | ((qh[ib] << (8 - 2*l)) & 0x300)
+                uint idx = wbyte(blk + 2u + 4u * ib + l) |
+                           ((wbyte(blk + 66u + ib) << (8u - 2u * l)) & 0x300u);
+                uint sgn = wbyte(blk + 34u + 4u * ib + l);
+                for (uint j = 0u; j < 8u; ++j) {
+                    // grid bytes are UNSIGNED in the host product (iq2s.cpp:76); the sign comes
+                    // from the sign byte's bit j only.
+                    int gw = int(gbyte(idx * 8u + j));
+                    int q = int(ybyte(yb + 4u + ib * 32u + l * 8u + j));
+                    if (q > 127) q -= 256;  // int8
+                    int v = (sgn & (1u << j)) != 0u ? -gw : gw;
+                    if (l < 2u) {
+                        sumi1 += q * v;
+                    } else {
+                        sumi2 += q * v;
+                    }
+                }
+            }
+            bsum += ls1 * sumi1 + ls2 * sumi2;
+        }
+        sumf += d * float(bsum);
+    }
+    o[row] = 0.125 * sumf;
+}

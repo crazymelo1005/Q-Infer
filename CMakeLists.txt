@@ -300,6 +300,10 @@ add_executable(test_igpu_gemv tests/test_igpu_gemv.cpp)
 target_link_libraries(test_igpu_gemv PRIVATE qinfer_experts)
 add_test(NAME igpu_gemv COMMAND test_igpu_gemv)
 
+add_executable(test_igpu_iq2s tests/test_igpu_iq2s.cpp)
+target_link_libraries(test_igpu_iq2s PRIVATE qinfer_experts)
+add_test(NAME igpu_iq2s COMMAND test_igpu_iq2s)
+
 add_executable(test_igpu_expert tests/test_igpu_expert.cpp)
 target_link_libraries(test_igpu_expert PRIVATE qinfer_experts)
 add_test(NAME igpu_expert COMMAND test_igpu_expert)
