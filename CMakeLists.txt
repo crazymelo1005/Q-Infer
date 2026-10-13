@@ -471,8 +471,9 @@ if(QINFER_ENABLE_CUDA)
 
   # 阶段 A：GDN/QSA 稠密段设备路径的对照载体（真字节夹具 + 各内核判据）。
   # 链 qinfer_experts（非 CUDA 版）：对照要用主机 quantize_input / run_gemv / format_name。
+  # 链 qinfer_dense_cuda：GDN 前段等 dense 设备实现；qinfer_dense 提供主机 gdn_preprocess 对照。
   add_executable(test_gdn_qsa_cuda tests/test_gdn_qsa_cuda.cpp)
-  target_link_libraries(test_gdn_qsa_cuda PRIVATE qinfer_kernels_cuda qinfer_experts)
+  target_link_libraries(test_gdn_qsa_cuda PRIVATE qinfer_kernels_cuda qinfer_dense_cuda qinfer_experts)
   add_test(NAME gdn_qsa_cuda COMMAND test_gdn_qsa_cuda)
 
   # 设备侧的专家前馈（权重常驻）住在 experts 一侧：它要按档分派、并复用主机的激活量化器，
@@ -483,6 +484,14 @@ if(QINFER_ENABLE_CUDA)
   )
   target_include_directories(qinfer_experts_cuda PUBLIC src)
   target_link_libraries(qinfer_experts_cuda PUBLIC qinfer_kernels_cuda qinfer_experts)
+
+  # 阶段 A：dense 各段的设备实现（GDN 前段/递推/收尾、QSA 各段）。链 qinfer_dense 是为了复用其
+  # 头（GdnShapes/GdnPreWeights 等）与主机侧对照对象（对照组在测试里链 qinfer_dense 即可）。
+  add_library(qinfer_dense_cuda
+    src/dense/gdn_preprocess_cuda.cu
+  )
+  target_include_directories(qinfer_dense_cuda PUBLIC src)
+  target_link_libraries(qinfer_dense_cuda PUBLIC qinfer_kernels_cuda qinfer_dense)
 
   add_executable(test_expert_ffn_cuda tests/test_expert_ffn_cuda.cpp)
   # 这个入口还要跑整模型一步（`run_step_model`），故另连 dense 与 artifact。
