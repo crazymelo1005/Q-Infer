@@ -547,6 +547,42 @@ grep -q 'st-header' "$R" && grep -q 'st-pill' "$R" && grep -q 'btn-theme' "$R" \
   && ok "25 Strata 资源 + 新壳（st-header/st-pill/btn-theme，兼容点保留）" \
   || bad "25 新壳标记：$(head -c 200 "$R")"
 
+# 26. 前端四：i18n 与设置收纳——/ 含语言钮（btn-lang）与 data-i18n 标记、About 含 api-key
+#     （key 从顶栏收进设置卡），app.js 含 qinfer.lang 字典与切语言函数。
+curl -s "http://$HOST:$PORT/" > "$R"
+grep -q 'id="btn-lang"' "$R" && grep -q 'data-i18n' "$R" \
+  && grep -q 'id="api-key"' "$R" && grep -q 'data-i18n="about.apiKey"' "$R" \
+  && ok "26 i18n 标记 + key 收纳（btn-lang/data-i18n/About 内 api-key）" \
+  || bad "26 i18n/key 收纳：$(head -c 200 "$R")"
+curl -s "http://$HOST:$PORT/web/app.js" > "$R"
+grep -q 'qinfer.lang' "$R" && grep -q 'applyLang' "$R" && grep -q 'data-i18n' "$R" \
+  && ok "26 app.js 语言层（qinfer.lang/applyLang/data-i18n）" \
+  || bad "26 app.js 语言层：$(head -c 200 "$R")"
+
+# 27. chunked 终止块：SSE 流必须带规范的 0 长度终止块——浏览器（严格 chunked 解析）在缺
+#     终止块时报 ERR_INCOMPLETE_CHUNKED_ENCODING 前端看不到流；python http.client 同样
+#     严格，读到不完整流抛 IncompleteRead。
+out27=$(python3 - "$HOST" "$PORT" <<'PYEOF'
+import http.client, sys
+host, port = sys.argv[1], int(sys.argv[2])
+conn = http.client.HTTPConnection(host, port, timeout=60)
+body = '{"messages":[{"role":"user","content":"d"}],"max_tokens":8,"temperature":0,"stream":true}'
+conn.request("POST", "/v1/chat/completions", body,
+             {"Content-Type": "application/json",
+              "Authorization": "Bearer testkey"})
+r = conn.getresponse()
+assert r.status == 200, "HTTP %s" % r.status
+assert r.getheader("Transfer-Encoding") == "chunked", "非 chunked"
+data = r.read()   # 缺终止块 → 抛 IncompleteRead
+assert data.endswith(b"data: [DONE]\n\n"), "流末缺 [DONE]"
+assert data.count(b"[DONE]") == 1, "DONE 只应出现一次"
+print("chunked-terminated-ok")
+PYEOF
+)
+[ "$out27" = chunked-terminated-ok ] \
+  && ok "27 chunked 终止块（严格解析完整读到 [DONE]）" \
+  || bad "27 chunked 终止块：缺 0 长度终止块 → IncompleteRead/流不完整：$out27"
+
 stop
 
 # ---- 503：--reject-after 1 → 第 1 个请求正常，之后一律队列满 ----

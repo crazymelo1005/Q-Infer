@@ -8,9 +8,159 @@
 
 function $(id) { return document.getElementById(id); }
 
-/* ---- API 密钥（sessionStorage，随页面会话保留） ---- */
-function apiKey() { return sessionStorage.getItem("qinfer_api_key") || ""; }
-function setApiKey(k) { sessionStorage.setItem("qinfer_api_key", k); }
+/* ---- i18n：zh/en 字典 + 切换（localStorage qinfer.lang，页面间共享） ---- */
+const I18N = {
+  zh: {
+    "brand.tag": "本地推理",
+    "lang.title": "切换语言（中 / EN）",
+    "state.connecting": "连接中…",
+    "chat.title": "向引擎提问吧",
+    "chat.sub": "模型在本机运行，数据不出本机。密钥在 About 页设置。",
+    "chat.sampler": "采样器",
+    "chat.seedLabel": "seed（-1 = 随机）",
+    "chat.inputPh": "输入消息，Enter 发送，Shift+Enter 换行",
+    "chat.stop": "停止",
+    "chat.you": "你",
+    "chat.assistant": "助手",
+    "chat.error": "错误",
+    "chat.generating": "生成中…",
+    "chat.prefilling": "正在阅读提示词…（真机预填约 2.5 分钟）",
+    "chat.stopped": "已停止",
+    "chat.stoppedSuffix": "（已停止）",
+    "chat.failedPrefix": "请求失败：",
+    "chat.idle": "空闲",
+    "chat.newChat": "新会话已开始",
+    "chat.exported": "已导出 qinfer-chat.md",
+    "chat.noExport": "没有可导出的对话",
+    "chat.exportTitle": "导出为 Markdown",
+    "mon.state": "模型状态",
+    "mon.retained": "请求保留",
+    "mon.retainedSub": "条（/api/requests）",
+    "mon.wall": "最近 wall-clock",
+    "mon.decode": "最近解码速度",
+    "mon.searchPh": "搜索路径 / 模型 / 状态",
+    "mon.filterTitle": "状态过滤",
+    "mon.all": "全部状态",
+    "mon.noReq": "暂无请求记录",
+    "mon.pickHint": "点左侧一条记录查看详情",
+    "mon.stateLine": "状态",
+    "mon.queued": "排队",
+    "mon.unreachable": "服务不可达，正在重试…",
+    "about.apiKey": "连接设置",
+    "about.apiKeyLabel": "API 密钥",
+    "about.apiKeyHint": "仅当服务端启动时带了 --api-key 才需要",
+    "about.apiKeyPh": "不需要",
+    "about.show": "显示",
+    "about.apiKeyNote": "密钥只保存在本浏览器（localStorage，跨标签页共享，不上传）。",
+    "about.engine": "模型与引擎",
+    "about.props": "能力（/props）",
+    "about.hw": "本机硬件",
+    "about.svc": "服务与协议",
+    "req.copy": "复制",
+    "req.copyFail": "复制失败",
+    "req.loading": "加载详情…",
+    "req.detailFail": "请求详情不可用：HTTP ",
+    "req.loadFail": "加载失败：",
+  },
+  en: {
+    "brand.tag": "Local inference",
+    "lang.title": "Switch language (CN / EN)",
+    "state.connecting": "Connecting…",
+    "chat.title": "Ask the engine anything",
+    "chat.sub": "The model runs on this PC; nothing leaves it. Set the API key in the About tab.",
+    "chat.sampler": "Sampler",
+    "chat.seedLabel": "seed (-1 = random)",
+    "chat.inputPh": "Type a message; Enter to send, Shift+Enter for a new line",
+    "chat.stop": "Stop",
+    "chat.you": "You",
+    "chat.assistant": "Assistant",
+    "chat.error": "Error",
+    "chat.generating": "Generating…",
+    "chat.prefilling": "Reading the prompt… (prefill can take minutes on real weights)",
+    "chat.stopped": "Stopped",
+    "chat.stoppedSuffix": " (stopped)",
+    "chat.failedPrefix": "Request failed: ",
+    "chat.idle": "Idle",
+    "chat.newChat": "New chat started",
+    "chat.exported": "Exported qinfer-chat.md",
+    "chat.noExport": "Nothing to export",
+    "chat.exportTitle": "Export as Markdown",
+    "mon.state": "Model state",
+    "mon.retained": "Requests kept",
+    "mon.retainedSub": "entries (/api/requests)",
+    "mon.wall": "Last wall-clock",
+    "mon.decode": "Last decode speed",
+    "mon.searchPh": "Search path / model / state",
+    "mon.filterTitle": "Filter by state",
+    "mon.all": "All states",
+    "mon.noReq": "No requests yet",
+    "mon.pickHint": "Pick a request on the left to inspect it",
+    "mon.stateLine": "State",
+    "mon.queued": "queued",
+    "mon.unreachable": "Server unreachable, retrying…",
+    "about.apiKey": "Connection settings",
+    "about.apiKeyLabel": "API key",
+    "about.apiKeyHint": "Only needed if the server was started with --api-key",
+    "about.apiKeyPh": "Not needed",
+    "about.show": "Show",
+    "about.apiKeyNote": "The key stays in this browser only (localStorage, shared across tabs; never uploaded).",
+    "about.engine": "Model and engine",
+    "about.props": "Capabilities (/props)",
+    "about.hw": "This PC",
+    "about.svc": "Service and protocols",
+    "req.copy": "Copy",
+    "req.copyFail": "Copy failed",
+    "req.loading": "Loading details…",
+    "req.detailFail": "Request details unavailable: HTTP ",
+    "req.loadFail": "Load failed: ",
+  },
+};
+
+function tr(key) {
+  const lang = localStorage.getItem("qinfer.lang") === "en" ? "en" : "zh";
+  return (I18N[lang] && I18N[lang][key]) || (I18N.zh[key] || key);
+}
+
+// 应用语言：data-i18n 文本、data-i18n-ph 占位符、data-i18n-title/title 提示；语言钮标签随动。
+function applyLang() {
+  const lang = localStorage.getItem("qinfer.lang") === "en" ? "en" : "zh";
+  document.documentElement.lang = lang === "en" ? "en" : "zh-CN";
+  document.querySelectorAll("[data-i18n]").forEach(function (el) {
+    el.textContent = tr(el.dataset.i18n);
+  });
+  document.querySelectorAll("[data-i18n-ph]").forEach(function (el) {
+    el.setAttribute("placeholder", tr(el.dataset.i18nPh));
+  });
+  document.querySelectorAll("[data-i18n-title]").forEach(function (el) {
+    const k = el.dataset.i18nTitle;
+    el.setAttribute("title", tr(k));
+    el.setAttribute("aria-label", tr(k));
+  });
+  const lb = $("btn-lang");
+  if (lb) lb.textContent = lang === "en" ? "中" : "EN";
+  const bd = document.querySelector(".st-header__brand small");
+  if (bd) bd.textContent = tr("brand.tag");
+  // 已渲染的语言气泡 role 标签随语言刷新（动态生成，无 data-i18n）。
+  document.querySelectorAll("#msg-list .bubble").forEach(function (b) {
+    const r = b.querySelector(".bubble-role");
+    if (!r) return;
+    r.textContent = b.classList.contains("user") ? tr("chat.you")
+      : b.classList.contains("error") ? tr("chat.error") : tr("chat.assistant");
+  });
+}
+
+function toggleLang() {
+  const next = localStorage.getItem("qinfer.lang") === "en" ? "zh" : "en";
+  try { localStorage.setItem("qinfer.lang", next); } catch (e) {}
+  applyLang();
+  showToast(next === "en" ? "English" : "中文", "info");
+}
+
+/* ---- API 密钥（localStorage，跨标签页共享；与 Strata 同款） ---- */
+function apiKey() { return localStorage.getItem("qinfer.api_key") || ""; }
+function setApiKey(k) {
+  try { localStorage.setItem("qinfer.api_key", k); } catch (e) {}
+}
 
 /* ---- 统一 fetch：带密钥头；有 body 时补 Content-Type ---- */
 async function api(path, opts) {
@@ -195,7 +345,7 @@ function addMsg(role, text) {
   el.className = "bubble " + role;
   const label = document.createElement("div");
   label.className = "bubble-role";
-  label.textContent = role === "user" ? "你" : role === "error" ? "错误" : "助手";
+  label.textContent = role === "user" ? tr("chat.you") : role === "error" ? tr("chat.error") : tr("chat.assistant");
   const body = document.createElement("div");
   body.className = "bubble-body";
   body.textContent = text;
@@ -239,8 +389,18 @@ async function sendChat() {
     seed: parseInt($("s-seed").value, 10),
   };
   const out = addMsg("assistant", "");
+  // prefill 期可见反馈：等待行（转圈 + 文案）→ 首个 delta 到达时移除，正文接管。
+  const waitRow = document.createElement("div");
+  waitRow.className = "msg-waiting";
+  const spinner = document.createElement("span");
+  spinner.className = "spinner";
+  const waitTxt = document.createElement("span");
+  waitTxt.textContent = tr("chat.prefilling");
+  waitRow.appendChild(spinner);
+  waitRow.appendChild(waitTxt);
+  out.parentElement.appendChild(waitRow);
   setStreaming(true);
-  setPill("generating", "生成中…");
+  setPill("reading", tr("chat.prefilling"));
   abortCtrl = new AbortController();
   try {
     const res = await api("/v1/chat/completions", {
@@ -255,36 +415,44 @@ async function sendChat() {
         const e = await res.json();
         if (e.error && e.error.message) msg = e.error.message;
       } catch (e) { /* 非 JSON 错误体 */ }
+      waitRow.remove();
       out.textContent = msg;
       out.parentElement.className = "bubble error";
       if (res.status === 401) showBanner("API 密钥无效或未设置", "err");
-      setPill("error", "请求失败");
+      setPill("error", tr("chat.failed"));
       return;
     }
     await readSSE(res, function (ev) {
       if (ev.error) {
-        out.textContent = ev.error.message || "生成失败";
+        waitRow.remove();
+        out.textContent = ev.error.message || tr("chat.failed");
         out.parentElement.className = "bubble error";
-        setPill("error", "生成失败");
+        setPill("error", tr("chat.failed"));
       } else if (ev.choices && ev.choices[0]) {
         const d = ev.choices[0].delta || {};
-        if (typeof d.content === "string") out.textContent += d.content;
+        if (d.content !== undefined) {
+          if (waitRow.parentElement) waitRow.remove();
+          out.textContent += d.content;
+          setPill("generating", tr("chat.generating"));
+        }
         $("msg-list").scrollTop = $("msg-list").scrollHeight;
       }
     });
+    if (waitRow.parentElement) waitRow.remove();
   } catch (e) {
+    waitRow.remove();
     if (e.name === "AbortError") {
-      out.textContent += "（已停止）";
-      setPill("idle", "已停止");
+      out.textContent += tr("chat.stoppedSuffix");
+      setPill("idle", tr("chat.stopped"));
     } else {
-      out.textContent = "请求失败：" + e.message;
+      out.textContent = tr("chat.failedPrefix") + e.message;
       out.parentElement.className = "bubble error";
-      setPill("error", "请求失败");
+      setPill("error", tr("chat.failed"));
     }
   } finally {
     setStreaming(false);
     abortCtrl = null;
-    setPill("idle", "空闲");
+    setPill("idle", tr("chat.idle"));
   }
 }
 
@@ -297,26 +465,26 @@ function newChat() {
   $("msg-list").innerHTML = "";
   const e = $("chat-empty");
   if (e) e.style.display = "";
-  setPill("idle", "新会话");
-  showToast("新会话已开始", "info");
+  setPill("idle", tr("chat.newChat"));
+  showToast(tr("chat.newChat"), "info");
 }
 
 /* ---- 导出对话为 Markdown ---- */
 function exportChat() {
   const rows = [];
   document.querySelectorAll("#msg-list .bubble").forEach(function (b) {
-    const role = b.classList.contains("user") ? "你" : "助手";
+    const role = b.classList.contains("user") ? tr("chat.you") : tr("chat.assistant");
     const txt = b.querySelector(".bubble-body").textContent;
     rows.push("### " + role + "\n\n" + txt + "\n");
   });
-  if (!rows.length) { showToast("没有可导出的对话", "warn"); return; }
+  if (!rows.length) { showToast(tr("chat.noExport"), "warn"); return; }
   const blob = new Blob([rows.join("\n")], { type: "text/markdown;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = "qinfer-chat.md";
   a.click();
   URL.revokeObjectURL(a.href);
-  showToast("已导出 qinfer-chat.md", "success");
+  showToast(tr("chat.exported"), "success");
 }
 
 /* ---- 每秒轮询 /metrics：状态行与状态点 ---- */
@@ -335,17 +503,17 @@ async function pollMetrics() {
     const state = l.state || "?";
     const queued = l.queued === undefined ? 0 : l.queued;
     const tok = fmtRate(l.tok_s);
-    $("chat-state").textContent = "状态 " + state + " · 排队 " + queued + " · " + tok + " tok/s";
+    $("chat-state").textContent = (tr("mon.stateLine") + " " + state + " · " + tr("mon.queued") + " " + queued + " · " + tok + " tok/s");
     setStatusDot(true);
-    if (state !== "idle" && state !== "?") setPill(state, "状态 " + state + " · " + tok + " tok/s");
+    if (state !== "idle" && state !== "?") setPill(state, tr("mon.stateLine") + " " + state + " · " + tok + " tok/s");
   } catch (e) {
     setStatusDot(false);
-    $("chat-state").textContent = "服务不可达，正在重试…";
-    setPill("error", "服务不可达");
+    $("chat-state").textContent = tr("mon.unreachable");
+    setPill("error", tr("mon.unreachable"));
   }
 }
 
-/* ---- 公共初始化：Key、主题与 tab（index / monitor 两页通用） ---- */
+/* ---- 公共初始化：Key、语言、主题与 tab（index / monitor 两页通用） ---- */
 function initCommon() {
   document.querySelectorAll(".tab-btn").forEach(function (b) {
     b.addEventListener("click", function () { switchTab(b.dataset.tab); });
@@ -360,9 +528,12 @@ function initCommon() {
     kt.addEventListener("click", function () {
       const show = keyInput.type === "password";
       keyInput.type = show ? "text" : "password";
-      kt.textContent = show ? "隐藏" : "显示";
+      kt.textContent = show ? (tr("about.show") === "显示" ? "隐藏" : "Hide") : tr("about.show");
     });
   }
+  const lg = $("btn-lang");
+  if (lg) lg.addEventListener("click", toggleLang);
+  applyLang();
   const th = $("btn-theme");
   if (th) {
     setTheme(currentTheme());   // 同步图标
@@ -484,10 +655,10 @@ window.QinferRequests = {
     });
     const copy = document.createElement("button");
     copy.className = "btn ghost";
-    copy.textContent = "复制";
+    copy.textContent = tr("req.copy");
     copy.addEventListener("click", function () {
       const txt = box.dataset.text !== undefined ? box.dataset.text : box.textContent;
-      navigator.clipboard.writeText(txt).catch(function () { showBanner("复制失败", "err"); });
+      navigator.clipboard.writeText(txt).catch(function () { showBanner(tr("req.copyFail"), "err"); });
     });
     set.appendChild(copy);
     box.dataset.text = tabs[0][2];
@@ -496,15 +667,15 @@ window.QinferRequests = {
     el.appendChild(box);
   },
   loadDetail: function (id, el) {
-    el.innerHTML = '<div class="note">加载详情…</div>';
+    el.innerHTML = '<div class="note">' + tr("req.loading") + "</div>";
     return api("/api/requests?id=" + encodeURIComponent(id)).then(function (res) {
       if (!res.ok) {
-        el.innerHTML = '<div class="note">' + esc("请求详情不可用：HTTP " + res.status) + "</div>";
+        el.innerHTML = '<div class="note">' + esc(tr("req.detailFail") + " HTTP " + res.status) + "</div>";
         return;
       }
       return res.json().then(function (d) { QinferRequests.renderDetail(d, el); });
     }).catch(function (e) {
-      el.innerHTML = '<div class="note">' + esc("加载失败：" + e.message) + "</div>";
+      el.innerHTML = '<div class="note">' + esc(tr("req.loadFail") + e.message) + "</div>";
     });
   },
   sparkline: function (canvas, points) {

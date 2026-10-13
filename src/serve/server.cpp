@@ -681,8 +681,14 @@ void Serve::serve_sse(const std::shared_ptr<Job>& job, bool include_usage,
             continue;
         }
         if (state->pending.empty()) {
-            // 全部帧已送出（或事件缓冲异常终止）：记账收尾，provider 结束。
+            // kDone 已消费、帧全部送出：正常完成。必须调 sink.done() 写 chunked 终止块
+            // （0\r\n\r\n）——httplib 对 provider 返回 false 只是关连接、不写终止块，严格
+            // 的 chunked 客户端（浏览器、http.client）会报 ERR_INCOMPLETE_CHUNKED_ENCODING
+            // / IncompleteRead；curl 容忍 EOF，故此前集成测试未暴露。done() 内部写终止块
+            // 并把流置为 finished，while 循环随之正常退出。
             if (!state->recorded) { record_request(job, state->final_status, false); state->recorded = true; }
+            if (state->done) { sink.done(); return true; }
+            // 事件缓冲异常终止（kDone 未到、pop 失败已 499 记账）：provider 结束关连接。
             return false;
         }
         const std::string frame = state->pending.front();
@@ -877,8 +883,14 @@ void Serve::serve_anthropic_sse(const std::shared_ptr<Job>& job, const std::vect
             continue;
         }
         if (state->pending.empty()) {
-            // 全部帧已送出（或事件缓冲异常终止）：记账收尾，provider 结束。
+            // kDone 已消费、帧全部送出：正常完成。必须调 sink.done() 写 chunked 终止块
+            // （0\r\n\r\n）——httplib 对 provider 返回 false 只是关连接、不写终止块，严格
+            // 的 chunked 客户端（浏览器、http.client）会报 ERR_INCOMPLETE_CHUNKED_ENCODING
+            // / IncompleteRead；curl 容忍 EOF，故此前集成测试未暴露。done() 内部写终止块
+            // 并把流置为 finished，while 循环随之正常退出。
             if (!state->recorded) { record_request(job, state->final_status, false); state->recorded = true; }
+            if (state->done) { sink.done(); return true; }
+            // 事件缓冲异常终止（kDone 未到、pop 失败已 499 记账）：provider 结束关连接。
             return false;
         }
         const std::string frame = state->pending.front();

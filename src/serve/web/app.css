@@ -24,6 +24,11 @@ main{flex:1;min-height:0;display:flex}
 .bubble.assistant{align-self:flex-start;background:var(--st-surface);border:1px solid var(--st-line);border-bottom-left-radius:6px}
 .bubble.error{align-self:flex-start;background:var(--st-danger-tint);border:1px dashed var(--st-danger);color:var(--st-danger-text)}
 .bubble .bubble-body{white-space:pre-wrap;overflow-wrap:anywhere}
+.cursor::after{content:"";display:inline-block;width:8px;height:1.1em;margin-left:2px;vertical-align:-3px;border-radius:2px;background:var(--st-accent);animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+.msg-waiting{display:flex;align-items:center;gap:8px;font-size:var(--st-fs-sm);color:var(--st-ink-muted)}
+.msg-waiting .spinner{width:12px;height:12px;border-radius:50%;border:2px solid var(--st-line);border-top-color:var(--st-accent);animation:spin .8s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
 .composer-wrap{flex:none;padding:0 var(--st-s-6) var(--st-s-6)}
 .st-composer{max-width:860px;margin:0 auto}
 .chat-foot{flex:none;max-width:860px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:var(--st-s-2)}
@@ -54,7 +59,7 @@ main{flex:1;min-height:0;display:flex}
 .spark-head .name{color:var(--st-ink-muted)}
 .spark-head .val{font-family:var(--st-font-mono);color:var(--st-ink-soft)}
 .req-layout{flex:1;display:flex;gap:var(--st-s-3);padding:0 var(--st-s-6) var(--st-s-6);min-height:0}
-.req-list-pane{width:46%;background:var(--st-surface);border:1px solid var(--st-line);border-radius:var(--st-r-lg);box-shadow:var(--st-sh-card);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.req-list-pane{width:38%;min-width:340px;background:var(--st-surface);border:1px solid var(--st-line);border-radius:var(--st-r-lg);box-shadow:var(--st-sh-card);display:flex;flex-direction:column;min-height:0;overflow:hidden}
 .req-toolbar{display:flex;gap:var(--st-s-2);padding:var(--st-s-2) var(--st-s-3);border-bottom:1px solid var(--st-line)}
 .req-toolbar .input{flex:1;height:36px}
 .req-list{flex:1;overflow-y:auto}
@@ -96,7 +101,8 @@ main{flex:1;min-height:0;display:flex}
 .input:focus{outline:0;border-color:var(--st-focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--st-focus) 20%,transparent)}
 .keybox{display:flex;align-items:center;gap:var(--st-s-2)}
 .keybox label{font-size:var(--st-fs-sm);color:var(--st-ink-muted)}
-.key-input{width:170px}
+.key-row{display:flex;align-items:center;gap:var(--st-s-2)}
+.key-input{width:220px}
 .tab-btn{cursor:pointer}
 .topbar{align-items:center}
 .brand{display:flex;align-items:baseline;gap:var(--st-s-2);min-width:140px}
@@ -111,7 +117,7 @@ main{flex:1;min-height:0;display:flex}
   .monitor-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .spark-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .req-layout{flex-direction:column;overflow-y:auto}
-  .req-list-pane{width:100%;min-height:300px}
+  .req-list-pane{width:100%;min-width:0;min-height:300px}
 }
 @media (max-width:640px){
   .st-header{padding:0 var(--st-s-3);gap:var(--st-s-2)}
