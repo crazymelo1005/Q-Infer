@@ -46,6 +46,10 @@ struct ServeConfig {
     int threads = 0;                     // httplib HTTP 线程池；0 = 2 × slots + 2
     int compute_threads = 0;             // 引擎推理线程池（scheduling::set_pool_threads）；0 = 默认
                                          // （物理并发数的一半、封顶 8——默认不满载，用户要求）；1 或负 = 关
+    // --gpu：启用 CUDA 设备侧。auto = 全部可见卡；否则逗号分隔的设备索引列表（nvidia-smi 序号）。
+    // 空 + 非 auto = 纯 CPU（现行为）。只有带 QINFER_CUDA_BUILD 的构建才允许非空。
+    bool gpu_auto = false;               // --gpu auto（启动时取全部可见 CUDA 卡）
+    std::vector<int> gpu_devices;        // --gpu 0,1 显式列表；空 = 纯 CPU
     std::size_t conversation_cache = 64; // token 前缀缓存条数；0 = 关（/metrics 的 conversation_cache 实读）
     std::uint64_t reject_after = 0;      // 0 = 关；>0 = 第 N 个请求起一律 503（集成测试用，注释见 main）
     // 门面几何直通（默认 = 真模型推导值；集成测试覆写成夹具值）。

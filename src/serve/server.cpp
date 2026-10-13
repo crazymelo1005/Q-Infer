@@ -1444,6 +1444,17 @@ void Serve::register_routes() {
         r.set("default_generation_settings", std::move(dg));
         r.set("total_slots", Json::numv(static_cast<double>(cfg_.slots)));
         r.set("compute_threads", Json::numv(static_cast<double>(cfg_.compute_threads)));
+        // GPU 设备侧：offload_enabled = 配置里给了 --gpu；gpu_devices = auto 或显式列表。
+        r.set("offload_enabled", Json::boolv(cfg_.gpu_auto || !cfg_.gpu_devices.empty()));
+        {
+            Json gd = Json::arrv();
+            if (cfg_.gpu_auto) {
+                gd.push(Json::strv("auto"));
+            } else {
+                for (int d : cfg_.gpu_devices) gd.push(Json::numv(static_cast<double>(d)));
+            }
+            r.set("gpu_devices", std::move(gd));
+        }
         r.set("model_alias", Json::strv(eng_->model_name()));
         r.set("chat_template", Json::strv(eng_->chat_template()));
         Json caps = Json::objv();

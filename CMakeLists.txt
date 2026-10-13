@@ -435,6 +435,8 @@ add_test(NAME step_record COMMAND test_step_record)
 # 打开时才需要 nvcc，且要单独一份构建目录（例如 -B build/cuda -DQINFER_ENABLE_CUDA=ON）。
 option(QINFER_ENABLE_CUDA "构建 CUDA 内核（需要 nvcc）" OFF)
 if(QINFER_ENABLE_CUDA)
+  # 编译宏：qinfer-server 用它在 main 入口检查「--gpu 只在 CUDA 构建可用」。
+  target_compile_definitions(qinfer-server PRIVATE QINFER_CUDA_BUILD=1)
   enable_language(CUDA)
   # CUDA::cudart 这个导入目标由 FindCUDAToolkit 提供，语言启用本身不会建它。
   find_package(CUDAToolkit REQUIRED)

@@ -12,6 +12,7 @@
 #include <map>
 #include <string>
 #include <thread>
+#include <vector>
 
 using namespace qinfer::serve;
 
@@ -39,6 +40,39 @@ std::int64_t arg_int(const std::map<std::string, std::string>& a, const char* ke
         return dflt;
     }
     return static_cast<std::int64_t>(r);
+}
+
+// --gpu 解析：auto（全部可见卡）或逗号分隔的非负设备索引（nvidia-smi 序号）。非法 → err。
+bool parse_gpu(const std::map<std::string, std::string>& a, bool& gpu_auto,
+               std::vector<int>& devices, std::string& err) {
+    const auto it = a.find("--gpu");
+    if (it == a.end()) return true;
+    const std::string v = it->second;
+    if (v == "auto") {
+        gpu_auto = true;
+        return true;
+    }
+    std::size_t start = 0;
+    while (start <= v.size()) {
+        const std::size_t comma = v.find(',', start);
+        const std::string tok = v.substr(start, comma == std::string::npos ? std::string::npos
+                                                                          : comma - start);
+        if (tok.empty()) {
+            err = "参数 --gpu 需要 auto 或逗号分隔的设备索引，得「" + v + "」（空段）";
+            return false;
+        }
+        errno = 0;
+        char* end = nullptr;
+        const long long r = std::strtoll(tok.c_str(), &end, 10);
+        if (end == tok.c_str() || *end != '\0' || errno == ERANGE || r < 0) {
+            err = "参数 --gpu 需要非负设备索引，段「" + tok + "」非法（得 " + v + "）";
+            return false;
+        }
+        devices.push_back(static_cast<int>(r));
+        if (comma == std::string::npos) break;
+        start = comma + 1;
+    }
+    return true;
 }
 
 double arg_double(const std::map<std::string, std::string>& a, const char* key, double dflt,
@@ -89,6 +123,7 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
         c.compute_threads = static_cast<int>(arg_int(a, "--compute-threads", dflt, err));
     }
     c.conversation_cache = static_cast<std::size_t>(arg_int(a, "--conversation-cache", 64, err));
+    if (!parse_gpu(a, c.gpu_auto, c.gpu_devices, err)) return {};
     c.reject_after = static_cast<std::uint64_t>(arg_int(a, "--reject-after", 0, err));
     FacadeConfig& f = c.facade;
     f.model_path = c.model_path;
@@ -120,17 +155,25 @@ int main(int argc, char** argv) {
     if (!err.empty()) {
         std::fprintf(stderr, "%s\n", err.c_str());
         std::fprintf(stderr, "用法：qinfer-server --model <gguf> [--host H] [--port P] [--api-key K] "
-                             "[--slots N] [--queue N] [--threads N] [--compute-threads N] [--reject-after N] "
+                             "[--slots N] [--queue N] [--threads N] [--compute-threads N] [--gpu auto|0,1] [--reject-after N] "
                              "[--n-embd N] [--hc N] [--hc-lr N] [--layers N] [--top-k N] "
                              "[--gdn-head-dim N] [--qsa-head-dim N] [--n-rot N] [--idx-dim N] "
                              "[--idx-top-k N] [--idx-block N] [--max-context N] [--cache-slots N] "
                              "[--cache-byte-budget N] [--ple-table P] [--ple-budget-bytes N] [--kv-slots N] "
                              "[--conversation-cache N]\n        --threads N 是 HTTP 线程池；"
-                             "--compute-threads N 是推理线程池（默认物理核数一半、封顶 8，1 或负 = 单线程）\n");
+                             "--compute-threads N 是推理线程池（默认物理核数一半、封顶 8，1 或负 = 单线程）；"
+                             "--gpu 选择 CUDA 设备（auto = 全部，0,1 = 指定；需带 CUDA 的构建）\n");
         return 2;
     }
     // --reject-after：仅供集成测试制造确定性 503（第 N 个请求起一律拒绝入队），生产不用。
     // 在 handler 里生效：launch() 前检查 req_id_ 与阈值。
+#ifndef QINFER_CUDA_BUILD
+    if (cfg.gpu_auto || !cfg.gpu_devices.empty()) {
+        std::fprintf(stderr, "--gpu 需要带 CUDA 的构建（cmake -B build/cuda -DQINFER_ENABLE_CUDA=ON）；"
+                             "本构建 CUDA 未启用\n");
+        return 1;
+    }
+#endif
     std::shared_ptr<Engine> eng = std::make_shared<Engine>();
     if (!Engine::open(cfg.facade, *eng, err)) {
         std::fprintf(stderr, "装载失败：%s\n", err.c_str());

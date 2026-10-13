@@ -602,6 +602,21 @@ half=$(( cores / 2 )); [ "$half" -gt 8 ] && half=8
   || bad "28 默认 compute_threads：得 $ct，期望 1..$half（cores=$cores）"
 stop
 
+# 29. --gpu 在无 CUDA 构建上必须拒绝启动（明确报错不静默回退）；不带 --gpu 服务照常起（纯 CPU 路径零变化）。
+timeout 8 "$SERVER" --model "$FIX" --host "$HOST" --port "$PORT" --n-embd 256 --hc 2 --hc-lr 3 \
+          --layers 2 --top-k 2 --gdn-head-dim 32 --qsa-head-dim 32 --n-rot 4 --idx-dim 4 \
+          --idx-top-k 2048 --idx-block 4 --max-context 4096 --api-key testkey --gpu 0 \
+          >/tmp/gpu-reject.log 2>&1
+rc=$?
+pkill -9 -x qinfer-server 2>/dev/null
+sleep 1
+if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && grep -q "CUDA 未启用" /tmp/gpu-reject.log; then
+  ok "29 --gpu 在无 CUDA 构建上拒绝启动（exit=$rc，错误体含 CUDA 未启用）"
+else
+  bad "29 --gpu 拒绝启动：exit=$rc（124=静默卡住），日志 $(tail -2 /tmp/gpu-reject.log)"
+fi
+rm -f /tmp/gpu-reject.log
+
 stop
 
 # ---- 503：--reject-after 1 → 第 1 个请求正常，之后一律队列满 ----
