@@ -304,6 +304,11 @@ add_executable(test_igpu_iq2s tests/test_igpu_iq2s.cpp)
 target_link_libraries(test_igpu_iq2s PRIVATE qinfer_experts)
 add_test(NAME igpu_iq2s COMMAND test_igpu_iq2s)
 
+# P3a step 3: IQ2_XXS x Q8_K on the iGPU vs the host kernel.
+add_executable(test_igpu_iq2xxs tests/test_igpu_iq2xxs.cpp)
+target_link_libraries(test_igpu_iq2xxs PRIVATE qinfer_experts)
+add_test(NAME igpu_iq2xxs COMMAND test_igpu_iq2xxs)
+
 add_executable(test_igpu_expert tests/test_igpu_expert.cpp)
 target_link_libraries(test_igpu_expert PRIVATE qinfer_experts)
 add_test(NAME igpu_expert COMMAND test_igpu_expert)

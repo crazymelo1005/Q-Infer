@@ -1,0 +1,91 @@
+// IQ2_XXS x Q8_K row GEMV (P3a step 3). Mirrors src/kernels/iq2xxs.cpp's iq2xxs_dot_q8k line for
+// line: per IQ2_XXS block (66 B: fp16 d at 0, then 8 groups of 8 bytes - 4 grid indices followed
+// by one little-endian u32 whose top 4 bits are the group scale and whose low 28 bits are four
+// 7-bit sign indices) and its Q8_K activation block (292 B: float d, int8 qs[256], int16 bsums[16]
+// - the host dot never reads bsums, so neither does this shader). Integer MACs into int32, one
+// fp32 multiply per block, and the host's final 0.125 factor.
+//
+// IQ2_XXS differs from IQ2_S in having a single 4-bit scale per 32 values (one int32 accumulator
+// per group, not two), 8-bit grid indices into a 256-entry codebook, and signs looked up from a
+// 128-entry table rather than stored in the weights.
+//
+// Both tables are static host data, so they are uploaded as storage buffers (binding 3 = the
+// 256 x 8 B grid codebook kIq2xxsGrid, binding 4 = the 128 B sign patterns kSigns) instead of
+// being hardcoded: the shader stays small and no driver has to accept a large const array.
+//
+// The iGPU has no integer dot product, so the MACs are hand-written, as in q2_0_gemv.comp.
+//
+// Build: glslangValidator -V iq2xxs_gemv.comp -o iq2xxs_gemv.spv (see README.md).
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 0) readonly buffer W { uint w[]; };  // n_rows x n_blocks x 66 B
+layout(std430, binding = 1) readonly buffer Y { uint y[]; };  // n_blocks x 292 B (Q8_K)
+layout(std430, binding = 2) writeonly buffer O { float o[]; };
+layout(std430, binding = 3) readonly buffer G { uint g[]; };  // 256 x 8 B grid codebook
+layout(std430, binding = 4) readonly buffer S { uint s[]; };  // 128 B sign patterns
+
+layout(push_constant) uniform Pc {
+    uint n_rows;
+    uint n_blocks;
+} pc;
+
+// Byte access over the uint-backed buffers (little-endian, same as the host).
+uint wbyte(uint off) { return (w[off >> 2] >> ((off & 3u) * 8u)) & 0xFFu; }
+uint ybyte(uint off) { return (y[off >> 2] >> ((off & 3u) * 8u)) & 0xFFu; }
+uint gbyte(uint off) { return (g[off >> 2] >> ((off & 3u) * 8u)) & 0xFFu; }
+uint sbyte(uint off) { return (s[off >> 2] >> ((off & 3u) * 8u)) & 0xFFu; }
+
+// fp16 bits -> fp32, matching kernels/fp16.hpp f16_bits_to_f32.
+float f16(uint h) {
+    uint sgn = (h >> 15) & 1u;
+    uint e = (h >> 10) & 0x1Fu;
+    uint m = h & 0x3FFu;
+    float v = 0.0;
+    if (e == 0u) {
+        v = ldexp(float(m), -24);
+    } else if (e != 31u) {
+        v = ldexp(1.0 + float(m) / 1024.0, int(e) - 15);
+    }
+    return sgn != 0u ? -v : v;
+}
+
+void main() {
+    uint row = gl_GlobalInvocationID.x;
+    if (row >= pc.n_rows) return;
+    uint row_base = row * pc.n_blocks * 66u;
+    // `precise` forbids contraction/reassociation: without it the Intel compiler folds the
+    // per-block multiply into the accumulator and the last bits leave the host's path.
+    precise float sumf = 0.0;
+    for (uint i = 0u; i < pc.n_blocks; ++i) {
+        uint blk = row_base + i * 66u;
+        uint yb = i * 292u;
+        // The host folds both scales into one float before accumulating (iq2xxs.cpp:57).
+        precise float d = f16(wbyte(blk) | (wbyte(blk + 1u) << 8)) * uintBitsToFloat(y[yb >> 2u]);
+        precise int bsum = 0;
+        for (uint ib = 0u; ib < 8u; ++ib) {
+            uint base = blk + 2u + 8u * ib;
+            uint w1 = wbyte(base + 4u) | (wbyte(base + 5u) << 8) | (wbyte(base + 6u) << 16) |
+                      (wbyte(base + 7u) << 24);
+            precise int ls = 2 * int(w1 >> 28u) + 1;
+            precise int sumi = 0;
+            for (uint l = 0u; l < 4u; ++l) {
+                uint idx = wbyte(base + l);                 // 8 bits -> 256-entry codebook
+                uint sign = sbyte((w1 >> (7u * l)) & 127u);  // 7 bits -> 8-bit sign pattern
+                for (uint j = 0u; j < 8u; ++j) {
+                    // grid bytes are UNSIGNED in the host product (iq2xxs.cpp:70); the sign comes
+                    // from the sign byte's bit j only.
+                    int gw = int(gbyte(idx * 8u + j));
+                    int q = int(ybyte(yb + 4u + ib * 32u + l * 8u + j));
+                    if (q > 127) q -= 256;  // int8
+                    int v = (sign & (1u << j)) != 0u ? -gw : gw;
+                    sumi += q * v;
+                }
+            }
+            bsum += sumi * ls;
+        }
+        sumf += d * float(bsum);
+    }
+    o[row] = 0.125 * sumf;
+}
