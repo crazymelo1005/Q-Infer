@@ -215,6 +215,10 @@ gr_read 那一段（此前从没拆过）拆开后没有意外：20 线程下 lo
 
 IQ2_XS 这一档的块反量化与「与 Q8_K 的定点点积」已实现：`src/kernels/iq2xs`（块格式，编码定义登记在 [S-35]，表体在 `kernels/iq2xs_tables`）、`src/kernels/q8k`（激活侧 Q8_K 量化）、`src/kernels/iq2xs_dot`（定点点积与逐行 GEMV）。点积把权重留在整数域：整数侧在 int32 里累加完再乘 d · d_y · 0.125，尺度用 ls = 2s + 1，等价于逐元素反量化后再点乘，但省掉权重侧的浮点展开。IQ2_XS 是 §15 算带宽上限所用的名义档，不是参考实例的专家档。
 
+**服务路径接线（阶段 A：dense 整层上卡，[ADR-014](adr/ADR-014-gpu-igpu-serve.md)）**：稠密这段的服务侧入口已接通——`run_block_layer` 的 GDN/QSA 两个分支在给了设备执行器时走整层 `*_cuda` 入口（`run_gdn_layer_cuda` / `run_qsa_layer_cuda`），否则照旧走主机 `run_gdn_layer` / `run_qsa_layer`。分派不靠编译期符号：`DenseExec` 是函数指针结构（`run_gdn` / `run_qsa`），`StepConfig.dense_exec` 由调用方（facade）在 `--gpu` 时填 CUDA 侧 `dense_exec_cuda()`——只有 `QINFER_ENABLE_CUDA=ON` 的构建编这个符号，主机构建恒空、全主机路径零行为变化（68 测全绿即这条的断言）。`--gpu` 语义：`auto` = 全部可见卡、`0,1` = nvidia-smi 索引列表；无 CUDA 的构建给 `--gpu` 明确拒绝启动（错误体含「CUDA 未启用」），不静默回退。补档一件：合成/测试模型的稠密权重是 Q8_0（真模型的 dense 投影是 IQ4_XS / IQ3_S / Q6_K），而 `gdn_proj_gemv` 的分派表原本没有 Q8_0 权重档——补上 `src/kernels/cuda/q8_0_gemv`（Q8_0 × Q8_0 定点点积，激活搭档同为 32 值块），真字节 oracle（ffn_down_shexp 前 16 块）tile 成 640 行 × 80 块/行后与主机 `run_gemv` 逐位相同（640/640、L1 相对差 0）；4 条变异全致死（权重尺度字节序反 / 激活尺度泄漏 / 整数点积少算一个值 / 块循环漏最后一圈）。集成门禁按构建分野：CUDA 构建下 `--gpu 0` 起服务并发一个请求——层 0 GDN + 层 1 QSA 两条 `*_cuda` 路径都跑到、返回 200 且内容非空（任一设备内核炸都会现形为 400/500/坠）；无 CUDA 构建保留「拒绝启动」断言。
+
+环境2（双 5060 Ti，部署那份真模型，`--gpu auto`）上的实测读数：服务约 5 秒就绪（页缓存暖）；一次 53 prompt + 8 gen 的请求 200、finish=length。用同提示双请求拆分：max_tokens=1 耗时 34.62 s、max_tokens=9 耗时 38.17 s，故 decode ≈ 0.444 s/token（2.25 tok/s）、prefill 53 token ≈ 34.2 s——对 CPU 基线（decode 0.5 tok/s、prefill 约 2.5 分钟）各约 4.5 倍与 4.4 倍（单次采样、方差存在；首请求另有约 7 s 的加载/首接触开销）。`nvidia-smi` 可见 qinfer 进程占显存（稳态 228 MiB、请求期间峰值约 1.2 GiB——监控 `history/gpu_mem_used` 读数），`/props` 报告 `offload_enabled:true`、`gpu_devices:["auto"]`。`history/gpu_pcie_rx_mb` 一趟 1.7–3.5 GB 是 dense 权重的反复上传痕迹，`gpu_util` 峰值 15.5%——即当前形态是「每段各自 H2D/D2H + 同步」：权重在主机侧按层缓存、每 token 重传，真正的提速（权重常驻 + 图捕获 + 每步单汇合）留给阶段 D，届时此读数的提升空间自会兑现。分工求解器与其余阶段（B 的 KV 上卡、C 的核显未命中专家、D 的 head/GR/共享专家 + 裁剪）见 [ADR-014](adr/ADR-014-gpu-igpu-serve.md)，不在本节内。
+
 ## 7. KV 管理
 
 主案例有两种 KV，必须分开记账。
