@@ -66,5 +66,35 @@ int main() {
     const bool ok = b.generate({1}, o, [](const std::string&) { return false; }, r3, err);
     CHECK(!ok);
     CHECK(!err.empty());
+
+    // --- incremental UTF-8: emit whole characters only ---
+    CHECK(utf8_complete_prefix("") == 0);
+    CHECK(utf8_complete_prefix("abc") == 3);
+    CHECK(utf8_complete_prefix("\xE4\xB8\xAD") == 3);   // "中", three bytes
+    CHECK(utf8_complete_prefix("\xE4\xB8") == 0);       // partial tail is held back
+    CHECK(utf8_complete_prefix("\xE4\xB8\xADx") == 4);
+    CHECK(utf8_complete_prefix("\xFF") == 1);           // invalid lead byte: emit one, never stall
+
+    // --- stop string: cut at the hit, report kStopString, don't emit the suffix ---
+    {
+        StrataBackendConfig c2;
+        c2.driver.exe = MOCK_ENGINE_PATH;
+        c2.driver.engine_args = {"basic"};
+        c2.driver.ready_timeout_ms = 5000;
+        CHECK(tiny_tokenizer(c2.tokenizer, err));
+        StrataBackend b2;
+        CHECK(StrataBackend::open(std::move(c2), b2, err));
+
+        GenOptions os;
+        os.max_tokens = 4;
+        os.stop = {"c"};  // the mock streams "a","b","c","d"
+        std::string s2;
+        GenResult r4;
+        CHECK(b2.generate({1}, os, [&](const std::string& s) { s2 += s; return true; }, r4, err));
+        CHECK(r4.finish == Finish::kStopString);
+        CHECK(r4.text == "ab");
+        CHECK(s2 == "ab");
+        CHECK(r4.tokens.size() == 2);   // the cut token is not counted as produced
+    }
     return 0;
 }

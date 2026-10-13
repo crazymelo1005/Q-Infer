@@ -16,6 +16,11 @@
 
 namespace qinfer::serve {
 
+// Length of the leading run of `buf` that forms complete UTF-8 sequences. A trailing partial
+// sequence is not counted, so a character split across two engine tokens is held back rather
+// than emitted as two broken pieces. An invalid lead byte counts as one byte (never stalls).
+std::size_t utf8_complete_prefix(const std::string& buf);
+
 // The tokenizer and chat template are built by the caller (from the same GGUF) and moved in, so
 // a unit test can hand in a tiny vocabulary and needs no weights.
 struct StrataBackendConfig {
@@ -48,6 +53,7 @@ private:
     text::Tokenizer tokenizer_;
     std::string chat_template_, model_name_;
     FacadeConfig cfg_{};
+    std::string pending_;   // bytes of the trailing incomplete UTF-8 sequence, if any
 };
 
 }  // namespace qinfer::serve
