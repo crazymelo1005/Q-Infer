@@ -79,6 +79,7 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     c.slots = static_cast<std::size_t>(arg_int(a, "--slots", 8, err));
     c.queue_capacity = static_cast<std::size_t>(arg_int(a, "--queue", 0, err));
     c.threads = static_cast<int>(arg_int(a, "--threads", 0, err));
+    c.conversation_cache = static_cast<std::size_t>(arg_int(a, "--conversation-cache", 64, err));
     c.reject_after = static_cast<std::uint64_t>(arg_int(a, "--reject-after", 0, err));
     FacadeConfig& f = c.facade;
     f.model_path = c.model_path;
@@ -114,7 +115,8 @@ int main(int argc, char** argv) {
                              "[--n-embd N] [--hc N] [--hc-lr N] [--layers N] [--top-k N] "
                              "[--gdn-head-dim N] [--qsa-head-dim N] [--n-rot N] [--idx-dim N] "
                              "[--idx-top-k N] [--idx-block N] [--max-context N] [--cache-slots N] "
-                             "[--cache-byte-budget N] [--ple-table P] [--ple-budget-bytes N] [--kv-slots N]\n");
+                             "[--cache-byte-budget N] [--ple-table P] [--ple-budget-bytes N] [--kv-slots N] "
+                             "[--conversation-cache N]\n");
         return 2;
     }
     // --reject-after：仅供集成测试制造确定性 503（第 N 个请求起一律拒绝入队），生产不用。

@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "serve/facade.hpp"
+#include "serve/prompt_cache.hpp"
 #include "serve/records.hpp"
 #include "serve/scheduler.hpp"
 #include "serve/telemetry.hpp"
@@ -41,6 +42,7 @@ struct ServeConfig {
     std::size_t slots = 8;
     std::size_t queue_capacity = 0;      // 0 = 2 × slots（规格 §4 第 1 条）
     int threads = 0;                     // httplib HTTP 线程池；0 = 2 × slots + 2
+    std::size_t conversation_cache = 64; // token 前缀缓存条数；0 = 关（/metrics 的 conversation_cache 实读）
     std::uint64_t reject_after = 0;      // 0 = 关；>0 = 第 N 个请求起一律 503（集成测试用，注释见 main）
     // 门面几何直通（默认 = 真模型推导值；集成测试覆写成夹具值）。
     FacadeConfig facade;
@@ -71,6 +73,7 @@ private:
     ServeConfig cfg_;
     std::shared_ptr<Engine> eng_;
     Scheduler sched_;
+    PromptCache prompt_cache_;   // token 前缀缓存：命中免进 engine_mu_（spec §6 的 conversation_cache 数据源）
     std::mutex engine_mu_;             // 见文件头注释：v0 串行化引擎访问（encode + generate）
     std::vector<std::thread> workers_;
     std::atomic<std::uint64_t> req_id_{0};
@@ -92,6 +95,7 @@ private:
     // tok_s_mean 的累计口径：最近一次请求的解码速度是 v0 的 tok_s，全程均值另记这两项。
     std::uint64_t gen_done_ = 0;   // 累计生成的 token 数（成功请求才累加）
     std::uint64_t gen_us_ = 0;     // 累计解码耗时（µs）
+    std::atomic<std::uint64_t> reused_{0};   // 缓存命中的 prompt token 累计（totals.reused；worker 线程写）
     // 请求记录环（/metrics 的 requests/totals 与 /api/requests 的数据源，T14 起 record_request 填）。
     Records records_;
     // /metrics 的 totals 累计（与 last_ 同临界区更新——record_request 是 HTTP 线程调用的唯一写入者；

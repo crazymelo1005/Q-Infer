@@ -104,7 +104,7 @@ Strata 的并发延迟来自全局锁与 GIL 以及 solo 路径的换槽机制�
 | `engine` | `{model, max_context, images(false), ...}` |
 | `live` | `{state, queued, phase, prompt_tokens, prompt_read, prompt_total, generated, max_tokens, elapsed_s, tok_s, tok_s_mean, prefill_tok_s_mean, tok_s_window_s, parallel, running, slots, waiting}` |
 | `requests` | 最近 12 条请求记录（详细走 `/api/requests`） |
-| `conversation_cache` | 前缀缓存视图；v0 从索引器统计尚未接上，返回 `{enabled:false}` 占位，M2 填实 |
+| `conversation_cache` | 前缀缓存视图；已由服务层 token 前缀缓存填实（精确匹配 LRU：enabled/capacity/hits/misses/entries/tokens 实读，命中计入 totals.reused） |
 | `requests_kept` | 保留条数（默认 100） |
 | `totals` | `{prompt_tokens, reused(0), completion_tokens, prompt_ms, decode_ms}` 累计 |
 | `hardware` | 每秒采样一次的最新读数 |

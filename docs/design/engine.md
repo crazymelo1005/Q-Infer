@@ -302,6 +302,7 @@ IQ2_XS 这一档的块反量化与「与 Q8_K 的定点点积」已实现：`src
 - 调度：有界队列 + 槽位租约，满则 503；`--reject-after` 仅供集成测试制造确定 503。
 - 遥测：NVML `dlopen`（Windows `nvml.dll`）、AMD kfd 拓扑 + hwmon、CPU/RAM 走 `/proc` 差值法、磁盘读解析 `/proc/diskstats`；无任何可读源时字段为 `null`。10 个系列各 60 点历史，`/metrics` 顶层键对齐 Strata。
 - 请求记录环：保留 100 条、大字段 256 KiB 截断，`/api/requests` 列表剥大字段、`?id=` 给全量；`/metrics` 的 requests 取最近 12 条。前端四页（三 tab 单页 + `/api-monitor` 检查页）读这些端点，轮询 1 秒（/metrics）与 2 秒（/v1/status、/api/requests）。
+- 会话前缀缓存（spec §6 的 conversation_cache 落地）：整串精确匹配的 token 前缀 LRU（`serve/prompt_cache`，`--conversation-cache N` 默认 64、0 即关）。请求 prompt 命中缓存即免 BPE、命中 token 数计入 `totals.reused`；`/metrics` 的 `conversation_cache` 实读 enabled/capacity/hits/misses/entries/tokens。查询在 engine_mu_ 锁外、命中免进锁；未命中才进锁 encode 并回填，generate 照旧在锁内串行。BPE 合并可跨字节边界故不做前缀拆分，只整串精确命中；索引器 KV 侧的前缀复用不在本缓存语义内。
 - 鉴权：可选 `--api-key`；`/web`、`/api-monitor`、`/`、`/health` 可达，页面自带 key 走 `Authorization: Bearer`。
 
 ## 13. 核显与 NPU

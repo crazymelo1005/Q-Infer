@@ -73,4 +73,4 @@
 | 未实现的专家档与共享专家 | 部署那份的 IQ1_M 3 层、另一档的 IQ3_S / IQ3_XXS 等尚无内核；共享专家与专家缓存未接 |
 | 机器画像的并发分池一项 | QSA 侧已能算，GDN 侧按并发增长、需要 SSM 几何（未取到） |
 | 引擎接口的实现细节 | 随实现阶段确定 |
-| 服务层 M2：Prometheus 文本、前缀缓存接入 /metrics 的 conversation_cache | 用户确认监控形态为 Web 页面实时查看，Prometheus 完整对接推迟到 M2；conversation_cache 的实值要等索引器统计接上（`design/adr/ADR-012-http-transport-and-serving-stack.md`） |
+| 服务层 M2：Prometheus 文本对接 | 用户确认监控形态为 Web 页面实时查看，Prometheus 完整对接推迟到 M2；conversation_cache 已由服务层 token 前缀缓存填实（精确匹配 LRU、命中免 BPE 并计入 totals.reused，`--conversation-cache N` 可调、0 即关） |

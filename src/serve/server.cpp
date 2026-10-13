@@ -199,6 +199,7 @@ Serve::Serve(ServeConfig cfg, std::shared_ptr<Engine> eng)
     : cfg_(std::move(cfg)),
       eng_(std::move(eng)),
       sched_(cfg_.slots, cfg_.queue_capacity == 0 ? 2 * cfg_.slots : cfg_.queue_capacity),
+      prompt_cache_(cfg_.conversation_cache),
       svr_(std::make_unique<httplib::Server>()),
       started_(std::time(nullptr)) {
     const std::filesystem::path base = std::filesystem::path(__FILE__).parent_path() / "web";
@@ -221,21 +222,28 @@ void Serve::worker_main() {
         GenResult res;
         bool ok = false;
         {
-            // v0 串行化：encode 与 generate 都在锁内。encode 写各 worker 共享的 piece_cache_
-            // （tokenizer.cpp 的 encode_plain），脱离锁是两个 worker 并发改同一张表（见 server.hpp 头注释）。
+            // 编码查缓存（spec §6 的 conversation_cache）：查询在锁外，命中拿缓存的 ids 免做
+            // BPE（也不写各 worker 共享的 piece_cache_）；未命中才在锁内 encode 并回填。
+            // generate 一如 v0 仍须在 engine_mu_ 内串行（写共享 KV），命中省的是分词、锁照进。
+            // 缓存只在锁外查、锁内回填：持锁方向恒为 engine→cache，无反向路径。
+            const bool hit = prompt_cache_.lookup(job->prompt, ids);
             std::lock_guard<std::mutex> lock(engine_mu_);
-            if (!eng_->tokenizer().encode(job->prompt, /*parse_special=*/true, ids, err)) {
-                job->finish = "error";
-                job->error = "分词失败：" + err;
-                // 先落完成时刻再停流：HTTP 侧读到 done_at 时必然已就绪（与其他错误路径同构），
-                // 否则 HTTP 线程可能赶在 done_at 之前调 record_request、被其守卫整条跳过。
-                job->done_at = std::chrono::steady_clock::now();
-                job->events->stop_with_error(job->error);
-                sched_.done(job);
-                continue;
+            if (!hit) {
+                if (!eng_->tokenizer().encode(job->prompt, /*parse_special=*/true, ids, err)) {
+                    job->finish = "error";
+                    job->error = "分词失败：" + err;
+                    // 先落完成时刻再停流：HTTP 侧读到 done_at 时必然已就绪（与其他错误路径同构），
+                    // 否则 HTTP 线程可能赶在 done_at 之前调 record_request、被其守卫整条跳过。
+                    job->done_at = std::chrono::steady_clock::now();
+                    job->events->stop_with_error(job->error);
+                    sched_.done(job);
+                    continue;
+                }
+                prompt_cache_.store(job->prompt, ids);
             }
             job->prompt_ids = std::move(ids);
             job->n_prompt = job->prompt_ids.size();
+            if (hit) reused_.fetch_add(job->n_prompt);   // 命中 = 这整段 prompt 免编码（totals.reused）
             ok = eng_->generate(job->prompt_ids, job->opts,
                                 [&](const std::string& piece) -> bool {
                                     if (job->first_at == std::chrono::steady_clock::time_point{})
@@ -735,17 +743,17 @@ void Serve::handle_count_tokens(const httplib::Request& req, httplib::Response& 
         return;
     }
     std::vector<std::int32_t> ids;
-    bool enc_ok;
-    {
+    if (!prompt_cache_.lookup(prompt, ids)) {
         // 与 worker_main 同一把 engine_mu_：encode 写各 worker 共享的 piece_cache_，
         // 脱离锁与并发请求是数据竞争（见 server.hpp 头注释）；chat_template() 是只读访问不需锁。
         // 锁只罩引擎可变访问：失败路径的 500 响应移到锁外，慢读客户端写响应不得持锁冻结全槽。
+        // 命中免进锁；未命中仍在锁内 encode 与回填（锁序恒定 engine→cache，无反向路径）。
         std::lock_guard<std::mutex> lock(engine_mu_);
-        enc_ok = eng_->tokenizer().encode(prompt, /*parse_special=*/true, ids, rerr);
-    }
-    if (!enc_ok) {
-        send_json(res, 500, anthropic_err("server_error", "分词失败：" + rerr));
-        return;
+        if (!eng_->tokenizer().encode(prompt, /*parse_special=*/true, ids, rerr)) {
+            send_json(res, 500, anthropic_err("server_error", "分词失败：" + rerr));
+            return;
+        }
+        prompt_cache_.store(prompt, ids);
     }
     Json r = Json::objv();
     r.set("input_tokens", Json::numv(static_cast<double>(ids.size())));
@@ -1131,14 +1139,23 @@ void Serve::register_routes() {
         for (std::size_t i = 0; i < list.size() && i < 12; ++i) reqs.push(record_summary_json(list[i]));
         r.set("requests", std::move(reqs));
         Json cc = Json::objv();
-        cc.set("enabled", Json::boolv(false));   // 索引器统计 M2 接（spec §6）
+        {
+            // 缓存实况（spec §6 的 conversation_cache 填实）：逐请求计数，全是真实值。
+            const PromptCache::Stats cs = prompt_cache_.stats();
+            cc.set("enabled", Json::boolv(prompt_cache_.enabled()));
+            cc.set("capacity", Json::numv(static_cast<double>(cfg_.conversation_cache)));
+            cc.set("hits", Json::numv(static_cast<double>(cs.hits)));
+            cc.set("misses", Json::numv(static_cast<double>(cs.misses)));
+            cc.set("entries", Json::numv(static_cast<double>(cs.entries)));
+            cc.set("tokens", Json::numv(static_cast<double>(cs.tokens)));
+        }
         r.set("conversation_cache", std::move(cc));
         r.set("requests_kept", Json::numv(static_cast<double>(Records::kCap)));
         Json total = Json::objv();
         {
             std::lock_guard<std::mutex> lk(last_mu_);
             total.set("prompt_tokens", Json::numv(static_cast<double>(totals_.prompt_tokens)));
-            total.set("reused", Json::numv(0.0));
+            total.set("reused", Json::numv(static_cast<double>(reused_.load())));
             total.set("completion_tokens", Json::numv(static_cast<double>(totals_.completion_tokens)));
             total.set("prompt_ms", Json::numv(totals_.prompt_ms));
             total.set("decode_ms", Json::numv(totals_.decode_ms));

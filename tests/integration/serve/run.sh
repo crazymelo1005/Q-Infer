@@ -280,13 +280,17 @@ curl -s -H "$H" "http://$HOST:$PORT/v1/status" > "$R"
   && ok "/v1/status machine.at" || bad "/v1/status machine：$(head -c 200 "$R")"
 
 # 13. /metrics：全键类型、10 系列、历史有数据、totals/conversation_cache/time 形状。
+# conversation_cache 自 token 前缀缓存（--conversation-cache 默认 64）落地后为实况；本用例之前
+# 已有顺序重复请求（case 129→136 同 content "c"），故 hits ≥ 1、totals.reused ≥ 1 是确定性的。
 curl -s -H "$H" "http://$HOST:$PORT/metrics" > "$R"
 [ "$(jget "$R" "d['engine']['model']")" ] && [ "$(jget "$R" "d['live']['state']")" ] \
   && [ "$(jget "$R" "len(d['history'])")" = 10 ] \
   && [ "$(jget "$R" "len(d['history']['cpu']) >= 1")" = True ] \
   && [ "$(jget "$R" "d['requests_kept']")" = 100 ] \
-  && [ "$(jget "$R" "d['totals']['reused']")" = 0 ] \
-  && [ "$(jget "$R" "d['conversation_cache']['enabled']")" = False ] \
+  && [ "$(jget "$R" "d['totals']['reused'] >= 1")" = True ] \
+  && [ "$(jget "$R" "d['conversation_cache']['enabled']")" = True ] \
+  && [ "$(jget "$R" "d['conversation_cache']['hits'] >= 1")" = True ] \
+  && [ "$(jget "$R" "d['conversation_cache']['capacity']")" = 64 ] \
   && [ "$(jget "$R" "d['time'] > 0")" = True ] \
   && ok "/metrics 全键" || bad "/metrics：$(head -c 300 "$R")"
 
@@ -371,6 +375,26 @@ for _ in $(seq 1 40); do
   sleep 0.25
 done
 [ "$idle" = 1 ] && ok "断开后槽位释放" || bad "断开后槽位未释放：$(head -c 200 "$R")"
+
+# 18. conversation_cache 命中：同一请求顺序发两次，第二次必命中（首个应答前已入库）；对比
+#     发请求前后的 /metrics，hits 与 totals.reused 各至少 +1，且缓存非空。
+curl -s -H "$H" "http://$HOST:$PORT/metrics" > "$R"
+h0=$(jget "$R" "d['conversation_cache']['hits']")
+r0=$(jget "$R" "d['totals']['reused']")
+for _ in 1 2; do
+  curl -s -o /dev/null -H "$H" -H 'Content-Type: application/json' -X POST \
+    "http://$HOST:$PORT/v1/chat/completions" \
+    -d '{"messages":[{"role":"user","content":"e"}],"max_tokens":4,"temperature":0}'
+done
+curl -s -H "$H" "http://$HOST:$PORT/metrics" > "$R"
+h1=$(jget "$R" "d['conversation_cache']['hits']")
+r1=$(jget "$R" "d['totals']['reused']")
+if [ "$h1" -ge "$((h0 + 1))" ] && [ "$r1" -ge "$((r0 + 1))" ] \
+   && [ "$(jget "$R" "d['conversation_cache']['entries'] >= 1")" = True ]; then
+  ok "18 重复请求命中缓存（hits ${h0}→${h1}、reused ${r0}→${r1}）"
+else
+  bad "18 重复请求未命中：hits ${h0}→${h1}、reused ${r0}→${r1}、$(head -c 200 "$R")"
+fi
 
 stop
 

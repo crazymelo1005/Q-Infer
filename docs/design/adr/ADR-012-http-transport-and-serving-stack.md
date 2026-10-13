@@ -15,7 +15,7 @@
 1. HTTP 传输用 cpp-httplib 入库（MIT 许可证，单头，llama.cpp 同款）。文件整份入库、保留版权与许可注释、锁定上游发布版本号（v0.18.6）。「裁剪」落实为只启用服务端所需特性：不定义 `CPPHTTPLIB_OPENSSL_SUPPORT` 与 `CPPHTTPLIB_ZLIB_SUPPORT`；线程池大小由入口按槽位数配置（2 × 槽位 + 2）。协议解析、SSE 帧、轮询全部自写，不引入 HTTP 协议栈之外的任何依赖。
 2. 单进程自包含，不做独立网关进程：零 IPC、零部署面，与 ADR-008 的依赖面口径一致。并发在进程内解决：有界队列 + 槽位租约，请求经队列交给槽位 worker，worker 驱动引擎步循环，增量经每 Job 的事件缓冲回写 HTTP 线程（满则背压、断开即取消）。
 3. JSON 手写子集入库：对象、数组、字符串（含转义与 `\uXXXX`）、数字、布尔、空。OpenAI 与 Anthropic 两个兼容域的请求与响应都在这个子集内；越界输入一律 400。
-4. 监控只出页面用的 JSON（`/metrics` 顶层键对齐 Strata v0.1.43 的契约：engine、live、requests、conversation_cache 占位、requests_kept、totals、hardware、hardware_static、history、time）。Prometheus 文本格式延迟到 M2；`conversation_cache` 的实值同样等 M2 接索引器统计。
+4. 监控只出页面用的 JSON（`/metrics` 顶层键对齐 Strata v0.1.43 的契约：engine、live、requests、conversation_cache、requests_kept、totals、hardware、hardware_static、history、time）。Prometheus 文本格式延迟到 M2；`conversation_cache` 的实值由服务层 token 前缀缓存填实（精确匹配 LRU：enabled/capacity/hits/misses/entries/tokens 实读，命中计入 totals.reused；引擎侧 KV 级前缀复用仍属 M2 后字段）。
 5. 硬件采集零依赖：NVIDIA 走 `dlopen("libnvidia-ml.so.1")` / Windows `LoadLibrary("nvml.dll")`，读不到的字段一律 `null`，遥测任何异常不允许拖垮服务；AMD 走 Linux sysfs（kfd 拓扑 + hwmon）；CPU/RAM 走 `/proc` 差值法。逻辑照抄 Strata 的 `serve/telemetry.py`。
 
 ## 备选方案

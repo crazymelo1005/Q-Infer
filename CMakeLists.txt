@@ -45,6 +45,7 @@ add_library(qinfer_serve
   src/serve/server.cpp
   src/serve/telemetry.cpp
   src/serve/records.cpp
+  src/serve/prompt_cache.cpp
 )
 target_include_directories(qinfer_serve PUBLIC src)
 target_link_libraries(qinfer_serve PUBLIC qinfer_text qinfer_dense qinfer_ple qinfer_storage qinfer_kernels)
@@ -172,6 +173,10 @@ target_link_libraries(test_telemetry PRIVATE qinfer_serve)
 # 请求记录环（T14）：/metrics 的 requests/totals 与 /api/requests 的数据源。
 add_executable(test_records tests/test_records.cpp)
 target_link_libraries(test_records PRIVATE qinfer_serve)
+
+# token 前缀缓存（conversation_cache 数据源）：全串精确匹配的 LRU，/metrics 实读其统计。
+add_executable(test_prompt_cache tests/test_prompt_cache.cpp)
+target_link_libraries(test_prompt_cache PRIVATE qinfer_serve)
 
 add_executable(test_iq4nl tests/test_iq4nl.cpp)
 target_link_libraries(test_iq4nl PRIVATE qinfer_kernels)
@@ -359,6 +364,7 @@ add_test(NAME json COMMAND test_json)
 add_test(NAME scheduler COMMAND test_scheduler)
 add_test(NAME telemetry COMMAND test_telemetry)
 add_test(NAME records COMMAND test_records)
+add_test(NAME prompt_cache COMMAND test_prompt_cache)
 add_test(NAME iq4nl COMMAND test_iq4nl)
 add_test(NAME iq2xs COMMAND test_iq2xs)
 add_test(NAME q8k COMMAND test_q8k)
