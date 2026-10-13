@@ -142,8 +142,10 @@ void test_bad_jobs_fail_loudly() {
     CHECK(cpu.stats().jobs == 0);
 }
 
-void test_igpu_placeholder_is_unavailable_with_reason() {
-    IgpuExpertWorker igpu(/*device_usable=*/false);
+void test_igpu_unavailable_with_reason() {
+    // Force the unavailable path (the machine may well have an iGPU; the real
+    // probe is covered by test_igpu_expert).
+    IgpuExpertWorker igpu(/*force_unavailable=*/true);
     CHECK(!igpu.available());
     const LayerSpec spec = make_spec();
     const std::vector<std::uint8_t> b = q20_matrix(1.0f);
@@ -160,9 +162,8 @@ void test_igpu_placeholder_is_unavailable_with_reason() {
 
     std::string err;
     CHECK(!igpu.submit(job, err));
-    // 原因里要能看出「本机没有计算运行时」这件事，而不是一句泛泛的失败。
-    CHECK(err.find("无计算运行时") != std::string::npos);
-    CHECK(err.find("integer_dot_product") != std::string::npos);
+    // 原因要能看出「不可用」这件事，而不是一句泛泛的失败。
+    CHECK(err.find("iGPU unavailable") != std::string::npos);
     CHECK(igpu.stats().failed == 1);
 }
 
@@ -180,7 +181,7 @@ void test_reroute_keeps_results_and_counts() {
     job.hidden = kN;
 
     // (1) 核显不可用 -> 改派给 CPU，结果与纯 CPU 一致。
-    IgpuExpertWorker igpu(false);
+    IgpuExpertWorker igpu(/*force_unavailable=*/true);
     CpuExpertWorker cpu;
     std::vector<float> via_reroute(kN, 0.0f);
     std::vector<float> via_cpu(kN, 0.0f);
@@ -209,7 +210,7 @@ void test_reroute_keeps_results_and_counts() {
     // (3) 两边都失败（作业不合法）时错误向上抛。
     ExpertJob bad;
     RerouteStats rs3{};
-    IgpuExpertWorker igpu2(false);
+    IgpuExpertWorker igpu2(/*force_unavailable=*/true);
     std::string err3;
     CHECK(!run_job_with_fallback(igpu2, cpu, bad, rs3, err3));
     CHECK(!err3.empty());
@@ -221,7 +222,7 @@ void test_reroute_keeps_results_and_counts() {
 int main() {
     test_cpu_worker_matches_direct_call();
     test_bad_jobs_fail_loudly();
-    test_igpu_placeholder_is_unavailable_with_reason();
+    test_igpu_unavailable_with_reason();
     test_reroute_keeps_results_and_counts();
     std::puts("expert_worker: CPU 工人与直接调用一致、坏作业明确失败、核显占位与重派语义成立");
     return 0;

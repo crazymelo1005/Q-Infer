@@ -676,7 +676,11 @@ else
     bad "29 --gpu refused startup: exit=$rc (124=silently hung), log $(tail -2 /tmp/gpu-reject.log)"
   fi
 fi
-pkill -9 -x qinfer-server 2>/dev/null
+# Kill only THIS case's server (B is the timeout wrapper; its child is the
+# server). A blanket `pkill -x qinfer-server` also killed a developer's own
+# long-running instance on the same machine.
+kill -9 "$BPID" 2>/dev/null
+pkill -9 -P "$BPID" 2>/dev/null
 wait "$BPID" 2>/dev/null
 sleep 1
 rm -f /tmp/gpu-reject.log
