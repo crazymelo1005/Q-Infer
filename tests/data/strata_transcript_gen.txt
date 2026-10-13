@@ -1,0 +1,29 @@
+# Strata --serve stdout, captured verbatim (protocol oracle for tests/test_engine_protocol.cpp).
+# Binary: build-engine/strata == vendored third_party/strata v0.1.43.1 (engine=0.1.43.1).
+# Command sent: GEN 8 temperature=0 top_k=1 9419,13,9419,13,9419,13   (ids: "Hello" '.' repeated)
+# Context: --pack iq2_xs, gsq-rco-iq2_xs GGUF pair 00001/00002, --expert-profile, --mtp mtp/rt,
+#          --kv int8 --kv-resident 32768, --max-context 65536.
+# Memory note: captured with --mmap-experts inside a capped systemd scope (MemoryMax=16G); the
+#          default resident expert arena wants 33 GiB and OOM-killed another cgroup on this box.
+# Observed facts (supersede the documented layout where they differ):
+#   * READY carries the max_context: "READY 65536 stop"
+#   * the DONE line has 15 fields:
+#     generated prompt_tokens prompt_ms decode_ms finish drafts_accepted drafts_offered reused
+#     hits lookups ram_blobs file_blobs file_mb prompt_read offloaded
+#   * no WARN line is written to stdout (the "route tail skip"/"expert tiers" notes go to stderr)
+#   * RESUME <n> and REUSED <n> appear before the tokens; neither is in the plan's EventKind enum
+#     yet, so parse_event() classifies them as kOther (the protocol grows; see the parser test).
+INFO logit_bias=1 context=65536 kv=int8 kv_resident=32768 expert_slots=7268 expert_cache_mib=9968 expert_slots_primary=7268 expert_cache_primary_mib=9968 spec=6 mtp_max=4 lookup=3 vram_free_mib=354 cvec=0 arena_mib=0 pool_workers=15 pcie_frac=0.55 spec_min_p=0.50 conversation_cache_mib=0 conversation_cache_slots=4 conversation_cache_min_free_mib=2560 conversation_cache_min_tokens=0 tail_role_token=-1 vram_elastic=0 engine=0.1.43.1
+READY 65536 stop
+RESUME 0
+PP 5 6 263 19.0
+REUSED 0
+T 271
+T 248068
+T 198
+T 760
+T 1156
+T 369
+T 40719
+T 728
+DONE 8 6 263.4 539.9 length 4 9 0 4361 6107 0 0 1437.7 6 0
