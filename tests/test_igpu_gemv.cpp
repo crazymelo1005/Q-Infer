@@ -8,6 +8,7 @@
 #include "experts/igpu/shaders/spv_data.hpp"
 #include "experts/igpu/vulkan_runtime.hpp"
 
+#include "experts/ffn.hpp"
 #include "kernels/q2_0.hpp"
 #include "kernels/q8_0.hpp"
 
@@ -154,11 +155,93 @@ int test_q2_0_gemv() {
     return compare(host_out, dev_out, "iGPU vs host");
 }
 
+// Stage C task 3: fused silu*gate + Q8_0 quantization vs the host quantizer.
+int test_swiglu_quant() {
+    constexpr std::uint64_t kFfn = 640;  // real ffn; 20 blocks (even, required)
+    constexpr std::uint64_t kNb = kFfn / 32;
+    std::vector<float> gv(kFfn), uv(kFfn);
+    for (std::size_t i = 0; i < kFfn; ++i) {
+        gv[i] = 0.6f + 0.02f * static_cast<float>((i * 5 + 1) % 13) *
+                            (static_cast<float>(i % 2) * 2.0f - 1.0f);
+        uv[i] = -0.4f + 0.03f * static_cast<float>((i * 3 + 2) % 17);
+    }
+    // Host: silu(gate)*up then the Q8_0 quantizer, exactly as expert_ffn does.
+    std::vector<float> h(kFfn);
+    for (std::size_t i = 0; i < kFfn; ++i) h[i] = experts::silu(gv[i]) * uv[i];
+    std::vector<kernels::Q80Block> hb(kNb);
+    kernels::q8_0_quantize_row(h.data(), hb.data(), static_cast<int>(kNb));
+
+    experts::igpu::VulkanRuntime& rt = experts::igpu::igpu_runtime();
+    std::string err;
+    if (!rt.load(err) || !rt.init_device(err) || !rt.available()) {
+        std::printf("  swiglu skipped (no iGPU): %s\n", rt.reason().c_str());
+        return 0;
+    }
+    const std::uint64_t out_bytes = kNb * sizeof(kernels::Q80Block);  // 680, 4-aligned
+    void* d_g = nullptr;
+    void* d_u = nullptr;
+    void* d_o = nullptr;
+    if (!rt.alloc_device(kFfn * sizeof(float), d_g, err) ||
+        !rt.upload(gv.data(), kFfn * sizeof(float), d_g, err) ||
+        !rt.alloc_device(kFfn * sizeof(float), d_u, err) ||
+        !rt.upload(uv.data(), kFfn * sizeof(float), d_u, err) ||
+        !rt.alloc_device(out_bytes, d_o, err)) {
+        std::printf("FAIL swiglu buffers: %s\n", err.c_str());
+        return 1;
+    }
+    vk::DescriptorSetLayoutBinding bindings[3] = {};
+    for (std::uint32_t i = 0; i < 3; ++i) {
+        bindings[i].binding = i;
+        bindings[i].descriptorType = vk::DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[i].descriptorCount = 1;
+        bindings[i].stageFlags = vk::SHADER_STAGE_COMPUTE;
+    }
+    vk::DescriptorSetLayout sl = rt.make_set_layout(bindings, 3, err);
+    vk::PipelineLayout pl = sl != nullptr ? rt.make_layout(&sl, 1, err) : nullptr;
+    vk::Pipeline pipe =
+        pl != nullptr ? rt.make_pipeline(experts::igpu::shaders::kSwigluQuantQ80Spv,
+                                         experts::igpu::shaders::kSwigluQuantQ80SpvSize, pl, err)
+                      : nullptr;
+    vk::Buffer bufs[3] = {static_cast<vk::Buffer>(d_g), static_cast<vk::Buffer>(d_u),
+                          static_cast<vk::Buffer>(d_o)};
+    vk::DescriptorSet set = pipe != nullptr ? rt.make_set(sl, bufs, 3, err) : nullptr;
+    if (set == nullptr) {
+        std::printf("FAIL swiglu pipeline: %s\n", err.c_str());
+        return 1;
+    }
+    struct Pc {
+        std::uint32_t n_blocks;
+        std::uint32_t pad;
+    } pc{static_cast<std::uint32_t>(kNb), 0};
+    const std::uint32_t groups = static_cast<std::uint32_t>(kNb / 2);
+    if (!rt.dispatch(pipe, pl, set, &pc, sizeof(pc), (groups + 63) / 64, 1, 1, err)) {
+        std::printf("FAIL swiglu dispatch: %s\n", err.c_str());
+        return 1;
+    }
+    std::vector<std::uint8_t> dev_bytes(out_bytes, 0);
+    if (!rt.download(d_o, out_bytes, dev_bytes.data(), err)) {
+        std::printf("FAIL swiglu download: %s\n", err.c_str());
+        return 1;
+    }
+    rt.free_buf(d_g, err);
+    rt.free_buf(d_u, err);
+    rt.free_buf(d_o, err);
+    const std::uint8_t* want = reinterpret_cast<const std::uint8_t*>(hb.data());
+    std::uint64_t mism = 0;
+    for (std::uint64_t i = 0; i < out_bytes; ++i) {
+        if (want[i] != dev_bytes[static_cast<std::size_t>(i)]) ++mism;
+    }
+    std::printf("  swiglu+q8_0 (%llu blocks): %s\n", (unsigned long long) kNb,
+                mism == 0 ? "byte-identical" : "differs");
+    return mism == 0 ? 0 : 1;
+}
+
 }  // namespace
 
 int main() {
     int rc = 0;
     rc += test_q2_0_gemv();
-    if (rc == 0) std::puts("igpu_gemv: Q2_0 x Q8_0 matches the host reference");
+    rc += test_swiglu_quant();
+    if (rc == 0) std::puts("igpu_gemv: Q2_0 x Q8_0 + fused swiglu/quantize match the host");
     return rc;
 }

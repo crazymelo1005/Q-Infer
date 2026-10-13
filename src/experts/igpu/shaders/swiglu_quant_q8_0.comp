@@ -1,0 +1,86 @@
+// Fused SwiGLU + Q8_0 quantization (stage C): h = silu(gate) * up, then each
+// 32-value block is quantized to Q8_0 exactly as src/kernels/q8_0.cpp
+// q8_0_quantize_row does (amax -> d = amax/127 -> id = 1/d -> round(x*id),
+// fp16 scale). Mirrors src/experts/cuda/expert_ffn_cuda.cu's
+// swiglu_quant_q8_0_kernel, which is the same accumulation the CPU path uses.
+//
+// One invocation owns TWO output blocks (68 bytes = 17 uint words), assembled
+// in private storage and written as whole words: a Q8_0 block is 34 bytes, so
+// block-per-invocation would have neighbours sharing a word (data race). This
+// requires an even block count (the real ffn is 640 = 20 blocks; callers
+// reject odd counts explicitly).
+//
+// Build: see README.md.
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 0) readonly buffer G { float g[]; };  // gate projection, length ffn
+layout(std430, binding = 1) readonly buffer U { float u[]; };  // up projection, length ffn
+layout(std430, binding = 2) buffer O { uint o[]; };            // Q8_0 blocks, 34 B each
+
+layout(push_constant) uniform Pc {
+    uint n_blocks;
+    uint pad;
+} pc;
+
+const uint kElems = 32u;
+const uint kWords = 17u;  // two blocks: 68 bytes
+
+// fp32 -> fp16 bits, same bit trick as kernels/fp16.hpp f32_to_f16_bits.
+uint f32_to_f16_bits(float f) {
+    precise float base = (abs(f) * uintBitsToFloat(0x77800000u)) * uintBitsToFloat(0x08800000u);
+    uint w = floatBitsToUint(f);
+    uint shl1_w = w + w;
+    uint sign = w & 0x80000000u;
+    uint bias = shl1_w & 0xFF000000u;
+    if (bias < 0x71000000u) bias = 0x71000000u;
+    uint magic = (bias >> 1) + 0x07800000u;
+    precise float m = uintBitsToFloat(magic);
+    precise float sum = m + base;
+    uint bits = floatBitsToUint(sum);
+    uint exp_bits = (bits >> 13) & 0x00007C00u;
+    uint mantissa_bits = bits & 0x00000FFFu;
+    uint nonsign = exp_bits + mantissa_bits;
+    return (sign >> 16) | (shl1_w > 0xFF000000u ? 0x7E00u : nonsign);
+}
+
+void putbyte(inout uint words[kWords], uint off, uint v) {
+    uint wi = off >> 2;
+    uint sh = (off & 3u) * 8u;
+    words[wi] = (words[wi] & ~(0xFFu << sh)) | ((v & 0xFFu) << sh);
+}
+
+void main() {
+    uint grp = gl_GlobalInvocationID.x;
+    uint b0 = grp * 2u;
+    if (b0 >= pc.n_blocks) return;
+    uint words[kWords];
+    for (uint t = 0u; t < kWords; ++t) words[t] = 0u;
+    for (uint e = 0u; e < 2u; ++e) {
+        uint b = b0 + e;
+        if (b >= pc.n_blocks) break;
+        uint base = b * kElems;
+        precise float amax = 0.0;
+        for (uint j = 0u; j < kElems; ++j) {
+            precise float x = g[base + j];
+            precise float h = (x / (1.0 + exp(-x))) * u[base + j];
+            float ax = abs(h);
+            amax = ax > amax ? ax : amax;
+        }
+        precise float d = amax / 127.0;
+        precise float id = d != 0.0 ? 1.0 / d : 0.0;
+        uint dbits = f32_to_f16_bits(d);
+        uint off = e * 34u;
+        putbyte(words, off, dbits & 0xFFu);
+        putbyte(words, off + 1u, dbits >> 8);
+        for (uint j = 0u; j < kElems; ++j) {
+            precise float x = g[base + j];
+            precise float h = (x / (1.0 + exp(-x))) * u[base + j];
+            int q = int(round(h * id));
+            q = clamp(q, -128, 127);
+            putbyte(words, off + 2u + j, uint(q) & 0xFFu);
+        }
+    }
+    for (uint t = 0u; t < kWords; ++t) o[grp * kWords + t] = words[t];
+}

@@ -12,7 +12,7 @@ time.
 """
 import pathlib
 
-SHADERS = ["q2_0_gemv"]
+SHADERS = ["q2_0_gemv", "swiglu_quant_q8_0"]
 
 
 def main() -> None:
