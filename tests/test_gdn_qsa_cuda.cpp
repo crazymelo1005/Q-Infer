@@ -12,6 +12,8 @@
 #include "dense/qsa_attend.hpp"
 #include "dense/qsa_index.hpp"
 #include "dense/qsa_index_attend_cuda.hpp"
+#include "dense/qsa_layer.hpp"
+#include "dense/qsa_layer_cuda.hpp"
 #include "dense/qsa_qk_prep.hpp"
 #include "dense/qsa_qk_prep_cuda.hpp"
 #include "dense/rope.hpp"  // build_rope_table
@@ -366,6 +368,72 @@ int manual_gdn_layer_entry(const char* model, int layer) {
     return worst < 1e-4 ? 0 : 1;
 }
 
+// 真模型 QSA 整层对照（Task 8）：`--model <GGUF> --layer N --qsa` 时，主机 run_qsa_layer 对设备
+// run_qsa_layer_cuda 同输入对照；2 步连跑（KV/idx 状态跨 token）。判据 ADR-009 分布级。
+int manual_qsa_layer_entry(const char* model, int layer) {
+    qinfer::artifact::GgufFile g;
+    std::string err;
+    if (!g.open(model, err)) {
+        std::printf("打不开模型：%s（%s）\n", model, err.c_str());
+        return 1;
+    }
+    qinfer::dense::QsaLayer ql;
+    // 真模型几何（S-54/S-57）：head_dim 256、n_rot 64、idx_dim 128、idx_top_k 2048、idx_block 4。
+    if (!qinfer::dense::build_qsa_layer(g, layer, 2560, 256, 64, 128, 2048, 4, ql, err)) {
+        std::printf("层 %d 建不起来：%s\n", layer, err.c_str());
+        return 1;
+    }
+    std::printf("QSA 层 %d：n_head %llu、n_head_kv %llu、head_dim %llu、idx_dim %llu、idx_n_head %llu；档 ",
+                layer, static_cast<unsigned long long>(ql.sh.n_head),
+                static_cast<unsigned long long>(ql.sh.n_head_kv),
+                static_cast<unsigned long long>(ql.sh.head_dim),
+                static_cast<unsigned long long>(ql.idx_dim),
+                static_cast<unsigned long long>(ql.idx_n_head));
+    std::printf("%s / %s / %s / %s\n", qinfer::experts::format_name(ql.q.format),
+                qinfer::experts::format_name(ql.k.format),
+                qinfer::experts::format_name(ql.v.format),
+                qinfer::experts::format_name(ql.out.format));
+    std::vector<float> x(static_cast<std::size_t>(ql.q.cols), 0.5f);
+    double worst = 0.0;
+    // 主机与设备的 scratch 各自配 KV / rope 表（与 prepare_step_scratch 同口径：page_size 4、
+    // 恒等页表、pos_base 0、rope 表 theta 1e7）。
+    auto setup_scratch = [&](qinfer::dense::QsaScratch& s) {
+        s.pos_base = 0;
+        s.kv.page_size = 4;
+        s.kv.n_head_kv = ql.sh.n_head_kv;
+        s.kv.head_dim = ql.sh.head_dim;
+        s.kv.n_pages = 1024;
+        s.kv.reset();
+        s.kv.table.resize(1024);
+        for (std::uint64_t p = 0; p < 1024; ++p) s.kv.table[p] = static_cast<std::int32_t>(p);
+        return qinfer::dense::build_rope_table(ql.n_rot, 1.0e7, 16384, s.cos_tab, s.sin_tab, err);
+    };
+    qinfer::dense::QsaScratch host_s, dev_s;
+    if (!setup_scratch(host_s) || !setup_scratch(dev_s)) {
+        std::printf("rope 表建失败：%s\n", err.c_str());
+        return 1;
+    }
+    std::vector<float> host_out(ql.q.cols), dev_out(ql.q.cols);
+    for (int step = 0; step < 2; ++step) {  // 2 步：KV 与 idx 状态跨 token
+        if (!qinfer::dense::run_qsa_layer(g, ql, x.data(), host_out.data(), host_s, err)) {
+            std::printf("主机 QSA 层 %d 跑不动（step %d）：%s\n", layer, step, err.c_str());
+            return 1;
+        }
+        if (!qinfer::dense::run_qsa_layer_cuda(g, ql, x.data(), dev_out.data(), dev_s, err)) {
+            std::printf("设备 QSA 层 %d 跑不动（step %d）：%s\n", layer, step, err.c_str());
+            return 1;
+        }
+        double d = 0.0, mag = 0.0;
+        for (std::size_t i = 0; i < host_out.size(); ++i) {
+            d += std::fabs(static_cast<double>(host_out[i]) - static_cast<double>(dev_out[i]));
+            mag += std::fabs(static_cast<double>(host_out[i]));
+        }
+        worst = std::max(worst, d / (mag > 1e-30 ? mag : 1e-30));
+    }
+    std::printf("  QSA 整层 2 步（KV/idx 状态跨 token）主机 vs 设备最差相对 L1 %.3e\n", worst);
+    return worst < 1e-4 ? 0 : 1;
+}
+
 // ---- QSA 投影与 qk_prep 设备对照（Task 6）----
 // 合成几何：n_head 3、n_head_kv 2、head_dim 8、n_rot 4（部分 rope、非整头）、pos 可变。
 int test_qsa_qk_prep_cuda() {
@@ -512,12 +580,16 @@ int main(int argc, char** argv) {
         }
     }
     if (argc >= 3 && std::string(argv[1]) == "--model") {
+        bool qsa = false;
         for (int i = 2; i < argc; ++i) {
             if (std::string(argv[i]) == "--layer" && i + 1 < argc) {
                 layer = std::atoi(argv[++i]);
+            } else if (std::string(argv[i]) == "--qsa") {
+                qsa = true;
             }
         }
-        rc += manual_gdn_layer_entry(argv[2], layer);
+        rc += qsa ? manual_qsa_layer_entry(argv[2], layer)
+                  : manual_gdn_layer_entry(argv[2], layer);
     }
     if (rc == 0) {
         std::puts("gdn_qsa_cuda: 稠密投影 + GDN 前段/递推/收尾/整层设备对照全部通过");

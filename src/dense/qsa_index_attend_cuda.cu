@@ -43,6 +43,21 @@ __device__ __forceinline__ float f16_bits_to_f32_dev(std::uint16_t h) {
     return f;
 }
 
+__device__ __forceinline__ float bfs16_f32_dev(std::uint16_t bits) {
+    const std::uint32_t f = static_cast<std::uint32_t>(bits) << 16;
+    float out;
+    __builtin_memcpy(&out, &f, sizeof(out));
+    return out;
+}
+
+// f32 → bf16 位型（就近舍入到偶数，与主机 kernels::f32_to_bf16_bits 同语义；设备端舍入用）。
+__device__ __forceinline__ std::uint16_t f32_to_bf16_dev(float s) {
+    std::uint32_t u;
+    __builtin_memcpy(&u, &s, sizeof(u));
+    const std::uint32_t rounded = u + (0x7FFFu + ((u >> 16) & 1u));
+    return static_cast<std::uint16_t>(rounded >> 16);
+}
+
 __device__ __forceinline__ float sigmoidf_dev(float v) { return 1.0f / (1.0f + __expf(-v)); }
 
 // 逐 cell 分数。gridDim = ceil(n_kv / 256)、blockDim = 256。
@@ -161,7 +176,109 @@ __global__ void qsa_gate_kernel(const float* __restrict__ attn, const float* __r
                            sigmoidf_dev(static_cast<float>(g)));
 }
 
+// bf16 逐行点积：每行一个线程。w 是 bf16 位型、(rows, cols) 行主序；x 已舍入到 bf16 位型。
+// f32 累加，与主机 bf16_gemv_rows 逐位一致。
+__global__ void bf16_gemv_kernel(const std::uint16_t* __restrict__ w, int rows, int cols,
+                                 const std::uint16_t* __restrict__ x_bf16,
+                                 float* __restrict__ out) {
+    const int r = blockIdx.x * blockDim.x + threadIdx.x;
+    if (r >= rows) return;
+    const std::uint16_t* row = w + static_cast<std::size_t>(r) * cols;
+    float acc = 0.0f;
+    for (int i = 0; i < cols; ++i) {
+        acc += bfs16_f32_dev(row[i]) * bfs16_f32_dev(x_bf16[i]);
+    }
+    out[r] = acc;
+}
+
+// 激活 bf16 舍入（就地改写为位型）：线程并行。
+__global__ void bf16_round_kernel(const float* __restrict__ x, int n,
+                                  std::uint16_t* __restrict__ out) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    out[i] = f32_to_bf16_dev(x[i]);
+}
+
 }  // namespace
+
+bool bf16_gemv_cuda(const std::uint16_t* w_bf16, std::uint64_t rows, std::uint64_t cols,
+                    const float* x, float* out, cudaStream_t stream, std::string& err) {
+    if (w_bf16 == nullptr || x == nullptr || out == nullptr) {
+        err = "bf16 投影的参数为空";
+        return false;
+    }
+    if (rows == 0 || cols == 0) {
+        err = "bf16 投影的几何非法（行或列为 0）";
+        return false;
+    }
+    const std::size_t w_bytes = static_cast<std::size_t>(rows * cols) * sizeof(std::uint16_t);
+    const std::size_t x_bytes = static_cast<std::size_t>(cols) * sizeof(std::uint16_t);
+    const std::size_t out_bytes = static_cast<std::size_t>(rows) * sizeof(float);
+    void* d_w = nullptr;
+    void* d_x = nullptr;
+    void* d_xb = nullptr;
+    void* d_out = nullptr;
+    if (cudaMalloc(&d_w, w_bytes) != cudaSuccess || cudaMalloc(&d_xb, x_bytes) != cudaSuccess ||
+        cudaMalloc(&d_out, out_bytes) != cudaSuccess) {
+        err = "bf16_gemv_cuda：显存分配失败";
+        cudaFree(d_w);
+        cudaFree(d_xb);
+        cudaFree(d_out);
+        return false;
+    }
+    bool ok = cudaMemcpy(d_w, w_bf16, w_bytes, cudaMemcpyHostToDevice) == cudaSuccess;
+    if (!ok) {
+        err = "bf16_gemv_cuda：权重拷入失败";
+        cudaFree(d_w);
+        cudaFree(d_xb);
+        cudaFree(d_out);
+        return false;
+    }
+    // 激活舍入（在设备上做：拷 f32 x 上设备 → 舍入成 bf16 位型 → bf16 点积）。
+    const int cols_i = static_cast<int>(cols);
+    const int threads = 256;
+    const int blocks = (cols_i + threads - 1) / threads;
+    if (cudaMalloc(&d_x, static_cast<std::size_t>(cols) * sizeof(float)) != cudaSuccess) {
+        err = "bf16_gemv_cuda：激活显存分配失败";
+        cudaFree(d_w);
+        cudaFree(d_xb);
+        cudaFree(d_out);
+        return false;
+    }
+    ok = cudaMemcpy(d_x, x, static_cast<std::size_t>(cols) * sizeof(float),
+                    cudaMemcpyHostToDevice) == cudaSuccess;
+    if (!ok) {
+        err = "bf16_gemv_cuda：激活拷入失败";
+        cudaFree(d_w);
+        cudaFree(d_x);
+        cudaFree(d_xb);
+        cudaFree(d_out);
+        return false;
+    }
+    bf16_round_kernel<<<blocks, threads, 0, stream>>>(
+        static_cast<const float*>(d_x), cols_i, static_cast<std::uint16_t*>(d_xb));
+    const int rthreads = 128;
+    const int rblocks = static_cast<int>((rows + rthreads - 1) / rthreads);
+    bf16_gemv_kernel<<<rblocks, rthreads, 0, stream>>>(
+        static_cast<const std::uint16_t*>(d_w), static_cast<int>(rows), cols_i,
+        static_cast<const std::uint16_t*>(d_xb), static_cast<float*>(d_out));
+    const cudaError_t launch = cudaGetLastError();
+    if (launch != cudaSuccess) {
+        err = std::string("bf16_gemv_cuda：内核启动失败：") + cudaGetErrorString(launch);
+        cudaFree(d_w);
+        cudaFree(d_x);
+        cudaFree(d_xb);
+        cudaFree(d_out);
+        return false;
+    }
+    ok = cudaMemcpy(out, d_out, out_bytes, cudaMemcpyDeviceToHost) == cudaSuccess;
+    if (!ok) err = "bf16_gemv_cuda：结果拷回失败";
+    cudaFree(d_w);
+    cudaFree(d_x);
+    cudaFree(d_xb);
+    cudaFree(d_out);
+    return ok;
+}
 
 bool qsa_index_cuda(const float* pooled, std::uint64_t n_bid, std::uint64_t idx_dim,
                     std::uint64_t idx_n_head, const float* q_idx, const float* bias,

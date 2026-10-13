@@ -493,6 +493,7 @@ if(QINFER_ENABLE_CUDA)
     src/dense/gdn_layer_cuda.cu
     src/dense/qsa_qk_prep_cuda.cu
     src/dense/qsa_index_attend_cuda.cu
+    src/dense/qsa_layer_cuda.cu
   )
   target_include_directories(qinfer_dense_cuda PUBLIC src)
   target_link_libraries(qinfer_dense_cuda PUBLIC qinfer_kernels_cuda qinfer_dense)

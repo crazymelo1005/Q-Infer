@@ -36,4 +36,9 @@ bool qsa_attend_cuda(const float* q, const std::uint16_t* k_scratch, const std::
                      std::uint64_t n_ids, const QsaShapes& s, const float* q_full, float* attn,
                      float* weights, cudaStream_t stream, std::string& err);
 
+// BF16 逐行点积的设备版（索引器 q/k 投影；语义与主机 run_bf16_gemv 一致：激活先舍入到 bf16 位型、
+// 逐行 bf16 点积、f32 累加、每行独立）。w_bf16 (rows, cols)、x 是 f32 激活（内部舍入）、out 长 rows。
+bool bf16_gemv_cuda(const std::uint16_t* w_bf16, std::uint64_t rows, std::uint64_t cols,
+                    const float* x, float* out, cudaStream_t stream, std::string& err);
+
 }  // namespace qinfer::dense
