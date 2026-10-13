@@ -481,6 +481,11 @@ target_compile_definitions(test_backend_strata PRIVATE
                            MOCK_ENGINE_PATH="$<TARGET_FILE:mock_strata_engine>")
 add_test(NAME backend_strata COMMAND test_backend_strata)
 
+# Byte-parity of the chat renderer against the reference engine's golden (data only, no weights).
+add_executable(test_chat_golden tests/test_chat_golden.cpp)
+target_link_libraries(test_chat_golden PRIVATE qinfer_serve)
+add_test(NAME chat_golden COMMAND test_chat_golden ${CMAKE_CURRENT_SOURCE_DIR}/tests/data)
+
 target_sources(qinfer_engine PRIVATE src/engine/engine_driver.cpp)
 add_executable(test_engine_driver tests/test_engine_driver.cpp)
 target_link_libraries(test_engine_driver PRIVATE qinfer_engine)

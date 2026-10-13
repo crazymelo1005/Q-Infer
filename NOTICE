@@ -73,3 +73,9 @@ as an oversight. The copy receives a placeholder at that path which fails loudly
 tries to compile it, so the vendored tree itself is never edited and stays byte-identical to
 `a0116b27`. The script prints a confirmation of that at the end of every build.
 
+----------
+
+Test data (P2): `tests/data/chat_golden.json` and `tests/data/chat_template.jinja` are copies
+from the same upstream checkout (`serve/`), used as the byte-parity oracle for our chat
+renderer (`tests/test_chat_golden.cpp`). They are data, not code; the renderer is ours.
+
