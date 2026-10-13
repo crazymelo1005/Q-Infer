@@ -449,6 +449,16 @@ add_test(NAME kv_window COMMAND test_kv_window)
 add_test(NAME bf16_gemv COMMAND test_bf16_gemv)
 add_test(NAME step_record COMMAND test_step_record)
 
+# ---- 引擎后端协议（厂商化 Strata；P0/P1）----
+# qinfer_engine 只依赖标准库与 pthreads，**不**并入 qinfer_serve：进程边界=依赖边界（ADR-008）。
+# src/serve 的接线是 P2，本阶段不碰。
+add_library(qinfer_engine src/engine/engine_protocol.cpp)
+target_include_directories(qinfer_engine PUBLIC src)
+
+add_executable(test_engine_protocol tests/test_engine_protocol.cpp)
+target_link_libraries(test_engine_protocol PRIVATE qinfer_engine)
+add_test(NAME engine_protocol COMMAND test_engine_protocol)
+
 # ---- CUDA 内核（默认关闭）----
 # ADR-008 第 2 条：骨架不依赖 CUDA，CI 在没有 GPU 的 runner 上只编主机侧、照样跑测试。
 # 打开时才需要 nvcc，且要单独一份构建目录（例如 -B build/cuda -DQINFER_ENABLE_CUDA=ON）。
