@@ -188,6 +188,7 @@ bool VulkanRuntime::init_device(std::string& err) {
     CmdBindDescriptorSets_ = reinterpret_cast<vk::PfnCmdBindDescriptorSets>(
         dev_fn("vkCmdBindDescriptorSets"));
     CmdDispatch_ = reinterpret_cast<vk::PfnCmdDispatch>(dev_fn("vkCmdDispatch"));
+    CmdPushConstants_ = reinterpret_cast<vk::PfnCmdPushConstants>(dev_fn("vkCmdPushConstants"));
     CmdPipelineBarrier =
         reinterpret_cast<vk::PfnCmdPipelineBarrier>(dev_fn("vkCmdPipelineBarrier"));
     EndCommandBuffer_ =
@@ -437,6 +438,19 @@ bool VulkanRuntime::copy_via_staging(vk::Buffer side, std::uint64_t bytes, void*
     if (to_device) {
         CmdCopyBuffer_(cmd_, stage_buf, side, 1, &c);
     } else {
+        // Reading a device-local result back: the copy must observe the prior
+        // compute writes (same queue, but a memory dependency is still needed).
+        vk::BufferMemoryBarrier mb{};
+        mb.sType = vk::ST_BUFFER_MEMORY_BARRIER;
+        mb.srcAccessMask = vk::ACCESS_SHADER_WRITE;
+        mb.dstAccessMask = vk::ACCESS_TRANSFER_READ;
+        mb.srcQueueFamilyIndex = UINT32_MAX;  // VK_QUEUE_FAMILY_IGNORED
+        mb.dstQueueFamilyIndex = UINT32_MAX;
+        mb.buffer = side;
+        mb.offset = 0;
+        mb.size = bytes;
+        CmdPipelineBarrier(cmd_, vk::STAGE_COMPUTE, vk::STAGE_TRANSFER, 0, 0, nullptr, 1, &mb, 0,
+                            nullptr);
         CmdCopyBuffer_(cmd_, side, stage_buf, 1, &c);
     }
     EndCommandBuffer_(cmd_);
@@ -459,6 +473,160 @@ bool VulkanRuntime::copy_via_staging(vk::Buffer side, std::uint64_t bytes, void*
     FreeMemory_(device_, stage_mem, nullptr);
     DestroyBuffer_(device_, stage_buf, nullptr);
     return err.empty();
+}
+
+// ---- compute layer (stage C task 2) ----
+
+vk::DescriptorSetLayout VulkanRuntime::make_set_layout(
+    const vk::DescriptorSetLayoutBinding* bindings, std::uint32_t n, std::string& err) {
+    err.clear();
+    vk::DescriptorSetLayoutCreateInfo ci{};
+    ci.sType = vk::ST_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    ci.bindingCount = n;
+    ci.pBindings = bindings;
+    vk::DescriptorSetLayout out = nullptr;
+    if (CreateDescriptorSetLayout_(device_, &ci, nullptr, &out) != vk::VK_SUCCESS) {
+        err = "vkCreateDescriptorSetLayout failed";
+        return nullptr;
+    }
+    return out;
+}
+
+vk::PipelineLayout VulkanRuntime::make_layout(const vk::DescriptorSetLayout* sets,
+                                              std::uint32_t n, std::string& err) {
+    err.clear();
+    // One push-constant range covers the kernels' parameter block (two uints
+    // today); declaring it on layouts whose shader has no push block is legal.
+    vk::PushConstantRange r{};
+    r.stageFlags = vk::SHADER_STAGE_COMPUTE;
+    r.offset = 0;
+    r.size = 8;
+    vk::PipelineLayoutCreateInfo ci{};
+    ci.sType = vk::ST_PIPELINE_LAYOUT_CREATE_INFO;
+    ci.setLayoutCount = n;
+    ci.pSetLayouts = sets;
+    ci.pushConstantRangeCount = 1;
+    ci.pPushConstantRanges = &r;
+    vk::PipelineLayout out = nullptr;
+    if (CreatePipelineLayout_(device_, &ci, nullptr, &out) != vk::VK_SUCCESS) {
+        err = "vkCreatePipelineLayout failed";
+        return nullptr;
+    }
+    return out;
+}
+
+vk::Pipeline VulkanRuntime::make_pipeline(const std::uint8_t* spv, std::size_t spv_len,
+                                          vk::PipelineLayout layout, std::string& err) {
+    err.clear();
+    // The SPIR-V word stream must be 4-byte aligned; the embedded byte arrays
+    // are not, so copy into a word vector first.
+    std::vector<std::uint32_t> words((spv_len + 3) / 4, 0);
+    std::memcpy(words.data(), spv, spv_len);
+    vk::ShaderModuleCreateInfo smci{};
+    smci.sType = vk::ST_SHADER_MODULE_CREATE_INFO;
+    smci.codeSize = spv_len;
+    smci.pCode = words.data();
+    vk::ShaderModule module = nullptr;
+    if (CreateShaderModule_(device_, &smci, nullptr, &module) != vk::VK_SUCCESS) {
+        err = "vkCreateShaderModule failed";
+        return nullptr;
+    }
+    vk::PipelineShaderStageCreateInfo stage{};
+    stage.sType = vk::ST_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stage.stage = vk::SHADER_STAGE_COMPUTE;
+    stage.module = module;
+    stage.pName = "main";
+    vk::ComputePipelineCreateInfo ci{};
+    ci.sType = vk::ST_COMPUTE_PIPELINE_CREATE_INFO;
+    ci.stage = stage;
+    ci.layout = layout;
+    vk::Pipeline out = nullptr;
+    if (CreateComputePipelines_(device_, nullptr, 1, &ci, nullptr, &out) != vk::VK_SUCCESS) {
+        err = "vkCreateComputePipelines failed";
+        return nullptr;
+    }
+    // The module may be destroyed once the pipeline exists; we keep it (bounded
+    // by the small fixed set of pipelines the process creates).
+    return out;
+}
+
+vk::DescriptorSet VulkanRuntime::make_set(vk::DescriptorSetLayout layout, const vk::Buffer* buffers,
+                                          std::uint32_t n, std::string& err) {
+    err.clear();
+    if (desc_pool_ == nullptr) {
+        vk::DescriptorPoolSize size{};
+        size.type = vk::DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        size.descriptorCount = 256;
+        vk::DescriptorPoolCreateInfo pci{};
+        pci.sType = vk::ST_DESCRIPTOR_POOL_CREATE_INFO;
+        pci.maxSets = 64;
+        pci.poolSizeCount = 1;
+        pci.pPoolSizes = &size;
+        if (CreateDescriptorPool_(device_, &pci, nullptr, &desc_pool_) != vk::VK_SUCCESS) {
+            err = "vkCreateDescriptorPool failed";
+            return nullptr;
+        }
+    }
+    vk::DescriptorSetAllocateInfo ai{};
+    ai.sType = vk::ST_DESCRIPTOR_SET_ALLOCATE_INFO;
+    ai.descriptorPool = desc_pool_;
+    ai.descriptorSetCount = 1;
+    ai.pSetLayouts = &layout;
+    vk::DescriptorSet set = nullptr;
+    if (AllocateDescriptorSets_(device_, &ai, &set) != vk::VK_SUCCESS) {
+        err = "vkAllocateDescriptorSets failed";
+        return nullptr;
+    }
+    std::vector<vk::DescriptorBufferInfo> infos(n);
+    std::vector<vk::WriteDescriptorSet> writes(n);
+    for (std::uint32_t i = 0; i < n; ++i) {
+        infos[i].buffer = buffers[i];
+        infos[i].offset = 0;
+        infos[i].range = vk::WHOLE_SIZE;
+        writes[i] = vk::WriteDescriptorSet{};
+        writes[i].sType = vk::ST_WRITE_DESCRIPTOR_SET;
+        writes[i].dstSet = set;
+        writes[i].dstBinding = i;
+        writes[i].descriptorCount = 1;
+        writes[i].descriptorType = vk::DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[i].pBufferInfo = &infos[i];
+    }
+    UpdateDescriptorSets_(device_, n, writes.data(), 0, nullptr);
+    return set;
+}
+
+bool VulkanRuntime::dispatch(vk::Pipeline pipeline, vk::PipelineLayout layout,
+                             vk::DescriptorSet set, const void* push, std::uint32_t push_size,
+                             std::uint32_t gx, std::uint32_t gy, std::uint32_t gz,
+                             std::string& err) {
+    err.clear();
+    if (!ensure_cmd(err)) return false;
+    ResetCommandPool_(device_, cmd_pool_, 0);
+    vk::CommandBufferBeginInfo bi{};
+    bi.sType = vk::ST_COMMAND_BUFFER_BEGIN_INFO;
+    bi.flags = vk::CB_ONE_TIME;
+    BeginCommandBuffer_(cmd_, &bi);
+    CmdBindPipeline_(cmd_, vk::PIPELINE_BIND_POINT_COMPUTE, pipeline);
+    CmdBindDescriptorSets_(cmd_, vk::PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &set, 0, nullptr);
+    if (push != nullptr && push_size > 0) {
+        CmdPushConstants_(cmd_, layout, vk::SHADER_STAGE_COMPUTE, 0, push_size, push);
+    }
+    CmdDispatch_(cmd_, gx, gy, gz);
+    EndCommandBuffer_(cmd_);
+    vk::SubmitInfo si{};
+    si.sType = vk::ST_SUBMIT_INFO;
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cmd_;
+    if (QueueSubmit_(queue_, 1, &si, fence_) != vk::VK_SUCCESS) {
+        err = "vkQueueSubmit failed";
+        return false;
+    }
+    if (WaitForFences_(device_, 1, &fence_, 1, ~0ull) != vk::VK_SUCCESS) {
+        err = "vkWaitForFences failed";
+        return false;
+    }
+    ResetFences_(device_, 1, &fence_);
+    return true;
 }
 
 VulkanRuntime& igpu_runtime() {

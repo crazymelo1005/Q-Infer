@@ -252,6 +252,11 @@ struct ComputePipelineCreateInfo {
     Pipeline basePipelineHandle;
     std::int32_t basePipelineIndex;
 };
+struct PushConstantRange {
+    Flags stageFlags;
+    std::uint32_t offset;
+    std::uint32_t size;
+};
 struct PipelineLayoutCreateInfo {
     std::uint32_t sType;
     const void* pNext;
@@ -259,7 +264,7 @@ struct PipelineLayoutCreateInfo {
     std::uint32_t setLayoutCount;
     const DescriptorSetLayout* pSetLayouts;
     std::uint32_t pushConstantRangeCount;
-    const void* pPushConstantRanges;
+    const PushConstantRange* pPushConstantRanges;
 };
 struct DescriptorSetLayoutBinding {
     std::uint32_t binding;
@@ -356,6 +361,8 @@ using PfnCmdBindDescriptorSets = void (*)(CommandBuffer, std::uint32_t, Pipeline
                                           std::uint32_t, std::uint32_t, const DescriptorSet*,
                                           std::uint32_t, const std::uint32_t*);
 using PfnCmdDispatch = void (*)(CommandBuffer, std::uint32_t, std::uint32_t, std::uint32_t);
+using PfnCmdPushConstants = void (*)(CommandBuffer, PipelineLayout, Flags, std::uint32_t,
+                                     std::uint32_t, const void*);
 using PfnCmdPipelineBarrier = void (*)(CommandBuffer, Flags, Flags, std::uint32_t,
                                        std::uint32_t, const void*, std::uint32_t,
                                        const BufferMemoryBarrier*, std::uint32_t, const void*);

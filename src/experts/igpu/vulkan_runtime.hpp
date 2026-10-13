@@ -36,15 +36,17 @@ struct VulkanRuntime {
     vk::Device dev() const { return device_; }
     vk::PipelineLayout make_layout(const vk::DescriptorSetLayout* sets, std::uint32_t n,
                                    std::string& err);
-    vk::Pipeline make_pipeline(const char* spv_bytes, std::uint64_t spv_len,
+    vk::Pipeline make_pipeline(const std::uint8_t* spv, std::size_t spv_len,
                                vk::PipelineLayout layout, std::string& err);
     vk::DescriptorSetLayout make_set_layout(const vk::DescriptorSetLayoutBinding* bindings,
                                             std::uint32_t n, std::string& err);
     vk::DescriptorSet make_set(vk::DescriptorSetLayout layout, const vk::Buffer* buffers,
                                std::uint32_t n, std::string& err);
-    // One dispatch: binds pipeline+set, dispatches (x,y,z), waits on a fence.
+    // One dispatch: binds pipeline+set, pushes `push` (push_size bytes), dispatches
+    // (x,y,z), waits on a fence.
     bool dispatch(vk::Pipeline pipeline, vk::PipelineLayout layout, vk::DescriptorSet set,
-                  std::uint32_t gx, std::uint32_t gy, std::uint32_t gz, std::string& err);
+                  const void* push, std::uint32_t push_size, std::uint32_t gx, std::uint32_t gy,
+                  std::uint32_t gz, std::string& err);
 
     // Function pointers (public: the compute layer uses them through helpers).
     vk::PfnCmdPipelineBarrier CmdPipelineBarrier = nullptr;
@@ -98,6 +100,7 @@ private:
     vk::PfnCmdBindPipeline CmdBindPipeline_ = nullptr;
     vk::PfnCmdBindDescriptorSets CmdBindDescriptorSets_ = nullptr;
     vk::PfnCmdDispatch CmdDispatch_ = nullptr;
+    vk::PfnCmdPushConstants CmdPushConstants_ = nullptr;
     vk::PfnEndCommandBuffer EndCommandBuffer_ = nullptr;
     vk::PfnQueueSubmit QueueSubmit_ = nullptr;
     vk::PfnCreateFence CreateFence_ = nullptr;

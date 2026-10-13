@@ -294,6 +294,10 @@ add_executable(test_igpu_runtime tests/test_igpu_runtime.cpp)
 target_link_libraries(test_igpu_runtime PRIVATE qinfer_experts)
 add_test(NAME igpu_runtime COMMAND test_igpu_runtime)
 
+add_executable(test_igpu_gemv tests/test_igpu_gemv.cpp)
+target_link_libraries(test_igpu_gemv PRIVATE qinfer_experts)
+add_test(NAME igpu_gemv COMMAND test_igpu_gemv)
+
 add_executable(test_thread_pool tests/test_thread_pool.cpp)
 target_link_libraries(test_thread_pool PRIVATE qinfer_experts)
 
