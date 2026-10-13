@@ -22,6 +22,7 @@ Then rebuild and run `test_igpu_gemv`. Commit the `.comp`, the `.spv` and
 | `q2_0_gemv.comp` | weights (Q2_0), Q8_0 activation, output | rows, blocks |
 | `iq2s_gemv.comp` | weights (IQ2_S), Q8_K activation, output, grid codebook (1024 x 8 B) | rows, blocks |
 | `iq2xxs_gemv.comp` | weights (IQ2_XXS), Q8_K activation, output, grid codebook (256 x 8 B), sign patterns (128 B) | rows, blocks |
+| `iq1m_gemv.comp` | weights (IQ1_M), Q8_K activation, output, grid codebook (2048 x 8 B, signed) | rows, blocks |
 
 The IQ-format tables are static host data (`src/kernels/*_tables.hpp`), uploaded as plain storage
 buffers rather than hardcoded: the SPIR-V stays small, and the numbers stay single-sourced with the

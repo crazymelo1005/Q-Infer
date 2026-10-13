@@ -1,0 +1,126 @@
+// IQ1_M x Q8_K row GEMV (P3a step 4). Mirrors src/kernels/iq1m.cpp's iq1m_dot_q8k line for line:
+// per IQ1_M block (56 B: 32 B of low grid-index bytes, 16 B of index-high/delta-sign nibbles,
+// 8 B of scales) and its Q8_K activation block (292 B: float d, int8 qs[256], int16 bsums[16] -
+// the host dot never reads bsums, so neither does this shader).
+//
+// Three things set IQ1_M apart from the IQ2 family, all transcribed literally:
+//   - there is NO fp16 d field: the block scale is assembled from the four high nibbles of the
+//     eight scale bytes (iq1m.cpp:32-40), whose low 12 bits hold eight 3-bit sub-scales;
+//   - the grid codebook has 2048 entries (16 KB) of SIGNED int8 values (-1 / 0 / 1), not the
+//     unsigned magnitudes of IQ2_S / IQ2_XXS;
+//   - every codeword carries a +/-0.125 delta, so the dot needs two accumulators: the grid
+//     product sum and the plain activation sum.
+//
+// The codebook is static host data, so it is uploaded as a storage buffer (binding 3) rather than
+// hardcoded. The iGPU has no integer dot product, so the MACs are hand-written.
+//
+// Build: glslangValidator -V iq1m_gemv.comp -o iq1m_gemv.spv (see README.md).
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 0) readonly buffer W { uint w[]; };  // n_rows x n_blocks x 56 B
+layout(std430, binding = 1) readonly buffer Y { uint y[]; };  // n_blocks x 292 B (Q8_K)
+layout(std430, binding = 2) writeonly buffer O { float o[]; };
+layout(std430, binding = 3) readonly buffer G { uint g[]; };  // 2048 x 8 B grid codebook (signed)
+
+layout(push_constant) uniform Pc {
+    uint n_rows;
+    uint n_blocks;
+} pc;
+
+// Byte access over the uint-backed buffers (little-endian, same as the host).
+uint wbyte(uint off) { return (w[off >> 2] >> ((off & 3u) * 8u)) & 0xFFu; }
+uint ybyte(uint off) { return (y[off >> 2] >> ((off & 3u) * 8u)) & 0xFFu; }
+uint gbyte(uint off) { return (g[off >> 2] >> ((off & 3u) * 8u)) & 0xFFu; }
+
+uint wu16(uint off) { return wbyte(off) | (wbyte(off + 1u) << 8); }
+
+// fp16 bits -> fp32, matching kernels/fp16.hpp f16_bits_to_f32.
+float f16(uint h) {
+    uint sgn = (h >> 15) & 1u;
+    uint e = (h >> 10) & 0x1Fu;
+    uint m = h & 0x3FFu;
+    float v = 0.0;
+    if (e == 0u) {
+        v = ldexp(float(m), -24);
+    } else if (e != 31u) {
+        v = ldexp(1.0 + float(m) / 1024.0, int(e) - 15);
+    }
+    return sgn != 0u ? -v : v;
+}
+
+// assembled_d(): the block scale, split across the four u16 of the scales area (iq1m.cpp:32-40).
+float assembled_d(uint sc_base) {
+    uint sc0 = wu16(sc_base);
+    uint sc1 = wu16(sc_base + 2u);
+    uint sc2 = wu16(sc_base + 4u);
+    uint sc3 = wu16(sc_base + 6u);
+    return f16((sc0 >> 12u) | ((sc1 >> 8u) & 0xF0u) | ((sc2 >> 4u) & 0xF00u) | (sc3 & 0xF000u));
+}
+
+// sub_scale(scales, ib, third_pair): one of the two 3-bit sub-scales of the group, as 1..15 odd.
+int sub_scale(uint sc_base, uint ib, uint third_pair) {
+    uint sc = wu16(sc_base + 2u * (ib / 2u));
+    uint shift = 6u * (ib % 2u) + third_pair;
+    return 2 * int((sc >> shift) & 0x7u) + 1;
+}
+
+void main() {
+    uint row = gl_GlobalInvocationID.x;
+    if (row >= pc.n_rows) return;
+    uint row_base = row * pc.n_blocks * 56u;
+    // `precise` forbids contraction/reassociation: without it the Intel compiler folds the
+    // per-block multiplies into the accumulator and the last bits leave the host's path.
+    precise float sumf = 0.0;
+    for (uint i = 0u; i < pc.n_blocks; ++i) {
+        uint blk = row_base + i * 56u;
+        uint qs = blk;
+        uint qh = blk + 32u;
+        uint sc_base = blk + 48u;
+        uint yb = i * 292u;
+        precise int sumi1 = 0;
+        precise int sumi2 = 0;
+        for (uint ib = 0u; ib < 8u; ++ib) {
+            precise int sum1a = 0;  // sum1[0]
+            precise int sum1b = 0;  // sum1[1]
+            precise int sum2a = 0;  // sum2[0]
+            precise int sum2b = 0;  // sum2[1]
+            for (uint l = 0u; l < 4u; ++l) {
+                // grid_index(): qs[l] | ((qh[l/2] << (8 - 4*(l%2))) & 0x700)
+                uint idx = wbyte(qs + 4u * ib + l) |
+                           ((wbyte(qh + 2u * ib + l / 2u) << (8u - 4u * (l % 2u))) & 0x700u);
+                // delta_of(): bit 3 (l even) or bit 7 (l odd) of the same qh byte selects -0.125.
+                bool neg_delta = (wbyte(qh + 2u * ib + l / 2u) &
+                                  ((l % 2u) == 0u ? 0x08u : 0x80u)) != 0u;
+                precise int lsum1 = 0;
+                precise int lsum2 = 0;
+                for (uint j = 0u; j < 8u; ++j) {
+                    // IQ1_M grid bytes are SIGNED (values -1 / 0 / 1), unlike the IQ2 family.
+                    int gw = int(gbyte(idx * 8u + j));
+                    if (gw > 127) gw -= 256;
+                    int q = int(ybyte(yb + 4u + ib * 32u + l * 8u + j));
+                    if (q > 127) q -= 256;  // int8
+                    lsum1 += q * gw;
+                    lsum2 += q;
+                }
+                if (l < 2u) {
+                    sum1a += lsum1;
+                    sum2a += neg_delta ? -lsum2 : lsum2;
+                } else {
+                    sum1b += lsum1;
+                    sum2b += neg_delta ? -lsum2 : lsum2;
+                }
+            }
+            precise int ls1 = sub_scale(sc_base, ib, 0u);
+            precise int ls2 = sub_scale(sc_base, ib, 3u);
+            sumi1 += sum1a * ls1 + sum1b * ls2;
+            sumi2 += sum2a * ls1 + sum2b * ls2;
+        }
+        // The host writes d * y.d * (sumi1 + 0.125 * sumi2) left-associatively (iq1m.cpp:119).
+        precise float prod = assembled_d(sc_base) * uintBitsToFloat(y[yb >> 2u]);
+        precise float inner = float(sumi1) + 0.125 * float(sumi2);
+        sumf += prod * inner;
+    }
+    o[row] = sumf;
+}
