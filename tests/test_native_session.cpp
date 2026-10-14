@@ -44,7 +44,7 @@ int main() {
 
     // Prepare for inference
     if (!session.prepare(/*n_pages=*/64, /*pos_base=*/0,
-                         /*kv_slots=*/0, /*seed=*/42, err)) {
+                         /*kv_slots=*/0, err)) {
         std::fprintf(stderr, "prepare failed: %s\n", err.c_str());
         return 1;
     }
@@ -61,6 +61,9 @@ int main() {
         std::fprintf(stderr, "run_token failed: %s\n", err.c_str());
         return 1;
     }
+
+    // Verify position advanced
+    assert(session.position() == 1);
 
     // Verify logits are non-empty and finite
     const auto& logits = session.logits();

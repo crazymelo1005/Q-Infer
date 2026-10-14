@@ -51,8 +51,6 @@ private:
     std::string model_name_;
     std::int32_t eos_ = -1;
     NativeSession session_;
-
-    void build_step_config();
 };
 
 }  // namespace qinfer::serve

@@ -1,7 +1,6 @@
 #include "serve/native_session.hpp"
 
 #include <algorithm>
-#include <cmath>
 
 namespace qinfer::serve {
 
@@ -19,8 +18,7 @@ bool NativeSession::open_model(const artifact::GgufFile& gguf,
 }
 
 bool NativeSession::prepare(std::uint64_t n_pages, std::uint64_t pos_base,
-                             std::uint64_t kv_slots, int seed,
-                             std::string& err) {
+                             std::uint64_t kv_slots, std::string& err) {
     if (!model_ready_) { err = "model not loaded"; return false; }
     if (!dense::prepare_step_scratch(model_, n_pages, pos_base, scratch_, err))
         return false;

@@ -8,7 +8,6 @@
 #pragma once
 
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -19,7 +18,6 @@
 #include "dense/model_head.hpp"
 #include "dense/kv_window.hpp"
 #include "dense/dense_exec.hpp"
-#include "serve/sampler.hpp"
 
 namespace qinfer::serve {
 
@@ -44,7 +42,7 @@ public:
     // Prepare per-inference state: scratch buffers, KV windows, sampler.
     // Called once per generate() call.
     bool prepare(std::uint64_t n_pages, std::uint64_t pos_base,
-                 std::uint64_t kv_slots, int seed, std::string& err);
+                 std::uint64_t kv_slots, std::string& err);
 
     // Run one token through all 48 layers. Updates R (residual stack) and logits.
     // This is the new session loop — iterates layers, dispatches dense to GPU

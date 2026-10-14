@@ -1,31 +1,19 @@
 #include "serve/native_backend.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <filesystem>
 
 #include "dense/step_loop.hpp"
 #include "serve/prompt.hpp"
 #include "serve/sampler.hpp"
 
-#ifdef QINFER_CUDA_BUILD
-#include "dense/dense_exec_cuda.hpp"
-#endif
-
 namespace qinfer::serve {
 
 NativeBackend::~NativeBackend() = default;
 
-void NativeBackend::build_step_config() {
-    // StepConfig fields mirror FacadeConfig; NativeSession reads from its own
-    // internal StepConfig (set via open_model). We just need to wire dense_exec
-    // if CUDA build is active.
-#ifdef QINFER_CUDA_BUILD
-    cfg_.dense_exec = dense::dense_exec_cuda();
-#else
-    cfg_.dense_exec = dense::DenseExec{};
-#endif
-}
+// build_step_config removed: dense_exec wiring is handled by main.cpp via
+// FacadeConfig (same as Engine). NativeBackend::open() copies cfg into cfg_,
+// so cfg_.dense_exec already reflects --gpu (or stays empty for CPU-only).
 
 bool NativeBackend::open(const FacadeConfig& cfg, NativeBackend& out,
                           std::string& err) {
@@ -49,9 +37,7 @@ bool NativeBackend::open(const FacadeConfig& cfg, NativeBackend& out,
     // Token embed
     if (!dense::build_token_embed(out.gguf_, cfg.n_embd, out.te_, err)) return false;
 
-    // Build step config and load model
-    out.build_step_config();
-
+    // Load model (dense_exec already populated by main.cpp via cfg if --gpu)
     dense::StepConfig sc{};
     sc.n_embd = cfg.n_embd;
     sc.hc = cfg.hc;
@@ -96,7 +82,7 @@ bool NativeBackend::generate(const std::vector<std::int32_t>& prompt,
          cfg_.idx_block - 1) / cfg_.idx_block;
 
     // Reuse session (model already loaded in open()). Just re-prepare scratch.
-    if (!session_.prepare(n_pages, 0, cfg_.kv_slots, opt.seed, err)) return false;
+    if (!session_.prepare(n_pages, 0, cfg_.kv_slots, err)) return false;
 
     Sampler sampler(opt.seed);
     res = GenResult{};
