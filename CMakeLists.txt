@@ -259,6 +259,12 @@ target_link_libraries(expert_cache_replay PRIVATE qinfer_storage)
 add_executable(gguf_tensors measure/gguf_tensors.cpp)
 target_link_libraries(gguf_tensors PRIVATE qinfer_artifact)
 
+# P3a step 7 falsification benchmark: iGPU GEMV shaders vs the host kernels on the real batch
+# shape. Needs a machine to itself (and an iGPU to be interesting), so it is not registered as a
+# test; the gate only has to compile it.
+add_executable(igpu_gemv_bench measure/igpu_gemv_bench.cpp)
+target_link_libraries(igpu_gemv_bench PRIVATE qinfer_experts)
+
 # 线程池与主机内核的伸缩微基准（流式带宽 / 分派开销 / 真实 GEMV）：要独占机器才准，故不进 ctest。
 add_executable(thread_pool_bench measure/thread_pool_bench.cpp)
 target_link_libraries(thread_pool_bench PRIVATE qinfer_experts qinfer_scheduling)

@@ -28,7 +28,7 @@
 | [`design/adr/ADR-002`](design/adr/ADR-002-compute-unhit-experts-in-place.md) | 未命中专家：就地算还是搬回显存 | 接受 |
 | [`design/adr/ADR-003`](design/adr/ADR-003-ngram-table-explicit-prefetch.md) | 表访问：显式预取还是交给页缓存 | 被 ADR-007 取代（G-04 不通过） |
 | [`design/adr/ADR-004`](design/adr/ADR-004-consumer-dual-gpu-no-tensor-parallel.md) | 双卡：按层切分还是张量并行 | 接受 |
-| [`design/adr/ADR-005`](design/adr/ADR-005-igpu-npu-as-coprocessor.md) | 核显与 NPU：是否参与专家计算 | 接受（条件性：G-07） |
+| [`design/adr/ADR-005`](design/adr/ADR-005-igpu-npu-as-coprocessor.md) | 核显与 NPU：是否参与专家计算 | 第一节接受；第二节（专家分担）由 [ADR-019](design/adr/ADR-019-igpu-not-for-experts.md) 判为不启用 |
 | [`design/adr/ADR-006`](design/adr/ADR-006-precision-policy-nvfp4-fp8-kv.md) | 精度：权重、KV 与索引器的档位选择 | 接受 |
 | [`design/adr/ADR-007`](design/adr/ADR-007-ngram-table-on-demand-read.md) | 表行访问：预取还是按需读 | 接受（取代 ADR-003） |
 | [`design/adr/ADR-008`](design/adr/ADR-008-implementation-stack-and-kernel-reuse.md) | 实现栈、内核复用口径与许可 | 接受 |
@@ -40,6 +40,7 @@
 | [`design/adr/ADR-016-vendored-strata-backend.md`](design/adr/ADR-016-vendored-strata-backend.md) | 计算后端：厂商化 Strata 引擎作后端（进程边界=依赖边界） | 接受 |
 | [`design/adr/ADR-017-serve-engine-seam.md`](design/adr/ADR-017-serve-engine-seam.md) | 服务层引擎缝：`Backend` 接口与 `--backend strata|inhouse` | 接受 |
 | [`design/adr/ADR-018-default-backend-strata.md`](design/adr/ADR-018-default-backend-strata.md) | 默认计算后端切到厂商化引擎（P2 验收后） | 接受 |
+| [`design/adr/ADR-019-igpu-not-for-experts.md`](design/adr/ADR-019-igpu-not-for-experts.md) | 核显不参与未命中专家计算（P3a 证伪点读数：设备慢于 CPU 池） | 接受（关闭 ADR-005 第二节） |
 | [glossary.md](glossary.md) | 术语的唯一口径 | 完成 |
 | [hardware.md](hardware.md) | 两套测试环境的硬件规格 | 完成 |
 | [research/01-strata-engine.md](research/01-strata-engine.md) | 参考范本引擎的原理与边界 | 完成 |
