@@ -7,9 +7,12 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <unistd.h>
 
+#include "engine/engine_protocol.hpp"
 #include "httplib.h"
 #include "serve/json.hpp"
+#include "serve/media_fetch.hpp"
 
 namespace qinfer::serve {
 
@@ -276,6 +279,19 @@ Serve::Serve(ServeConfig cfg, std::shared_ptr<Backend> eng)
     // no data); sampling spans the process lifetime, destruction joins via tel_'s dtor.
     tel_ = std::make_unique<Telemetry>([this] { return telemetry_extra(); });
     tel_->start();
+    // M5b: start vision encoder if configured.
+    if (!cfg_.mmproj_path.empty()) {
+        vision_ = std::make_shared<engine::VisionProcess>();
+        engine::ProcessConfig pcfg;
+        pcfg.exe = cfg_.vision_binary.empty() ? "build-vision/bin/qinfer-vision" : cfg_.vision_binary;
+        pcfg.args = {"--mmproj", cfg_.mmproj_path, "--model", cfg_.model_path};
+        std::string verr;
+        if (!engine::VisionProcess::start(pcfg, *vision_, verr)) {
+            // Log but don't fail: vision is optional, the server can still serve text.
+            std::fprintf(stderr, "vision encoder failed to start: %s\n", verr.c_str());
+            vision_.reset();
+        }
+    }
 }
 
 Serve::~Serve() { stop(); }
@@ -394,23 +410,46 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
             return;
         }
         std::string text;
+        std::vector<std::string> image_paths;   // M5b: collected image_url paths for encoding
         const Json* content = m.find("content");
         if (content != nullptr && !content->is_null()) {
             if (content->is_str()) {
                 text = content->str;
             } else if (content->is_arr()) {
                 for (const Json& blk : content->arr) {
-                    if (!blk.is_obj() || !blk.find("type") || !blk.find("type")->is_str() ||
-                        blk.find("type")->str != "text") {
-                        send_json(res, 400, openai_err("content block accepts only {type: text} (images and other multimodal deferred to M2)", "invalid_request_error", "messages"));
+                    if (!blk.is_obj() || !blk.find("type") || !blk.find("type")->is_str()) {
+                        send_json(res, 400, openai_err("content block missing type", "invalid_request_error", "messages"));
                         return;
                     }
-                    const Json* t = blk.find("text");
-                    if (t == nullptr || !t->is_str()) {
-                        send_json(res, 400, openai_err("Text block missing text", "invalid_request_error", "messages"));
+                    const std::string btype = blk.find("type")->str;
+                    if (btype == "text") {
+                        const Json* t = blk.find("text");
+                        if (t == nullptr || !t->is_str()) {
+                            send_json(res, 400, openai_err("Text block missing text", "invalid_request_error", "messages"));
+                            return;
+                        }
+                        text += t->str;
+                    } else if (btype == "image_url") {
+                        // M5b: accept image_url parts when vision is configured.
+                        if (!vision_) {
+                            send_json(res, 400, openai_err("vision not configured (server started without --mmproj)", "invalid_request_error", "messages"));
+                            return;
+                        }
+                        const Json* iu = blk.find("image_url");
+                        if (iu == nullptr || !iu->is_obj()) {
+                            send_json(res, 400, openai_err("image_url block missing image_url object", "invalid_request_error", "messages"));
+                            return;
+                        }
+                        const Json* url = iu->find("url");
+                        if (url == nullptr || !url->is_str()) {
+                            send_json(res, 400, openai_err("image_url missing url", "invalid_request_error", "messages"));
+                            return;
+                        }
+                        image_paths.push_back(url->str);
+                    } else {
+                        send_json(res, 400, openai_err("content block accepts only text/image_url (other types not supported)", "invalid_request_error", "messages"));
                         return;
                     }
-                    text += t->str;
                 }
             } else {
                 send_json(res, 400, openai_err("content must be a string or block array", "invalid_request_error", "messages"));
@@ -426,7 +465,47 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
                 return;
             }
         }
-        if (text.empty() && calls.empty()) continue;   // empty messages (tool placeholders etc.) are filtered; the templater ignores them
+        if (text.empty() && calls.empty() && image_paths.empty()) continue;   // empty messages (tool placeholders etc.) are filtered; the templater ignores them
+        // M5b: encode images and insert vision tokens into the text.
+        if (!image_paths.empty()) {
+            std::string vision_tokens;
+            for (const std::string& url : image_paths) {
+                // Fetch media to a temp file.
+                char tmp_img[] = "/tmp/qinfer_img_XXXXXX";
+                const int fd = ::mkstemp(tmp_img);
+                if (fd < 0) {
+                    send_json(res, 500, openai_err("failed to create temp file for image", "server_error", nullptr));
+                    return;
+                }
+                ::close(fd);
+                const std::string tmp_sve = std::string(tmp_img) + ".sve1";
+                auto fetch_result = fetch_media(url, tmp_img, cfg_.media_root);
+                if (!fetch_result.ok) {
+                    std::filesystem::remove(tmp_img);
+                    send_json(res, 400, openai_err("failed to fetch image: " + fetch_result.err, "invalid_request_error", "messages"));
+                    return;
+                }
+                // Encode the image.
+                std::string enc_err;
+                engine::EncodeResult enc_result;
+                vision_->encode(tmp_img, tmp_sve, enc_err, enc_result);
+                std::filesystem::remove(tmp_img);
+                if (!enc_result.ok) {
+                    std::filesystem::remove(tmp_sve);
+                    send_json(res, 500, openai_err("vision encoding failed: " + enc_result.err, "server_error", nullptr));
+                    return;
+                }
+                // Insert vision token placeholders (one per encoded token).
+                // The template will render these as <|image_pad|> tokens.
+                for (int i = 0; i < enc_result.n_tokens; ++i) {
+                    vision_tokens += "<|image_pad|>";
+                }
+                std::filesystem::remove(tmp_sve);
+            }
+            // Prepend vision tokens to the text (they'll be rendered as part of the user message).
+            text = vision_tokens + text;
+        }
+        if (text.empty() && calls.empty()) continue;
         conv.emplace_back(Message{.role = r, .content = std::move(text), .tool_calls = std::move(calls)});
     }
     // tools → internal tool shape (normalize_tools' OpenAI unwrapping); a bad one is 400 (errors must come before enqueue).

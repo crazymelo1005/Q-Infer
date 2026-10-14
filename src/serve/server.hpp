@@ -29,6 +29,7 @@
 #include "serve/scheduler.hpp"
 #include "serve/telemetry.hpp"
 #include "serve/toolcall.hpp"
+#include "engine/vision_process.hpp"
 
 namespace httplib {
 class Server;
@@ -73,6 +74,11 @@ struct ServeConfig {
     std::vector<std::string> engine_args;    // --engine-arg ARG, repeatable (order preserved)
     // Facade geometry passthrough (defaults = real-model derived values; integration tests override).
     FacadeConfig facade;
+    // Vision (M5b): optional image encoder. When mmproj_path is non-empty, the server starts
+    // a VisionProcess and accepts image_url parts in chat requests.
+    std::string mmproj_path;           // --mmproj: path to mmproj.gguf
+    std::string vision_binary;         // --vision-binary: path to qinfer-vision (default: build-vision/bin/qinfer-vision)
+    std::string media_root;            // --media-root: allowed prefix for file:// URLs
 };
 
 class Serve {
@@ -132,6 +138,9 @@ private:
     // text port; observed by record_request at completion, internally locked,
     // snapshotted on HTTP threads — unrelated to the last_ critical section).
     Latencies lat_;
+    // Vision encoder (M5b): null when --mmproj is not configured. Shared pointer so the
+    // HTTP threads can access it without locking (VisionProcess has its own internal mutex).
+    std::shared_ptr<engine::VisionProcess> vision_;
     // /metrics totals (updated in the same critical section as last_ —
     // record_request is the only writer from HTTP threads; /metrics holds last_mu_
     // when reading, so no race).

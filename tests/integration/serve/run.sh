@@ -738,5 +738,22 @@ else
 fi
 rm -f /tmp/backend-default.log
 
+# ---- M5b: vision / image_url handling ----
+# Start a fresh server for vision tests.
+start --api-key testkey || exit 1
+
+# 30. image_url parts are rejected with a clear message when vision is not configured
+#     (the fixture has no --mmproj, so VisionProcess is not started).
+code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
+  -X POST "http://$HOST:$PORT/v1/chat/completions" \
+  -d '{"messages":[{"role":"user","content":[{"type":"text","text":"What is this?"},{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw0KGgo="}}]}],"max_tokens":8,"temperature":0}')
+if [ "$code" = 400 ] && grep -q "vision" "$R"; then
+  ok "30 image_url rejected when vision not configured (400 + vision message)"
+else
+  bad "30 image_url without vision: status $code, body $(head -c 200 "$R")"
+fi
+
+stop
+
 echo "serve integration: passed $PASS, failed $FAIL"
 [ "$FAIL" = 0 ]
