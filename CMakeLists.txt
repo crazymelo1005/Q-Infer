@@ -118,6 +118,8 @@ add_library(qinfer_experts
   src/experts/igpu/igpu_expert.cpp
   # Strata iGPU pool: planar Q2_0 pack format adapter (view over the blob).
   src/experts/igpu/strata_pack_adapter.cpp
+  # Strata iGPU pool: pool class + hybrid dispatcher (Task 4).
+  src/experts/igpu/igpu_expert_pool.cpp
 )
 target_include_directories(qinfer_experts PUBLIC src)
 target_link_libraries(qinfer_experts PUBLIC qinfer_artifact qinfer_kernels qinfer_storage
@@ -338,6 +340,11 @@ add_test(NAME igpu_expert COMMAND test_igpu_expert)
 add_executable(test_strata_pack_adapter tests/test_strata_pack_adapter.cpp)
 target_link_libraries(test_strata_pack_adapter PRIVATE qinfer_experts)
 add_test(NAME strata_pack_adapter COMMAND test_strata_pack_adapter)
+
+# Strata iGPU pool: pool init, hybrid routing, and ActQ quantization tests.
+add_executable(test_igpu_expert_pool tests/test_igpu_expert_pool.cpp)
+target_link_libraries(test_igpu_expert_pool PRIVATE qinfer_experts)
+add_test(NAME igpu_expert_pool COMMAND test_igpu_expert_pool)
 
 add_executable(test_thread_pool tests/test_thread_pool.cpp)
 target_link_libraries(test_thread_pool PRIVATE qinfer_experts)
