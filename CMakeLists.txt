@@ -489,6 +489,11 @@ add_executable(test_engine_process tests/test_engine_process.cpp)
 target_link_libraries(test_engine_process PRIVATE qinfer_engine)
 add_test(NAME engine_process COMMAND test_engine_process)
 
+target_sources(qinfer_engine PRIVATE src/engine/vision_process.cpp)
+add_executable(test_vision_process tests/test_vision_process.cpp)
+target_link_libraries(test_vision_process PRIVATE qinfer_engine)
+add_test(NAME vision_process COMMAND test_vision_process)
+
 # Protocol-level test double (no add_test: a mock is not a test). EngineDriver tests locate it
 # via a MOCK_ENGINE_PATH compile definition, so they need no arguments.
 add_executable(mock_strata_engine tests/mock_strata_engine.cpp)
