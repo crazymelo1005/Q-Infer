@@ -51,6 +51,7 @@ add_library(qinfer_serve
   src/serve/backend_strata.cpp
   src/serve/media_fetch.cpp
   src/serve/native_session.cpp
+  src/serve/native_backend.cpp
 )
 target_include_directories(qinfer_serve PUBLIC src)
 target_link_libraries(qinfer_serve PUBLIC qinfer_text qinfer_dense qinfer_ple qinfer_storage qinfer_kernels qinfer_engine)
@@ -412,6 +413,9 @@ target_link_libraries(test_step_record PRIVATE qinfer_experts)
 add_executable(test_native_session tests/test_native_session.cpp)
 target_link_libraries(test_native_session PRIVATE qinfer_serve qinfer_dense qinfer_artifact)
 
+add_executable(test_native_backend tests/test_native_backend.cpp)
+target_link_libraries(test_native_backend PRIVATE qinfer_serve)
+
 enable_testing()
 add_test(NAME page_table COMMAND test_page_table)
 add_test(NAME budget_arbiter COMMAND test_budget_arbiter)
@@ -480,6 +484,7 @@ add_test(NAME kv_window COMMAND test_kv_window)
 add_test(NAME bf16_gemv COMMAND test_bf16_gemv)
 add_test(NAME step_record COMMAND test_step_record)
 add_test(NAME native_session COMMAND test_native_session)
+add_test(NAME native_backend COMMAND test_native_backend)
 
 # ---- 引擎后端协议（厂商化 Strata；P0/P1）----
 # qinfer_engine 只依赖标准库与 pthreads，**不**并入 qinfer_serve：进程边界=依赖边界（ADR-008）。
