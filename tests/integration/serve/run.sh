@@ -291,13 +291,13 @@ curl -s -H "$H" "http://$HOST:$PORT/v1/status" > "$R"
 [ "$(jget "$R" "d['machine']['at'] > 0")" = True ] \
   && ok "/v1/status machine.at" || bad "/v1/status machine: $(head -c 200 "$R")"
 
-# 13. /metrics: all key types, 10 series, history has data, totals/conversation_cache/time shapes.
+# 13. /metrics: all key types, 11 series (incl. igpu_freq_mhz), history has data, totals/conversation_cache/time shapes.
 # conversation_cache reflects the real state once the token-prefix cache (--conversation-cache default 64) lands;
 # before this case there are already sequential duplicate requests (case 129→136, same content "c"), so
 # hits ≥ 1 and totals.reused ≥ 1 are deterministic.
 curl -s -H "$H" "http://$HOST:$PORT/metrics" > "$R"
 [ "$(jget "$R" "d['engine']['model']")" ] && [ "$(jget "$R" "d['live']['state']")" ] \
-  && [ "$(jget "$R" "len(d['history'])")" = 10 ] \
+  && [ "$(jget "$R" "len(d['history'])")" = 11 ] \
   && [ "$(jget "$R" "len(d['history']['cpu']) >= 1")" = True ] \
   && [ "$(jget "$R" "d['requests_kept']")" = 100 ] \
   && [ "$(jget "$R" "d['totals']['reused'] >= 1")" = True ] \

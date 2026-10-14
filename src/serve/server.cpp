@@ -85,13 +85,21 @@ Json record_summary_json(const RequestRecord& r) {
     o.set("path", Json::strv(r.path));
     o.set("model", Json::strv(r.model));
     o.set("created", Json::numv(r.created));
+    o.set("time", Json::numv(r.created));  // alias for frontend
     o.set("state", Json::strv(r.state));
+    // Map state to finish reason for frontend badge display
+    const std::string finish = r.state == "error" ? "error"
+                             : r.state == "cancelled" ? "cancel"
+                             : r.state == "disconnected" ? "disconnect"
+                             : "stop";
+    o.set("finish", Json::strv(finish));
     o.set("stream", Json::boolv(r.stream));
     o.set("response_format", r.response_format.empty()
                                  ? Json::nullv() : Json::strv(r.response_format));
     o.set("queue_s", Json::numv(r.queue_s));
     o.set("first_token_s", r.first_token_s > 0 ? Json::numv(r.first_token_s) : Json::nullv());
     o.set("wallclock_s", Json::numv(r.wallclock_s));
+    o.set("duration_s", Json::numv(r.wallclock_s));  // alias for frontend
     o.set("decode_tok_s", Json::numv(r.decode_tok_s));
     o.set("prompt_tokens", Json::numv(static_cast<double>(r.prompt_tokens)));
     o.set("output_tokens", Json::numv(static_cast<double>(r.output_tokens)));
@@ -1749,7 +1757,7 @@ void Serve::register_routes() {
         Json hs = Json::objv();
         hs.set("gpu_name", Json::strv(ts.stat.gpu_name));
         hs.set("gpu_count", Json::numv(static_cast<double>(ts.stat.gpu_count)));
-        hs.set("gpu_note", Json::nullv());   // always empty in v0 (see the comment in telemetry.hpp)
+        hs.set("gpu_note", ts.stat.gpu_note.empty() ? Json::nullv() : Json::strv(ts.stat.gpu_note));
         hs.set("cpu_name", Json::strv(ts.stat.cpu_name));
         hs.set("cores", Json::numv(static_cast<double>(ts.stat.cores)));
         hs.set("threads", Json::numv(static_cast<double>(ts.stat.threads)));

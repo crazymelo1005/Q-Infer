@@ -18,7 +18,7 @@
 // - 多卡聚合（NVML 多卡或 AMD 多节点）：mem/power/pcie 流量取总和、util 取均值、temp 取最高、
 //   pcie_gen/width 取第一张卡（Strata 同款：聚合键表里没有 gen/width）。
 // - history：10 系列（键表见 push_history），每样一次各推一个值（读不到推 nullopt），封顶 60。
-// - gpu_note/cores 在 v0 恒空/恒 0（见头文件注释），但键位保留，T14 照常序列化。
+// - gpu_note 在 v0 恒空（见头文件注释），cores 从 /proc/cpuinfo 物理核心数填入。
 #include "serve/telemetry.hpp"
 
 #include "experts/igpu/vulkan_runtime.hpp"
@@ -32,6 +32,7 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -367,6 +368,28 @@ Telemetry::Telemetry(ExtraFn extra, std::vector<int> gpu_filter) : extra_(std::m
         }
     }
     stat_.threads = static_cast<int>(std::thread::hardware_concurrency());
+    // Count physical cores from /proc/cpuinfo (unique "core id" lines).
+    {
+        std::ifstream ci2("/proc/cpuinfo");
+        std::string ln;
+        std::set<std::string> seen_cores;
+        int cur_phys_id = -1;
+        while (std::getline(ci2, ln)) {
+            if (ln.rfind("physical id", 0) == 0) {
+                auto pos = ln.find(':');
+                if (pos != std::string::npos)
+                    cur_phys_id = std::stoi(ln.substr(pos + 1));
+            } else if (ln.rfind("core id", 0) == 0) {
+                auto pos = ln.find(':');
+                if (pos != std::string::npos) {
+                    std::string key = std::to_string(cur_phys_id) + ":" + ln.substr(pos + 1);
+                    seen_cores.insert(key);
+                }
+            }
+        }
+        if (!seen_cores.empty())
+            stat_.cores = static_cast<int>(seen_cores.size());
+    }
 
     // Stage C: the integrated GPU. Availability and the device name come from
     // the Vulkan runtime probe (the same one the expert worker uses); the load
@@ -392,8 +415,8 @@ Telemetry::Telemetry(ExtraFn extra, std::vector<int> gpu_filter) : extra_(std::m
             if (std::filesystem::exists(base + "rps_act_freq_mhz", e)) {
                 igpu_freq_path_ = base + "rps_act_freq_mhz";
                 igpu_freq_max_path_ = base + "rps_max_freq_mhz";
+                break;
             }
-            break;
         }
     }
 }
@@ -607,7 +630,8 @@ void Telemetry::collect_cpu_ram_disk(std::map<std::string, std::optional<double>
 void Telemetry::push_history() {
     static const char* const kSeries[] = {
         "gpu_util", "gpu_mem_used", "gpu_temp", "gpu_power", "gpu_pcie_rx_mb",
-        "cpu", "ram_used", "disk_read_mb", "tok_s", "prefill_tok_s_mean"};
+        "cpu", "ram_used", "disk_read_mb", "tok_s", "prefill_tok_s_mean",
+        "igpu_freq_mhz"};
     std::lock_guard<std::mutex> lk(mu_);
     for (const char* key : kSeries) {
         auto& vec = hist_[key];

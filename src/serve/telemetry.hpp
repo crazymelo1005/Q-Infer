@@ -52,7 +52,7 @@ struct TelemetryStatic {
     int gpu_count = 0;
     std::string gpu_note;   // v0 恒空（AMD on Windows 的说明；本仓库 v0 无该用例）
     std::string cpu_name;   // /proc/cpuinfo "model name"
-    int cores = 0;          // v0 恒 0（Strata 无 psutil 时 cores 也是 null；M2 按拓扑填）
+    int cores = 0;          // physical core count from /proc/cpuinfo (unique core id entries)
     int threads = 0;        // std::thread::hardware_concurrency()
     // Stage C: the integrated GPU (Vulkan compute for unhit experts). name from
     // the runtime probe, note carries its reason when unavailable; freq series
