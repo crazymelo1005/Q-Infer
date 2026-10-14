@@ -5,6 +5,7 @@
 #include "scheduling/thread_pool.hpp"
 #include "serve/backend_strata.hpp"
 #include "serve/facade.hpp"
+#include "serve/native_backend.hpp"
 #include "serve/prompt.hpp"
 #include "serve/server.hpp"
 #include "text/tokenizer.hpp"
@@ -148,11 +149,12 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     c.kv_resident = static_cast<std::uint64_t>(arg_int(a, "--kv-resident", 0, err));
     if (!parse_gpu(a, c.gpu_auto, c.gpu_devices, err)) return {};
     c.reject_after = static_cast<std::uint64_t>(arg_int(a, "--reject-after", 0, err));
-    // --backend strata|inhouse (P2): strata drives the vendored engine over its line protocol.
+    // --backend strata|inhouse|native (P2): strata drives the vendored engine over its line protocol;
+    // native uses the self-written NativeBackend (Phase 1 native engine).
     if (a.count("--backend")) {
         const std::string v = a["--backend"];
-        if (v != "inhouse" && v != "strata") {
-            err = "--backend needs inhouse or strata, got \"" + v + "\"";
+        if (v != "inhouse" && v != "strata" && v != "native") {
+            err = "--backend needs inhouse, strata, or native, got \"" + v + "\"";
             return {};
         }
         c.backend = v;
@@ -166,7 +168,7 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     c.engine_args = std::move(engine_args);
     if (c.backend == "strata" && c.engine_exe.empty()) {
         err = "--backend defaults to strata, which needs --engine-exe <path to the vendored "
-              "engine binary>; pass --backend inhouse to use the in-house engine instead";
+              "engine binary>; pass --backend inhouse or --backend native to use a built-in engine";
         return {};
     }
     if (c.backend != "strata" && !c.engine_args.empty()) {
@@ -218,7 +220,7 @@ int main(int argc, char** argv) {
                              "[--idx-dim N] [--idx-top-k N] [--idx-block N] [--max-context N] "
                              "[--cache-slots N] [--cache-byte-budget N] [--ple-table P] "
                              "[--ple-budget-bytes N] [--kv-slots N] [--kv-resident N] "
-                             "[--conversation-cache N] [--backend inhouse|strata] "
+                             "[--conversation-cache N] [--backend inhouse|strata|native] "
                              "[--engine-exe P] [--engine-arg A]...\n"
                              "        --threads N is the HTTP thread pool; --compute-threads N is the "
                              "inference thread pool (default: half the physical cores, capped at 8; "
@@ -226,7 +228,7 @@ int main(int argc, char** argv) {
                              "(en default, zh optional); --gpu selects CUDA devices (auto = all, "
                              "0,1 = explicit; requires a CUDA-enabled build); --backend defaults to "
                              "strata and then needs --engine-exe (pass --backend inhouse to run the "
-                             "in-house engine)\n");
+                             "in-house engine, or --backend native for the self-written native engine)\n");
         return 2;
     }
     // --reject-after: integration-test-only knob for deterministic 503s (reject every
@@ -242,8 +244,8 @@ int main(int argc, char** argv) {
 #endif
     if (cfg.backend == "strata" && (cfg.gpu_auto || !cfg.gpu_devices.empty())) {
         std::fprintf(stderr,
-                     "--gpu applies to the in-house backend only; pass --backend inhouse, or give "
-                     "the strata engine its devices through --engine-arg\n");
+                     "--gpu applies to the in-house and native backends only; pass --backend inhouse "
+                     "or --backend native, or give the strata engine its devices through --engine-arg\n");
         return 1;
     }
     std::shared_ptr<Backend> eng;
@@ -278,6 +280,15 @@ int main(int argc, char** argv) {
             return 1;
         }
         eng = b;
+    } else if (cfg.backend == "native") {
+        // NativeBackend: self-written backend using NativeSession (Phase 1 native engine).
+        // Loads model, tokenizer, and chat template from GGUF; supports --gpu for CUDA offload.
+        auto nb = std::make_shared<NativeBackend>();
+        if (!NativeBackend::open(cfg.facade, *nb, err)) {
+            std::fprintf(stderr, "Native backend load failed: %s\n", err.c_str());
+            return 1;
+        }
+        eng = nb;
     } else {
         auto e = std::make_shared<Engine>();
         if (!Engine::open(cfg.facade, *e, err)) {

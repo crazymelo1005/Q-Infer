@@ -67,7 +67,8 @@ struct ServeConfig {
                                          // the oldest pages stream back to the host store)
     std::uint64_t reject_after = 0;      // 0 = off; >0 = 503 every request from the Nth (integration tests; see main)
     // Compute backend (P2, ADR-017): "strata" = the vendored engine driven over its line protocol
-    // (the default now that P2's end-to-end A/B is green), "inhouse" = the in-house Engine.
+    // (the default now that P2's end-to-end A/B is green), "inhouse" = the in-house Engine,
+    // "native" = the self-written NativeBackend (Phase 1 native engine).
     // strata needs engine_exe; engine_args are strata-only.
     std::string backend = "strata";
     std::string engine_exe;                  // --engine-exe: path to the vendored engine binary
@@ -106,7 +107,7 @@ private:
     TelemetryExtra telemetry_extra() const;   // T13: engine-side metrics per telemetry sample (accumulated in record_request)
 
     ServeConfig cfg_;
-    std::shared_ptr<Backend> eng_;   // the engine seam (ADR-017): in-house Engine or StrataBackend
+    std::shared_ptr<Backend> eng_;   // the engine seam (ADR-017): in-house Engine, StrataBackend, or NativeBackend
     Scheduler sched_;
     PromptCache prompt_cache_;   // token-prefix cache: hits skip engine_mu_ (source of /metrics conversation_cache)
     std::mutex engine_mu_;             // see file header: v0 serializes engine access (encode + generate)
