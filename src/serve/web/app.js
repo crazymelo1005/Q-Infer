@@ -632,7 +632,7 @@ function exportChat() {
 
 /* ---- Poll /metrics every second: status line and dot ---- */
 function fmtRate(v) {
-  if (v === null || v === undefined) return "—";
+  if (v === null || v === undefined) return "\u2014";
   return v >= 1000 ? (v / 1000).toFixed(1) + "k" : v.toFixed(1);
 }
 
@@ -643,15 +643,27 @@ async function pollMetrics() {
     const d = await res.json();
     window.lastMetrics = d;
     const l = d.live || {};
+    const hw = d.hardware || {};
     const state = l.state || "?";
     const queued = l.queued === undefined ? 0 : l.queued;
     const tok = fmtRate(l.tok_s);
-    $("chat-state").textContent = (tr("mon.stateLine") + " " + state + " · " + tr("mon.queued") + " " + queued + " · " + tok + " tok/s");
+    var chatState = $("chat-state");
+    if (chatState) chatState.textContent = (tr("mon.stateLine") + " " + state + " \u00b7 " + tr("mon.queued") + " " + queued + " \u00b7 " + tok + " tok/s");
     setStatusDot(true);
-    if (state !== "idle" && state !== "?") setPill(state, tr("mon.stateLine") + " " + state + " · " + tok + " tok/s");
+    if (state !== "idle" && state !== "?") setPill(state, tr("mon.stateLine") + " " + state + " \u00b7 " + tok + " tok/s");
+    // Push sparkline data even when monitor tab isn't visible, so switching to it shows history
+    pushSpark("tok_s", l.tok_s);
+    pushSpark("gpu_util", hw.gpu_util);
+    pushSpark("gpu_mem_used", hw.gpu_mem_used);
+    pushSpark("gpu_temp", hw.gpu_temp);
+    pushSpark("gpu_power", hw.gpu_power);
+    pushSpark("gpu_pcie_rx_mb", hw.gpu_pcie_rx_mb);
+    pushSpark("cpu", hw.cpu);
+    pushSpark("disk_read_mb", hw.disk_read_mb);
   } catch (e) {
     setStatusDot(false);
-    $("chat-state").textContent = tr("mon.unreachable");
+    var chatStateEl = $("chat-state");
+    if (chatStateEl) chatStateEl.textContent = tr("mon.unreachable");
     setPill("error", tr("mon.unreachable"));
   }
 }
@@ -681,6 +693,12 @@ function initCommon() {
   if (th) {
     setTheme(currentTheme());   // sync the icon
     th.addEventListener("click", toggleTheme);
+  }
+  // About page dark theme toggle switch
+  var dt = $("dark-toggle");
+  if (dt) {
+    dt.setAttribute("aria-checked", String(currentTheme() === "dark"));
+    dt.addEventListener("click", toggleTheme);
   }
 }
 
@@ -970,9 +988,10 @@ function initChat() {
   });
 }
 
-/* ---- Monitor: four cards + request list/detail + 10-series sparkline ---- */
+/* ---- Monitor: state card + metric grid + context gauge + requests + conv cache ---- */
 function kvTable(tbodyId, rows) {
   const tb = $(tbodyId);
+  if (!tb) return;
   tb.innerHTML = "";
   rows.forEach(function (r) {
     const tr = document.createElement("tr");
@@ -986,106 +1005,183 @@ function kvTable(tbodyId, rows) {
   });
 }
 
+// Metric card definitions for the 4-column grid
+var MON_METRICS = [
+  {key: "speed", label: "Speed", icon: "i-gauge", unit: "t/s", series: "tok_s"},
+  {key: "gpu", label: "GPU load", icon: "i-gpu", unit: "%", series: "gpu_util", max: 100},
+  {key: "vram", label: "VRAM", icon: "i-layers", unit: "GB", series: "gpu_mem_used"},
+  {key: "temp", label: "GPU temp", icon: "i-thermometer", unit: "\u00b0C", series: "gpu_temp", tone: "warn"},
+  {key: "power", label: "Power", icon: "i-bolt", unit: "W", series: "gpu_power"},
+  {key: "pcie", label: "PCIe", icon: "i-link", unit: "", series: "gpu_pcie_rx_mb", tone: "info"},
+  {key: "cpu", label: "CPU", icon: "i-cpu", unit: "%", series: "cpu", max: 100},
+  {key: "disk", label: "Disk read", icon: "i-disk", unit: "MB/s", series: "disk_read_mb", tone: "info"},
+];
+
+function initMetricCards() {
+  var el = $("metrics");
+  if (!el) return;
+  el.innerHTML = MON_METRICS.map(function (m) {
+    var toneAttr = m.tone ? ' data-tone="' + m.tone + '"' : '';
+    return '<div class="st-card metric-card"><div class="st-metric">' +
+      '<span class="st-metric__label"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#' + m.icon + '"/></svg>' + esc(m.label) + '</span>' +
+      '<span class="st-metric__value" id="mv-' + m.key + '">\u2013</span>' +
+      '<span class="st-metric__sub" id="ms-' + m.key + '"></span>' +
+      '<svg class="st-metric__spark" id="sp-' + m.key + '" viewBox="0 0 100 32" preserveAspectRatio="none"' + toneAttr + '>' +
+      '<path class="area" fill="currentColor" opacity=".12"/>' +
+      '<path class="line" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>' +
+      '</svg></div></div>';
+  }).join("");
+}
+
+// Render an SVG sparkline from an array of values (rolling window)
+function sparkline(id, values, max) {
+  var svg = $(id);
+  if (!svg) return;
+  var v = (values || []).map(function (x) { return x == null ? 0 : x; });
+  if (v.length < 2) {
+    svg.querySelector(".line").setAttribute("d", "");
+    svg.querySelector(".area").setAttribute("d", "");
+    return;
+  }
+  var top = Math.max(max || 0, Math.max.apply(null, v), 1);
+  var pts = v.map(function (x, i) {
+    return [(i / (v.length - 1)) * 100, 30 - (x / top) * 26];
+  });
+  var line = pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(2) + "," + p[1].toFixed(2); }).join("");
+  svg.querySelector(".line").setAttribute("d", line);
+  svg.querySelector(".area").setAttribute("d", line + "L100,32L0,32Z");
+}
+
+function setMetricValue(key, value, unit, sub) {
+  var el = $("mv-" + key);
+  if (el) el.innerHTML = value == null ? "\u2013" : esc(value) + (unit ? '<small>' + esc(unit) + '</small>' : '');
+  var s = $("ms-" + key);
+  if (s) s.textContent = sub || "";
+}
+
+// Rolling sparkline history: 60 samples per series
+var sparkHistory = {};
+var SPARK_WINDOW = 60;
+
+function pushSpark(series, value) {
+  if (!sparkHistory[series]) sparkHistory[series] = [];
+  sparkHistory[series].push(value);
+  if (sparkHistory[series].length > SPARK_WINDOW) sparkHistory[series].shift();
+}
+
 async function refreshAbout() {
   if (!$("panel-about")) return;
   try {
-    const m = await api("/metrics").then(function (r) { return r.json(); });
-    const p = await api("/props").then(function (r) { return r.json(); });
-    const s = await api("/v1/status").then(function (r) { return r.json(); });
-    const eng = m.engine || {};
-    kvTable("about-engine", [
-      ["model", eng.model || "—"],
-      ["max_context", eng.max_context === undefined ? "—" : String(eng.max_context)],
-      ["images", eng.images !== undefined ? String(eng.images) : "—"],
-      ["engine", s.engine || "—"],
-      ["service", s.service || "—"],
-      ["started", QinferRequests.timeOf(s.started)],
-      ["uptime_s", s.uptime_s === undefined ? "—" : s.uptime_s.toFixed(0) + "s"],
-      ["slots", s.concurrency ? String(s.concurrency.serving) : "—"],
-    ]);
-    const dg = p.default_generation_settings || {};
-    const prm = dg.params || {};
-    const caps = p.chat_template_caps || {};
-    const ct = p.chat_template || "";
-    kvTable("about-props", [
-      ["model_alias", p.model_alias || "—"],
-      ["total_slots", p.total_slots === undefined ? "—" : String(p.total_slots)],
-      ["chat_template", ct.length > 120 ? ct.slice(0, 120) + "…" : ct],
-      ["templater", caps.templater || "—"],
-      ["vision", p.modalities && p.modalities.vision !== undefined ? String(p.modalities.vision) : "—"],
-      [tr("about.tempDefault"), prm.temperature === undefined ? "—" : String(prm.temperature)],
-      [tr("about.topPDefault"), prm.top_p === undefined ? "—" : String(prm.top_p)],
-      [tr("about.seedDefault"), prm.seed === undefined ? "—" : String(prm.seed)],
-      ["build_info", p.build_info || "—"],
-    ]);
-    const hs = m.hardware_static || {};
-    kvTable("about-hardware", [
-      ["gpu_name", hs.gpu_name || "—"],
-      ["gpu_count", hs.gpu_count === undefined ? "—" : String(hs.gpu_count)],
-      ["gpu_note", hs.gpu_note || "—"],
-      ["igpu_name", hs.igpu_name || "—"],
-      ["igpu_available", hs.igpu_available === undefined ? "—" : String(hs.igpu_available)],
-      ["igpu_note", hs.igpu_note || "—"],
-      ["cpu_name", hs.cpu_name || "—"],
-      ["cores", hs.cores === undefined ? "—" : String(hs.cores)],
-      ["threads", hs.threads === undefined ? "—" : String(hs.threads)],
-    ]);
-    $("about-ports").textContent = location.protocol + "//" + location.host;
+    var m = await api("/metrics").then(function (r) { return r.json(); });
+    var p = await api("/props").then(function (r) { return r.json(); });
+    var s = await api("/v1/status").then(function (r) { return r.json(); });
+    var eng = m.engine || {};
+    var hs = m.hardware_static || {};
+    var hw = m.hardware || {};
+    renderAboutCards(eng, p, s, hs, hw);
   } catch (e) {
     showBanner(tr("err.aboutLoad") + e.message, "err");
   }
 }
 
-const SPARK_SERIES = [
-  { key: "gpu_util", i18n: "hw.gpuUtil", fmt: function (v) { return v.toFixed(1) + "%"; } },
-  { key: "gpu_mem_used", i18n: "hw.gpuMem", fmt: function (v) { return (v / 1073741824).toFixed(2) + " GB"; } },
-  { key: "gpu_temp", i18n: "hw.gpuTemp", fmt: function (v) { return v.toFixed(0) + " ℃"; } },
-  { key: "gpu_power", i18n: "hw.gpuPower", fmt: function (v) { return v.toFixed(0) + " W"; } },
-  { key: "gpu_pcie_rx_mb", i18n: "hw.pcieRx", fmt: function (v) { return v.toFixed(1) + " MB/s"; } },
-  { key: "cpu", i18n: "hw.cpu", fmt: function (v) { return v.toFixed(1) + "%"; } },
-  { key: "ram_used", i18n: "hw.ram", fmt: function (v) { return (v / 1073741824).toFixed(1) + " GB"; } },
-  { key: "disk_read_mb", i18n: "hw.diskRead", fmt: function (v) { return v.toFixed(1) + " MB/s"; } },
-  { key: "tok_s", i18n: "hw.tokS", fmt: function (v) { return v.toFixed(1); } },
-  { key: "prefill_tok_s_mean", i18n: "hw.prefill", fmt: function (v) { return v.toFixed(1); } },
-  { key: "igpu_freq_mhz", i18n: "hw.igpuFreq", fmt: function (v) { return v.toFixed(0) + " MHz"; } },
-];
-
-function renderSparklines(h) {
-  if (!$("spark-grid")) return;
-  const grid = $("spark-grid");
-  grid.innerHTML = "";
-  const hw = h.hardware || {};
-  const history = h.history || {};
-  SPARK_SERIES.forEach(function (s) {
-    const cell = document.createElement("div");
-    cell.className = "spark-cell";
-    const head = document.createElement("div");
-    head.className = "spark-head";
-    const name = document.createElement("span");
-    name.className = "name";
-    name.textContent = tr(s.i18n);
-    const val = document.createElement("span");
-    val.className = "val";
-    const cur = hw[s.key];
-    val.textContent = cur === null || cur === undefined ? "—" : s.fmt(cur);
-    head.appendChild(name);
-    head.appendChild(val);
-    const cv = document.createElement("canvas");
-    cv.width = 120;
-    cv.height = 30;
-    QinferRequests.sparkline(cv, history[s.key] || []);
-    cell.appendChild(head);
-    cell.appendChild(cv);
-    grid.appendChild(cell);
-  });
+// ---- About page: stacked card layout (Strata-inspired) ----
+function factsHtml(rows) {
+  return rows.filter(function (r) { return r[1] != null && r[1] !== ""; })
+    .map(function (r) {
+      var copyBtn = r[2] ? '<button class="st-btn st-btn--icon" data-copy="' + esc(r[1]) + '" aria-label="Copy"><svg class="st-icon"><use href="/web/sprite.svg#i-copy"/></svg></button>' : "";
+      return '<dt>' + esc(r[0]) + '</dt><dd>' + (r[2] ? '<code>' + esc(r[1]) + '</code>' + copyBtn : esc(r[1])) + '</dd>';
+    }).join("");
 }
+
+function renderAboutCards(eng, props, status, hs, hw) {
+  // Card 1: Model/engine facts
+  var engEl = $("facts-engine");
+  if (engEl) {
+    engEl.innerHTML = factsHtml([
+      ["Model", eng.model || "\u2014"],
+      ["Engine", status.engine || "\u2014"],
+      ["Service", status.service || "\u2014"],
+      ["Started", QinferRequests.timeOf(status.started)],
+      ["Uptime", status.uptime_s !== undefined ? status.uptime_s.toFixed(0) + "s" : "\u2014"],
+      ["Max context", eng.max_context !== undefined ? String(eng.max_context) : "\u2014"],
+      ["Images", eng.images !== undefined ? String(eng.images) : "\u2014"],
+      ["Slots", status.concurrency ? String(status.concurrency.serving) : "\u2014"],
+    ]);
+  }
+  // Card 2: Hardware facts
+  var hwEl = $("facts-hw");
+  if (hwEl) {
+    hwEl.innerHTML = factsHtml([
+      ["GPU", hs.gpu_name || "\u2014"],
+      ["GPU count", hs.gpu_count !== undefined ? String(hs.gpu_count) : "\u2014"],
+      ["iGPU", hs.igpu_name || "\u2014"],
+      ["CPU", hs.cpu_name || "\u2014"],
+      ["Cores / threads", (hs.cores !== undefined ? hs.cores : "\u2014") + " / " + (hs.threads !== undefined ? hs.threads : "\u2014")],
+      ["RAM", hw.ram_total ? (hw.ram_total / 1073741824).toFixed(1) + " GB" : "\u2014"],
+    ]);
+  }
+  // Card 3: API URLs with copy buttons
+  var apiEl = $("facts-api");
+  if (apiEl) {
+    var base = location.origin;
+    apiEl.innerHTML = factsHtml([
+      ["OpenAI base URL", base + "/v1", true],
+      ["Anthropic base URL", base, true],
+      ["Model name", eng.model || "\u2014", true],
+    ]);
+  }
+  // Card 4: Ports info
+  var portsEl = $("about-ports");
+  if (portsEl) portsEl.textContent = base;
+  // Card 5: /props details
+  var propsEl = $("facts-props");
+  if (propsEl) {
+    var dg = props.default_generation_settings || {};
+    var prm = dg.params || {};
+    var caps = props.chat_template_caps || {};
+    var ct = props.chat_template || "";
+    propsEl.innerHTML = factsHtml([
+      ["Model alias", props.model_alias || "\u2014"],
+      ["Total slots", props.total_slots !== undefined ? String(props.total_slots) : "\u2014"],
+      ["Chat template", ct.length > 120 ? ct.slice(0, 120) + "\u2026" : ct],
+      ["Templater", caps.templater || "\u2014"],
+      ["Vision", props.modalities && props.modalities.vision !== undefined ? String(props.modalities.vision) : "\u2014"],
+      [tr("about.tempDefault"), prm.temperature !== undefined ? String(prm.temperature) : "\u2014"],
+      [tr("about.topPDefault"), prm.top_p !== undefined ? String(prm.top_p) : "\u2014"],
+      [tr("about.seedDefault"), prm.seed !== undefined ? String(prm.seed) : "\u2014"],
+      ["Build info", props.build_info || "\u2014"],
+    ]);
+  }
+}
+
+// Copy-to-clipboard delegation for facts with data-copy
+document.addEventListener("click", function (e) {
+  var btn = e.target.closest("[data-copy]");
+  if (!btn) return;
+  var text = btn.dataset.copy;
+  navigator.clipboard.writeText(text).then(function () {
+    showToast("Copied", "success");
+  }).catch(function () {
+    // Fallback for non-HTTPS contexts
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+    showToast("Copied", "success");
+  });
+});
 
 let reqCache_ = [];
 let activeReqId_ = null;
 
 function renderFiltered() {
-  const q = ($("req-search").value || "").toLowerCase();
-  const f = $("req-filter").value;
+  var el = $("req-search");
+  if (!el) return;
+  const q = (el.value || "").toLowerCase();
+  var fEl = $("req-filter");
+  const f = fEl ? fEl.value : "";
   let list = reqCache_;
   if (q || f) {
     list = list.filter(function (r) {
@@ -1093,7 +1189,8 @@ function renderFiltered() {
       return (!q || hay.indexOf(q) >= 0) && (!f || r.state === f);
     });
   }
-  QinferRequests.renderList(list, $("req-list"), function (rec) {
+  var reqList = $("req-list");
+  if (reqList) QinferRequests.renderList(list, reqList, function (rec) {
     activeReqId_ = rec.id;
     QinferRequests.loadDetail(rec.id, $("req-detail"));
   });
@@ -1104,43 +1201,213 @@ async function refreshRequests() {
     const res = await api("/api/requests");
     if (!res.ok) throw new Error("HTTP " + res.status);
     const d = await res.json();
-    $("card-kept").textContent = d.retention === undefined ? "—" : d.retention;
     reqCache_ = d.requests || [];
     renderFiltered();
   } catch (e) { /* retry on the next poll */ }
 }
 
+// ---- Full monitor render from /metrics data ----
+function renderMonitorTab(m) {
+  var live = m.live || {}, hw = m.hardware || {}, st = m.hardware_static || {}, eng = m.engine || {};
+  var h = m.history || {};
+  var requests = m.requests || [];
+
+  // State card badges
+  var on = live.queued > 0 ? "queued" : live.state;
+  var badges = document.querySelectorAll("#state-badges .st-badge");
+  for (var i = 0; i < badges.length; i++) {
+    badges[i].classList.toggle("on", badges[i].dataset.s === on || badges[i].dataset.s === live.state);
+  }
+
+  // State card label/detail/progress
+  var prog = $("state-progress");
+  var label = "Waiting for a request", detail = "", pct = 0;
+  if (live.state === "reading") {
+    label = "Reading prompt";
+    if (prog) prog.dataset.tone = "info";
+    if (live.prompt_total) {
+      pct = (100 * live.prompt_read) / live.prompt_total;
+      detail = fmtNum(live.prompt_read) + " / " + fmtNum(live.prompt_total) + " tokens \u00b7 " + fmtNum(pct) + "%";
+    } else {
+      detail = fmtNum(live.prompt_tokens) + " tokens";
+    }
+  } else if (live.state === "generating") {
+    label = live.phase ? live.phase[0].toUpperCase() + live.phase.slice(1) : "Generating";
+    if (prog) delete prog.dataset.tone;
+    pct = live.max_tokens ? Math.min(100, (100 * live.generated) / live.max_tokens) : 0;
+    detail = fmtNum(live.generated) + " tokens \u00b7 " + fmtNum(live.tok_s, 1) + " tok/s";
+  }
+  var stateLabel = $("state-label");
+  if (stateLabel) stateLabel.textContent = label;
+  var stateDetail = $("state-detail");
+  if (stateDetail) stateDetail.textContent = detail;
+  var stateBar = $("state-bar");
+  if (stateBar) stateBar.style.width = pct + "%";
+
+  // Push current values into rolling sparkline history
+  pushSpark("tok_s", live.tok_s);
+  pushSpark("gpu_util", hw.gpu_util);
+  pushSpark("gpu_mem_used", hw.gpu_mem_used);
+  pushSpark("gpu_temp", hw.gpu_temp);
+  pushSpark("gpu_power", hw.gpu_power);
+  pushSpark("gpu_pcie_rx_mb", hw.gpu_pcie_rx_mb);
+  pushSpark("cpu", hw.cpu);
+  pushSpark("disk_read_mb", hw.disk_read_mb);
+
+  // Metric cards
+  var speed = live.state === "generating" ? live.tok_s : null;
+  setMetricValue("speed", speed == null ? null : fmtNum(speed, 1), "t/s",
+    live.state === "generating" ? "Decode now" : "Decode");
+  setMetricValue("gpu", hw.gpu_util == null ? null : fmtNum(hw.gpu_util), "%",
+    st.gpu_name || (st.gpu_note ? "not available" : ""));
+  var vramUsed = hw.gpu_mem_used != null ? (hw.gpu_mem_used / 1073741824).toFixed(2) : null;
+  var vramTotal = hw.gpu_mem_total ? " / " + (hw.gpu_mem_total / 1073741824).toFixed(0) + " GB" : " GB";
+  setMetricValue("vram", vramUsed, vramTotal, "");
+  setMetricValue("temp", hw.gpu_temp == null ? null : fmtNum(hw.gpu_temp), "\u00b0C", "");
+  setMetricValue("power", hw.gpu_power == null ? null : fmtNum(hw.gpu_power), "W",
+    hw.gpu_power_limit ? "of " + fmtNum(hw.gpu_power_limit) + " W limit" : "");
+  setMetricValue("pcie", hw.gpu_pcie_rx_mb == null ? null : fmtNum(hw.gpu_pcie_rx_mb, 1), "MB/s", "");
+  setMetricValue("cpu", hw.cpu == null ? null : fmtNum(hw.cpu), "%",
+    st.threads ? (st.cores ? st.cores + " cores \u00b7 " : "") + st.threads + " threads" : "");
+  setMetricValue("disk", hw.disk_read_mb == null ? null : fmtNum(hw.disk_read_mb, 1), "MB/s", "");
+
+  // Sparklines
+  sparkline("sp-speed", sparkHistory.tok_s);
+  sparkline("sp-gpu", sparkHistory.gpu_util, 100);
+  sparkline("sp-vram", sparkHistory.gpu_mem_used, hw.gpu_mem_total);
+  sparkline("sp-temp", sparkHistory.gpu_temp, 90);
+  sparkline("sp-power", sparkHistory.gpu_power, hw.gpu_power_limit);
+  sparkline("sp-pcie", sparkHistory.gpu_pcie_rx_mb);
+  sparkline("sp-cpu", sparkHistory.cpu, 100);
+  sparkline("sp-disk", sparkHistory.disk_read_mb);
+
+  // Context fill gauge
+  var ctx = eng.max_context || 0;
+  var used = 0;
+  if (live.state !== "idle") used = (live.prompt_tokens || 0) + (live.generated || 0);
+  var frac = ctx ? Math.min(1, used / ctx) : 0;
+  var ctxFill = $("ctx-fill");
+  if (ctxFill) {
+    ctxFill.setAttribute("stroke-dasharray", (235.6 * frac).toFixed(1) + " 314.2");
+    ctxFill.style.opacity = 235.6 * frac >= 3 ? "1" : "0";
+  }
+  var ctxPct = $("ctx-pct");
+  if (ctxPct) ctxPct.textContent = Math.round(frac * 100) + "%";
+  var ctxSub = $("ctx-sub");
+  if (ctxSub) ctxSub.textContent = ctx ? fmtNum(used) + " / " + fmtNum(ctx) : "\u2013";
+
+  // VRAM/RAM/temp progress bars in context card
+  var vramBar = $("vram-bar");
+  if (vramBar && hw.gpu_mem_total) vramBar.style.width = Math.min(100, (100 * hw.gpu_mem_used) / hw.gpu_mem_total) + "%";
+  var vramText = $("vram-text");
+  if (vramText) vramText.textContent = hw.gpu_mem_used != null ? (hw.gpu_mem_used / 1073741824).toFixed(1) + " / " + (hw.gpu_mem_total / 1073741824).toFixed(0) + " GB" : "\u2013";
+  var ramBar = $("ram-bar");
+  if (ramBar && hw.ram_total) ramBar.style.width = Math.min(100, (100 * hw.ram_used) / hw.ram_total) + "%";
+  var ramText = $("ram-text");
+  if (ramText) ramText.textContent = hw.ram_total ? (hw.ram_used / 1073741824).toFixed(1) + " / " + (hw.ram_total / 1073741824).toFixed(0) + " GB" : "\u2013";
+  var tempBar = $("temp-bar");
+  if (tempBar) tempBar.style.width = hw.gpu_temp != null ? Math.min(100, hw.gpu_temp) + "%" : "0%";
+  var tempText = $("temp-text");
+  if (tempText) tempText.textContent = hw.gpu_temp != null ? fmtNum(hw.gpu_temp) + " \u00b0C" : "\u2013";
+
+  // Recent requests table (last 10)
+  var body = $("req-body");
+  if (body) {
+    if (!requests.length) {
+      body.innerHTML = '<tr><td colspan="6" class="muted">No requests yet</td></tr>';
+    } else {
+      body.innerHTML = requests.slice(0, 10).map(function (r) {
+        var badge = {stop: ["", "Done"], length: ["", "Max tokens"], cancel: ["st-badge--queued", "Stopped"],
+                     disconnect: ["st-badge--queued", "Closed"], error: ["st-badge--error", "Error"]};
+        var bInfo = badge[r.finish] || ["", r.finish || "\u2013"];
+        var t = new Date(r.time * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+        return '<tr><td>' + esc(t) + '</td>' +
+          '<td><span class="st-badge ' + bInfo[0] + '">' + esc(bInfo[1]) + '</span></td>' +
+          '<td class="num">' + fmtNum(r.prompt_tokens) + '</td>' +
+          '<td class="num">' + fmtNum(r.output_tokens) + '</td>' +
+          '<td class="num">' + fmtNum(r.decode_tok_s, 1) + '</td>' +
+          '<td class="num">' + fmtNum(r.duration_s, 1) + ' s</td></tr>';
+      }).join("");
+    }
+  }
+
+  // Conversation cache
+  renderConvCache(m.conversation_cache);
+}
+
+function fmtNum(n, d) {
+  if (n == null || Number.isNaN(n)) return "\u2013";
+  return Number(n).toLocaleString(undefined, {maximumFractionDigits: d || 0, minimumFractionDigits: d || 0});
+}
+
+function renderConvCache(c) {
+  var card = $("cc-card");
+  if (!card) return;
+  card.style.display = c ? "" : "none";
+  if (!c) return;
+  var bars = $("cc-bars");
+  if (bars) bars.hidden = !c.enabled;
+  if (c.enabled) {
+    var slotsText = $("cc-slots-text");
+    if (slotsText) slotsText.textContent = fmtNum(c.parked) + " / " + fmtNum(c.slots);
+    var slotsBar = $("cc-slots-bar");
+    if (slotsBar) slotsBar.style.width = (c.slots ? Math.min(100, (100 * c.parked) / c.slots) : 0) + "%";
+    var budget = c.budget_mib * 1048576;
+    var memText = $("cc-mem-text");
+    if (memText) memText.textContent = (c.bytes / 1073741824).toFixed(1) + " / " + (budget / 1073741824).toFixed(0) + " GB";
+    var memBar = $("cc-mem-bar");
+    if (memBar) memBar.style.width = (budget ? Math.min(100, (100 * c.bytes) / budget) : 0) + "%";
+  }
+  var sum = $("cc-sum");
+  if (sum) sum.textContent = c.requests ? fmtNum(c.requests_reused) + " of " + fmtNum(c.requests) + " requests reused part of their prompt" : "";
+  var factsEl = $("cc-facts");
+  if (factsEl) {
+    var share = c.prompt_tokens ? " (" + fmtNum((100 * c.reused_tokens) / c.prompt_tokens) + "% of all prompt tokens)" : "";
+    factsEl.innerHTML =
+      (c.last_prompt != null ? '<dt>Last request</dt><dd>' + fmtNum(c.last_reused || 0) + ' of ' + fmtNum(c.last_prompt) + ' prompt tokens reused</dd>' : '') +
+      (c.requests ? '<dt>Reused since start</dt><dd>' + fmtNum(c.reused_tokens) + ' tokens' + share + '</dd>' : '') +
+      (c.enabled ? '<dt>Parked / restored</dt><dd>' + fmtNum(c.parks) + ' / ' + fmtNum(c.restores) + (c.evictions ? ' \u00b7 ' + fmtNum(c.evictions) + ' evicted' : '') + '</dd>' : '');
+  }
+  var note = $("cc-note");
+  if (note) {
+    note.textContent = c.enabled
+      ? "A request that continues a cached conversation gets its state back instead of reading it again."
+      : "The engine keeps the last conversation's state, so a follow-up reads only what is new.";
+  }
+}
+
 async function refreshMonitor() {
   if (!$("panel-monitor")) return;
   try {
-    const res = await api("/v1/status");
+    var res = await api("/metrics");
     if (!res.ok) throw new Error("HTTP " + res.status);
-    const st = await res.json();
-    const lt = st.last_timings;
-    $("card-state").textContent = st.loaded ? tr("state.loaded") : tr("state.unloaded");
-    $("card-state-sub").textContent = (st.model || "") +
-      (st.activity && st.activity.in_flight ? tr("state.inFlight") + st.activity.in_flight : "");
-    $("card-wall").textContent = lt && lt.wallclock_s !== undefined ? lt.wallclock_s.toFixed(2) + "s" : "—";
-    $("card-wall-sub").textContent = lt && lt.prompt_tokens !== undefined
-      ? lt.prompt_tokens + " prompt → " + lt.output_tokens + " out" : tr("mon.noDone");
-    $("card-tok").textContent = lt && lt.decode_tok_s !== undefined ? lt.decode_tok_s.toFixed(1) + " tok/s" : "—";
-    $("card-tok-sub").textContent = tr("mon.lastDecode");
+    var d = await res.json();
+    window.lastMetrics = d;
+    renderMonitorTab(d);
     setStatusDot(true);
+    // Update the header pill from metrics
+    var live = d.live || {};
+    var tok = live.tok_s != null ? fmtNum(live.tok_s, 1) : "\u2014";
+    if (live.state !== "idle" && live.state !== "?") setPill(live.state, tr("mon.stateLine") + " " + live.state + " \u00b7 " + tok + " tok/s");
   } catch (e) {
-    $("card-state").textContent = tr("state.unreachable");
-    $("card-state-sub").textContent = tr("state.noResponse");
     setStatusDot(false);
+    var stateLabel = $("state-label");
+    if (stateLabel) stateLabel.textContent = tr("state.unreachable");
+    var stateDetail = $("state-detail");
+    if (stateDetail) stateDetail.textContent = tr("state.noResponse");
   }
-  if (window.lastMetrics) renderSparklines(window.lastMetrics);
   refreshRequests();
 }
 
 function initMonitor() {
   if (!$("panel-monitor")) return;
+  initMetricCards();
   refreshMonitor();
-  window.setInterval(refreshMonitor, 2000);
-  $("req-search").addEventListener("input", renderFiltered);
-  $("req-filter").addEventListener("change", renderFiltered);
+  window.setInterval(refreshMonitor, 1000);
+  var searchEl = $("req-search");
+  if (searchEl) searchEl.addEventListener("input", renderFiltered);
+  var filterEl = $("req-filter");
+  if (filterEl) filterEl.addEventListener("change", renderFiltered);
 }
 
 document.addEventListener("DOMContentLoaded", function () {

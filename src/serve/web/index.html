@@ -103,13 +103,84 @@
   <!-- ============================ Monitor ============================ -->
   <section class="view panel hidden" id="panel-monitor" role="tabpanel">
     <div class="monitor">
-      <div class="monitor-grid" id="cards">
-        <div class="card"><div class="card-title" data-i18n="mon.state">Model state</div><div class="card-value" id="card-state">&ndash;</div><div class="card-sub" id="card-state-sub"></div></div>
-        <div class="card"><div class="card-title" data-i18n="mon.retained">Requests kept</div><div class="card-value" id="card-kept">&ndash;</div><div class="card-sub" data-i18n="mon.retainedSub">entries (/api/requests)</div></div>
-        <div class="card"><div class="card-title" data-i18n="mon.wall">Last wall-clock</div><div class="card-value" id="card-wall">&ndash;</div><div class="card-sub" id="card-wall-sub"></div></div>
-        <div class="card"><div class="card-title" data-i18n="mon.decode">Last decode speed</div><div class="card-value" id="card-tok">&ndash;</div><div class="card-sub" id="card-tok-sub"></div></div>
+      <!-- State card: model state badges + progress bar -->
+      <div class="st-card state-card">
+        <div class="state-card__head">
+          <span class="card-title" data-i18n="mon.state">Model state</span>
+          <span class="state-badges" id="state-badges">
+            <span class="st-badge" data-s="idle">Idle</span>
+            <span class="st-badge st-badge--reading" data-s="reading">Reading</span>
+            <span class="st-badge st-badge--generating" data-s="generating">Generating</span>
+            <span class="st-badge st-badge--queued" data-s="queued">Queued</span>
+            <span class="st-badge st-badge--error" data-s="error">Error</span>
+          </span>
+        </div>
+        <div class="state-card__row">
+          <span id="state-label">Waiting for a request</span>
+          <span class="muted" id="state-detail"></span>
+        </div>
+        <div class="st-progress" id="state-progress">
+          <div class="st-progress__bar" id="state-bar" style="width:0%"></div>
+        </div>
       </div>
-      <div class="spark-grid" id="spark-grid"></div>
+
+      <!-- 4-column metric grid, filled by JS -->
+      <div class="metrics" id="metrics"></div>
+
+      <!-- Monitor row: context gauge + recent requests -->
+      <div class="monitor-row">
+        <div class="st-card ctx-card">
+          <span class="card-title">Context fill</span>
+          <div class="ctx-gauge">
+            <svg class="st-gauge" viewBox="0 0 120 120" aria-hidden="true">
+              <circle class="st-gauge__track" cx="60" cy="60" r="50" fill="none" stroke-width="10" stroke-linecap="round"
+                      stroke-dasharray="235.6 314.2" transform="rotate(135 60 60)"/>
+              <circle class="st-gauge__fill" id="ctx-fill" cx="60" cy="60" r="50" fill="none" stroke-width="10"
+                      stroke-linecap="round" stroke-dasharray="0 314.2" transform="rotate(135 60 60)"/>
+            </svg>
+            <div class="ctx-gauge__label">
+              <span class="ctx-gauge__pct" id="ctx-pct">0%</span>
+              <span class="muted" id="ctx-sub">&ndash;</span>
+            </div>
+          </div>
+          <div class="bar-row"><span>VRAM</span><span class="muted" id="vram-text">&ndash;</span></div>
+          <div class="st-progress"><div class="st-progress__bar" id="vram-bar" style="width:0%"></div></div>
+          <div class="bar-row"><span>System RAM</span><span class="muted" id="ram-text">&ndash;</span></div>
+          <div class="st-progress"><div class="st-progress__bar" id="ram-bar" style="width:0%"></div></div>
+          <div class="bar-row"><span>GPU temperature</span><span class="muted" id="temp-text">&ndash;</span></div>
+          <div class="st-progress" data-tone="warn"><div class="st-progress__bar" id="temp-bar" style="width:0%"></div></div>
+        </div>
+        <div class="st-card req-card">
+          <div class="req-head">
+            <span class="card-title">Recent requests</span>
+          </div>
+          <div class="table-wrap">
+            <table class="st-table">
+              <thead><tr><th>Time</th><th>Status</th><th class="num">Prompt</th><th class="num">Output</th>
+                <th class="num">Decode t/s</th><th class="num">Duration</th></tr></thead>
+              <tbody id="req-body"><tr><td colspan="6" class="muted">No requests yet</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Conversation cache card -->
+      <div class="st-card cc-card" id="cc-card">
+        <div class="req-head">
+          <span class="card-title">Conversation cache</span>
+          <span class="muted small" id="cc-sum"></span>
+        </div>
+        <div class="cc-bars" id="cc-bars" hidden>
+          <div><div class="bar-row"><span>Cached conversations</span><span class="muted" id="cc-slots-text">&ndash;</span></div>
+            <div class="st-progress"><div class="st-progress__bar" id="cc-slots-bar" style="width:0%"></div></div></div>
+          <div><div class="bar-row"><span>Their memory</span><span class="muted" id="cc-mem-text">&ndash;</span></div>
+            <div class="st-progress"><div class="st-progress__bar" id="cc-mem-bar" style="width:0%"></div></div></div>
+        </div>
+        <dl class="facts" id="cc-facts"></dl>
+        <p class="muted small cc-note" id="cc-note"></p>
+      </div>
+
+      <!-- Legacy request inspector (search + detail pane) -->
       <div class="req-layout">
         <div class="req-list-pane">
           <div class="req-toolbar">
@@ -131,32 +202,42 @@
   <!-- ============================ About ============================ -->
   <section class="view panel hidden" id="panel-about" role="tabpanel">
     <div class="about-body">
-      <div class="card">
-        <div class="card-title" data-i18n="about.apiKey">Connection settings</div>
+      <!-- Card 1: Model and engine facts -->
+      <div class="st-card">
+        <span class="card-title" data-i18n="about.engine">Model and engine</span>
+        <dl class="facts" id="facts-engine"></dl>
+      </div>
+      <!-- Card 2: Hardware facts -->
+      <div class="st-card">
+        <span class="card-title" data-i18n="about.hw">This PC</span>
+        <dl class="facts" id="facts-hw"></dl>
+      </div>
+      <!-- Card 3: API URLs with copy buttons -->
+      <div class="st-card">
+        <span class="card-title" data-i18n="about.svc">Service and protocols</span>
+        <p class="dim">Any OpenAI- or Anthropic-compatible client works with these addresses.</p>
+        <dl class="facts" id="facts-api"></dl>
+      </div>
+      <!-- Card 4: Settings (API key + dark theme toggle) -->
+      <div class="st-card">
+        <span class="card-title" data-i18n="about.apiKey">Connection settings</span>
         <div class="st-field">
           <label class="st-label" for="api-key"><span data-i18n="about.apiKeyLabel">API key</span> <output data-i18n="about.apiKeyHint">Only needed if the server was started with --api-key</output></label>
           <div class="key-row">
-            <input id="api-key" class="input key-input" type="password" autocomplete="off" data-i18n-ph="about.apiKeyPh" placeholder="Not needed">
+            <input id="api-key" class="st-input key-input" type="password" autocomplete="off" data-i18n-ph="about.apiKeyPh" placeholder="Not needed">
             <button id="btn-key-toggle" class="btn ghost" type="button" data-i18n="about.show">Show</button>
           </div>
         </div>
+        <div class="toggle-row">
+          <span data-i18n="theme.dark">Dark theme</span>
+          <button class="st-toggle" id="dark-toggle" role="switch" aria-checked="false" aria-label="Dark theme" data-i18n-title="theme.title"></button>
+        </div>
         <p class="dim small" data-i18n="about.apiKeyNote">The key stays in this browser only (localStorage, shared across tabs; never uploaded).</p>
       </div>
-      <div class="card">
-        <div class="card-title" data-i18n="about.engine">Model and engine</div>
-        <table class="plain-table" id="about-engine"><tbody></tbody></table>
-      </div>
-      <div class="card">
-        <div class="card-title" data-i18n="about.props">Capabilities (/props)</div>
-        <table class="plain-table" id="about-props"><tbody></tbody></table>
-      </div>
-      <div class="card">
-        <div class="card-title" data-i18n="about.hw">This PC</div>
-        <table class="plain-table" id="about-hardware"><tbody></tbody></table>
-      </div>
-      <div class="card">
-        <div class="card-title" data-i18n="about.svc">Service and protocols</div>
-        <p class="dim" data-i18n-html="about.svcBody">Endpoints: <span class="mono" id="about-ports"></span>. OpenAI domain at <span class="mono">/v1/chat/completions</span> (incl. SSE streaming), <span class="mono">/v1/completions</span>, <span class="mono">/v1/models</span>; Anthropic domain at <span class="mono">/v1/messages</span> and <span class="mono">/v1/messages/count_tokens</span>; monitoring at <span class="mono">/metrics</span> and <span class="mono">/api/requests</span>.</p>
+      <!-- Card 5: Capabilities (/props) -->
+      <div class="st-card">
+        <span class="card-title" data-i18n="about.props">Capabilities (/props)</span>
+        <dl class="facts" id="facts-props"></dl>
       </div>
     </div>
   </section>
