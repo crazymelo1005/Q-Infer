@@ -217,6 +217,14 @@
         <span class="card-title" data-i18n="about.svc">Service and protocols</span>
         <p class="dim">Any OpenAI- or Anthropic-compatible client works with these addresses.</p>
         <dl class="facts" id="facts-api"></dl>
+        <details class="st-collapse">
+          <summary>Endpoint paths</summary>
+          <div class="st-collapse__body">
+            <p>OpenAI: <code class="mono">/v1/chat/completions</code> (SSE streaming), <code class="mono">/v1/completions</code>, <code class="mono">/v1/models</code></p>
+            <p>Anthropic: <code class="mono">/v1/messages</code>, <code class="mono">/v1/messages/count_tokens</code></p>
+            <p>Monitoring: <code class="mono">/metrics</code>, <code class="mono">/api/requests</code></p>
+          </div>
+        </details>
       </div>
       <!-- Card 4: Settings (API key + dark theme toggle) -->
       <div class="st-card">
