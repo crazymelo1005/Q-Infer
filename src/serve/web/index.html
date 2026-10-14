@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Q-Infer</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='4' fill='%2310b981'/><text x='12' y='17' font-family='Arial' font-size='14' font-weight='bold' text-anchor='middle' fill='white'>Q</text></svg>">
 <link rel="stylesheet" href="/web/tokens.css">
 <link rel="stylesheet" href="/web/components.css">
 <link rel="stylesheet" href="/web/app.css">
@@ -47,17 +48,41 @@
 
   <!-- ============================ Chat ============================ -->
   <section class="view panel" id="panel-chat" role="tabpanel">
-    <div class="chat-scroll">
-      <div class="chat" id="chat">
-        <div class="chat-empty" id="chat-empty">
-          <div class="chat-empty__title" data-i18n="chat.title">Ask the engine anything</div>
-          <div class="chat-empty__sub" data-i18n="chat.sub">The model runs on this PC; nothing leaves it. Set the API key in the About tab.</div>
+    <div class="chat-layout">
+      <!-- Conversation sidebar -->
+      <aside class="conv-sidebar" id="conv-sidebar">
+        <div class="conv-sidebar__head">
+          <span class="card-title" data-i18n="conv.history">Conversations</span>
+          <button class="st-btn st-btn--icon" id="btn-new-conv" title="New conversation" data-i18n-title="conv.new">
+            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-new-chat"/></svg>
+          </button>
+          <button class="st-btn st-btn--icon conv-sidebar__close" id="btn-close-conv" title="Close sidebar">
+            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-x"/></svg>
+          </button>
         </div>
-        <div id="msg-list" class="msg-list"></div>
-      </div>
-    </div>
-    <div class="composer-wrap">
-      <div class="chat-foot">
+        <div class="conv-sidebar__list" id="conv-list">
+          <p class="muted small" data-i18n="conv.empty">No conversations yet</p>
+        </div>
+      </aside>
+      <!-- Chat main area -->
+      <div class="chat-main">
+        <button class="conv-sidebar__toggle st-btn st-btn--icon" id="btn-toggle-conv" title="Show conversations" data-i18n-title="conv.toggle">
+          <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-chat"/></svg>
+        </button>
+        <div class="chat-scroll" id="chat-scroll">
+          <div class="chat" id="chat">
+            <div class="chat-empty" id="chat-empty">
+              <div class="chat-empty__title" data-i18n="chat.title">Ask the engine anything</div>
+              <div class="chat-empty__sub" data-i18n="chat.sub">The model runs on this PC; nothing leaves it. Set the API key in the About tab.</div>
+            </div>
+            <div id="msg-list" class="msg-list"></div>
+          </div>
+        </div>
+        <button class="scroll-bottom-btn hidden" id="btn-scroll-bottom" title="Scroll to bottom">
+          <svg class="st-icon"><use href="/web/sprite.svg#i-chevron"/></svg>
+        </button>
+        <div class="composer-wrap">
+          <div class="chat-foot">
         <details class="drawer">
           <summary>
             <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-settings"/></svg><span data-i18n="chat.sampler">Sampler</span></summary>
@@ -74,6 +99,10 @@
               <label for="s-seed" data-i18n="chat.seedLabel">seed (-1 = random)</label>
               <input id="s-seed" class="input" type="number" step="1" value="-1">
             </div>
+            <div class="field">
+              <label for="s-max-tokens" data-i18n="chat.maxTokens">max tokens</label>
+              <input id="s-max-tokens" class="input" type="number" min="1" max="32768" step="1" value="2048">
+            </div>
           </div>
         </details>
         <form class="st-composer" id="composer">
@@ -81,8 +110,6 @@
           <textarea id="chat-input" class="input chat-input" rows="2"
                     placeholder="Type a message; Enter to send, Shift+Enter for a new line" data-i18n-ph="chat.inputPh"></textarea>
           <div class="st-composer__bar">
-            <button type="button" class="st-btn st-btn--icon" id="btn-new" data-i18n-title="chat.newChatTitle">
-              <svg class="st-icon"><use href="/web/sprite.svg#i-new-chat"/></svg></button>
             <button type="button" class="st-btn st-btn--icon" id="btn-export" data-i18n-title="chat.exportTitleLong">
               <svg class="st-icon"><use href="/web/sprite.svg#i-download"/></svg></button>
             <span class="spacer"></span>
@@ -95,6 +122,21 @@
         <div class="chat-status">
           <span id="status-dot" class="status-dot"></span>
           <span id="chat-state" data-i18n="state.connecting">Connecting…</span>
+          <span class="chat-status__spacer"></span>
+          <button type="button" class="st-btn st-btn--icon chat-tool-btn" id="btn-tools" data-i18n-title="tool.settings">
+            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-tool"/></svg>
+            <span class="chat-tool-count" id="tool-count">0</span>
+          </button>
+        </div>
+        <div class="chat-tool-panel hidden" id="tool-panel">
+          <div class="chat-tool-panel__head">
+            <span class="card-title" data-i18n="tool.settings">Tool settings</span>
+          </div>
+          <div class="chat-tool-panel__body" id="tool-list">
+            <p class="muted small" data-i18n="tool.noTools">No tools enabled</p>
+          </div>
+        </div>
+          </div>
         </div>
       </div>
     </div>
