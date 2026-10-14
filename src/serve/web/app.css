@@ -12,13 +12,13 @@ main{flex:1;min-height:0;display:flex}
 
 /* ---- Chat ---- */
 .chat-scroll{flex:1;min-height:0;overflow-y:auto}
-.chat{max-width:980px;margin:0 auto;padding:var(--st-s-8) var(--st-s-6) var(--st-s-6);display:flex;flex-direction:column;gap:var(--st-s-6)}
-.chat-empty{margin:12vh auto 0;text-align:center}
+.chat{max-width:min(980px,90%);margin:0 auto;padding:var(--st-s-8) var(--st-s-6) var(--st-s-6);display:flex;flex-direction:column;gap:var(--st-s-6)}
+.chat-empty{margin:min(12vh,80px) auto 0;text-align:center}
 .chat-empty__title{font-weight:900;font-size:var(--st-fs-display);line-height:1.1;letter-spacing:-.02em}
 .chat-empty__sub{margin-top:var(--st-s-3);color:var(--st-ink-muted)}
 .chat-empty + .msg-list{padding-top:0}
 .msg-list{display:flex;flex-direction:column;gap:var(--st-s-4)}
-.bubble{max-width:78%;padding:10px 14px;border-radius:var(--st-r-lg);word-break:break-word}
+.bubble{max-width:min(78%,720px);padding:10px 14px;border-radius:var(--st-r-lg);word-break:break-word}
 .bubble .bubble-role{font-size:11px;color:var(--st-ink-muted);margin-bottom:2px}
 .bubble.user{align-self:flex-end;background:var(--st-accent);color:var(--st-accent-ink);border-bottom-right-radius:6px}
 .bubble.assistant{align-self:flex-start;background:var(--st-surface);border:1px solid var(--st-line);border-bottom-left-radius:6px}
@@ -35,7 +35,7 @@ main{flex:1;min-height:0;display:flex}
 /* width:100% explicitly: with width:auto the form shrank to its content
    (measured 233px inside a 447px parent) and the whole composer read as a
    small floating box. */
-.st-composer{max-width:980px;width:100%;margin:0 auto}
+.st-composer{max-width:min(980px,90%);width:100%;margin:0 auto}
 .st-composer.dragging{outline:2px dashed var(--st-accent);outline-offset:3px}
 .st-attachments{display:flex;flex-wrap:wrap;gap:var(--st-s-2);padding:2px 4px 0}
 .st-attachments:empty{display:none}
@@ -44,7 +44,7 @@ main{flex:1;min-height:0;display:flex}
 .st-attach-chip .chip-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .st-attach-chip .st-btn--icon{width:22px;height:22px;border-radius:50%;flex:none}
 .st-attach-chip .st-btn--icon .st-icon{width:14px;height:14px}
-.chat-foot{flex:none;max-width:980px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:var(--st-s-2)}
+.chat-foot{flex:none;max-width:min(980px,90%);width:100%;margin:0 auto;display:flex;flex-direction:column;gap:var(--st-s-2)}
 .drawer summary{cursor:pointer;color:var(--st-ink-muted);font-size:var(--st-fs-sm);user-select:none;display:flex;align-items:center;gap:6px}
 .drawer-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--st-s-3);margin-top:var(--st-s-2);padding:var(--st-s-3);background:var(--st-surface-2);border:1px solid var(--st-line);border-radius:var(--st-r-md)}
 .field{display:flex;flex-direction:column;gap:4px}
@@ -59,10 +59,10 @@ main{flex:1;min-height:0;display:flex}
 .status-dot.bad{background:var(--st-danger);box-shadow:0 0 0 3px var(--st-danger-tint)}
 
 /* ---- Monitor / About ---- */
-/* Monitor: viewport-adaptive — primary content fits without scrolling */
-.monitor{flex:1;min-height:0;max-width:1240px;width:100%;margin:0 auto;padding:var(--st-s-3) var(--st-s-4);display:flex;flex-direction:column;gap:var(--st-s-3);overflow-y:auto}
-/* About: 2-column grid for viewport-adaptive layout */
-.about-body{flex:1;min-height:0;max-width:1100px;width:100%;margin:0 auto;padding:var(--st-s-3) var(--st-s-4);display:grid;grid-template-columns:1fr 1fr;gap:var(--st-s-3);align-content:start;overflow-y:auto}
+/* Monitor: fluid layout that adapts to available width */
+.monitor{flex:1;min-height:0;width:100%;margin:0 auto;padding:var(--st-s-3) var(--st-s-4);display:flex;flex-direction:column;gap:var(--st-s-3);overflow-y:auto}
+/* About: fluid 2-column grid that collapses on narrow screens */
+.about-body{flex:1;min-height:0;width:100%;margin:0 auto;padding:var(--st-s-3) var(--st-s-4);display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:var(--st-s-3);align-content:start;overflow-y:auto}
 .about-body>.about-key-card{grid-column:1 / -1}
 
 /* State card */
@@ -73,8 +73,8 @@ main{flex:1;min-height:0;display:flex}
 .state-badges .st-badge.on{opacity:1}
 .state-card__row{display:flex;justify-content:space-between;gap:var(--st-s-4);font-size:var(--st-fs-sm);font-weight:500;font-variant-numeric:tabular-nums}
 
-/* Metric grid */
-.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--st-s-3)}
+/* Metric grid: fluid auto-fit for smooth scaling */
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:var(--st-s-3)}
 .metric-card{padding:var(--st-s-3) var(--st-s-4)}
 .st-metric__value small{font-size:var(--st-fs-md);font-weight:500;color:var(--st-ink-muted);margin-left:4px}
 .st-metric__sub{font-size:var(--st-fs-xs);color:var(--st-ink-muted);font-variant-numeric:tabular-nums;min-height:1em}
@@ -82,8 +82,8 @@ main{flex:1;min-height:0;display:flex}
 .st-metric__spark[data-tone="warn"]{color:var(--st-warn)}
 .st-metric__spark[data-tone="info"]{color:var(--st-info)}
 
-/* Monitor row: gauge + requests */
-.monitor-row{display:grid;grid-template-columns:minmax(200px,1fr) minmax(0,2.4fr);gap:var(--st-s-3)}
+/* Monitor row: fluid gauge + requests */
+.monitor-row{display:grid;grid-template-columns:minmax(180px,1fr) minmax(0,2.2fr);gap:var(--st-s-3)}
 .ctx-card{display:flex;flex-direction:column;gap:var(--st-s-2)}
 .ctx-gauge{position:relative;width:120px;height:120px;margin:var(--st-s-1) auto var(--st-s-2)}
 .ctx-gauge .st-gauge{width:120px;height:120px}
@@ -116,8 +116,8 @@ main{flex:1;min-height:0;display:flex}
 .card .card-title{font-size:var(--st-fs-sm);font-weight:500;color:var(--st-ink-muted)}
 .card .card-value{font-weight:900;font-size:var(--st-fs-stat);line-height:1.1;margin-top:2px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 .card .card-sub{font-size:var(--st-fs-xs);color:var(--st-ink-muted);margin-top:4px}
-.req-layout{flex:1;display:flex;gap:var(--st-s-3);min-height:200px;max-height:35vh;overflow:hidden}
-.req-list-pane{width:38%;min-width:340px;background:var(--st-surface);border:1px solid var(--st-line);border-radius:var(--st-r-lg);box-shadow:var(--st-sh-card);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.req-layout{flex:1;display:flex;gap:var(--st-s-3);min-height:200px;max-height:40vh;overflow:hidden}
+.req-list-pane{width:38%;min-width:280px;background:var(--st-surface);border:1px solid var(--st-line);border-radius:var(--st-r-lg);box-shadow:var(--st-sh-card);display:flex;flex-direction:column;min-height:0;overflow:hidden}
 .req-toolbar{display:flex;gap:var(--st-s-2);padding:var(--st-s-2) var(--st-s-3);border-bottom:1px solid var(--st-line)}
 .req-toolbar .input{flex:1;height:36px}
 .req-list{flex:1;overflow-y:auto}
@@ -178,7 +178,7 @@ main{flex:1;min-height:0;display:flex}
 .keybox{display:flex;align-items:center;gap:var(--st-s-2)}
 .keybox label{font-size:var(--st-fs-sm);color:var(--st-ink-muted)}
 .key-row{display:flex;align-items:center;gap:var(--st-s-2)}
-.key-input{width:220px}
+.key-input{width:min(320px,40vw)}
 .tab-btn{cursor:pointer}
 .topbar{align-items:center}
 .st-header__brand{white-space:nowrap}
@@ -189,38 +189,109 @@ main{flex:1;min-height:0;display:flex}
 /* 抽屉图标旋转 */
 .st-drawer__head .st-icon[data-chevron]{transform:rotate(-90deg)}
 
-/* ---- 窄屏 ---- */
-@media (max-width:1000px){
+/* ============================================================================
+   响应式布局系统 — 针对不同设备类型优化
+   ============================================================================ */
+
+/* ---- PC 宽屏 (>1400px): 充分利用横向空间 ---- */
+@media (min-width:1401px){
+  .chat{max-width:1200px}
+  .st-composer{max-width:1200px}
+  .chat-foot{max-width:1200px}
+  .metrics{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .monitor{max-width:1400px}
+  .about-body{max-width:1300px}
+}
+
+/* ---- 笔记本/平板横屏 (1000-1400px): 标准布局 ---- */
+@media (min-width:1000px) and (max-width:1400px){
+  .metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+
+/* ---- 平板竖屏/大手机 (768-1000px): 紧凑布局 ---- */
+@media (min-width:768px) and (max-width:999px){
   .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
   .monitor-row{grid-template-columns:1fr}
   .cc-bars{grid-template-columns:1fr}
-  .req-layout{flex-direction:column;overflow-y:auto}
-  .req-list-pane{width:100%;min-width:0;min-height:200px}
-  /* About: fall back to 1 column on narrow screens */
+  .req-layout{flex-direction:column;overflow-y:auto;max-height:none}
+  .req-list-pane{width:100%;min-width:0;min-height:180px;max-height:35vh}
   .about-body{grid-template-columns:1fr}
   .about-body>.about-sep{display:block}
 }
-/* ---- 矮视口 ---- */
-@media (max-height:800px){
+
+/* ---- 手机直屏 (<768px): 全宽单列 ---- */
+@media (max-width:767px){
+  /* Header: 紧凑化 */
+  .st-header{padding:0 var(--st-s-3);gap:var(--st-s-2);height:52px}
+  .st-header .st-tabs{margin-left:0}
+  .st-tab{padding:0 10px;font-size:var(--st-fs-sm)}
+  .st-tab .st-icon{display:none}
+  .st-pill #pill-text{display:none}
+  .st-header__brand small{display:none}
+  
+  /* Chat: 全宽 */
+  .chat{padding:var(--st-s-4) var(--st-s-3);max-width:100%}
+  .composer-wrap{padding:0 var(--st-s-3) var(--st-s-3)}
+  .st-composer{max-width:100%}
+  .chat-foot{max-width:100%}
+  .bubble{max-width:92%}
+  .chat-empty__title{font-size:var(--st-fs-xl)}
+  .drawer-grid{grid-template-columns:1fr}
+  
+  /* Monitor: 2列指标 */
+  .monitor{padding:var(--st-s-2) var(--st-s-3);max-width:100%}
+  .metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--st-s-2)}
+  .monitor-row{grid-template-columns:1fr}
+  .cc-bars{grid-template-columns:1fr}
+  
+  /* About: 单列 */
+  .about-body{padding:var(--st-s-2) var(--st-s-3);grid-template-columns:1fr;max-width:100%}
+  .about-body>.about-sep{display:block}
+  .facts{grid-template-columns:1fr;gap:2px}
+  .facts dd{margin-bottom:var(--st-s-2)}
+  
+  /* Request inspector */
+  .req-layout{flex-direction:column;overflow-y:auto;max-height:none}
+  .req-list-pane{width:100%;min-width:0;min-height:160px;max-height:30vh}
+  .kv{grid-template-columns:100px 1fr}
+  
+  /* API key input */
+  .key-input{width:100%;max-width:280px}
+  .keybox label{display:none}
+}
+
+/* ---- 小手机 (<400px): 超紧凑 ---- */
+@media (max-width:399px){
+  .metrics{grid-template-columns:1fr}
+  .st-header__brand{font-size:var(--st-fs-md)}
+  .st-tab{padding:0 8px}
+  .ctx-gauge{width:100px;height:100px}
+  .ctx-gauge .st-gauge{width:100px;height:100px}
+  .ctx-gauge__pct{font-size:var(--st-fs-lg)}
+}
+
+/* ---- 矮视口适配 (笔记本/平板横屏) ---- */
+@media (max-height:800px) and (min-width:768px){
   .metrics{gap:var(--st-s-2)}
   .metric-card{padding:var(--st-s-2) var(--st-s-3)}
   .ctx-gauge{width:100px;height:100px}
   .ctx-gauge .st-gauge{width:100px;height:100px}
   .monitor{gap:var(--st-s-2);padding:var(--st-s-2) var(--st-s-3)}
   .about-body{gap:var(--st-s-2);padding:var(--st-s-2) var(--st-s-3)}
+  .state-card{padding:var(--st-s-2) var(--st-s-3)}
+  .st-metric__spark{height:24px}
 }
-@media (max-width:640px){
-  .st-header{padding:0 var(--st-s-3);gap:var(--st-s-2)}
-  .st-header .st-tabs{margin-left:0}
-  .st-tab{padding:0 10px}
-  .st-tab .st-icon{display:none}
-  .st-pill #pill-text{display:none}
-  .chat{padding:var(--st-s-5) var(--st-s-4)}
-  .composer-wrap{padding:0 var(--st-s-3) var(--st-s-3)}
-  .monitor,.about-body{padding:var(--st-s-4)}
-  .drawer-grid{grid-template-columns:1fr}
-  .keybox label{display:none}
-  .st-header__brand small{display:none}
-  .facts{grid-template-columns:1fr;gap:2px}
-  .facts dd{margin-bottom:var(--st-s-2)}
+
+/* ---- 超矮视口 (手机横屏/小平板) ---- */
+@media (max-height:640px){
+  .st-header{height:48px}
+  .ctx-gauge{width:90px;height:90px}
+  .ctx-gauge .st-gauge{width:90px;height:90px}
+  .metrics{gap:var(--st-s-1)}
+  .metric-card{padding:var(--st-s-1) var(--st-s-2)}
+  .st-metric{gap:4px}
+  .st-metric__value{font-size:var(--st-fs-xl)}
+  .st-metric__spark{height:20px}
+  .monitor{gap:var(--st-s-1);padding:var(--st-s-1) var(--st-s-2)}
+  .state-card__row{font-size:var(--st-fs-xs)}
 }

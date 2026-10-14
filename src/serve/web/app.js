@@ -17,8 +17,8 @@ const I18N = {
     "brand.tag": "本地推理",
     "lang.title": "切换语言（中 / EN）",
     "state.connecting": "连接中…",
-    "chat.title": "向引擎提问吧",
-    "chat.sub": "模型在本机运行，数据不出本机。密钥在 About 页设置。",
+    "chat.title": "本地推理引擎",
+    "chat.sub": "模型在本机运行，数据不会离开您的设备。可在「关于」页设置 API 密钥。",
     "chat.sampler": "采样器",
     "chat.seedLabel": "seed（-1 = 随机）",
     "chat.inputPh": "输入消息，Enter 发送，Shift+Enter 换行",
@@ -27,7 +27,7 @@ const I18N = {
     "chat.assistant": "助手",
     "chat.error": "错误",
     "chat.generating": "生成中…",
-    "chat.prefilling": "正在阅读提示词…（真机预填约 2.5 分钟）",
+    "chat.prefilling": "正在处理提示词…",
     "chat.stopped": "已停止",
     "chat.stoppedSuffix": "（已停止）",
     "chat.failedPrefix": "请求失败：",
@@ -37,10 +37,10 @@ const I18N = {
     "chat.noExport": "没有可导出的对话",
     "chat.exportTitle": "导出为 Markdown",
     "mon.state": "模型状态",
-    "mon.retained": "请求保留",
-    "mon.retainedSub": "条（/api/requests）",
-    "mon.wall": "最近 wall-clock",
-    "mon.decode": "最近解码速度",
+    "mon.retained": "已保留请求",
+    "mon.retainedSub": "条请求记录",
+    "mon.wall": "最近耗时",
+    "mon.decode": "上次解码速度",
     "mon.searchPh": "搜索路径 / 模型 / 状态",
     "mon.filterTitle": "状态过滤",
     "mon.all": "全部状态",
@@ -54,10 +54,10 @@ const I18N = {
     "about.apiKeyHint": "仅当服务端启动时带了 --api-key 才需要",
     "about.apiKeyPh": "不需要",
     "about.show": "显示",
-    "about.apiKeyNote": "密钥只保存在本浏览器（localStorage，跨标签页共享，不上传）。",
+    "about.apiKeyNote": "密钥仅保存在浏览器本地存储中，跨标签页共享，不会上传到任何服务器。",
     "about.engine": "模型与引擎",
     "about.props": "能力（/props）",
-    "about.hw": "本机硬件",
+    "about.hw": "硬件信息",
     "about.svc": "服务与协议",
     "req.copy": "复制",
     "req.copyFail": "复制失败",
@@ -76,13 +76,13 @@ const I18N = {
     "hw.pcieRx": "PCIe RX",
     "hw.cpu": "CPU",
     "hw.ram": "内存",
-    "hw.diskRead": "磁盘读",
+    "hw.diskRead": "磁盘读取",
     "hw.tokS": "tok/s",
     "hw.prefill": "prefill tok/s",
     "hw.igpuFreq": "核显频率",
     "state.loaded": "已加载",
     "state.unloaded": "未加载",
-    "mon.lastDecode": "上次请求解码速度",
+    "mon.lastDecode": "上次解码速度",
     "mon.noDone": "尚无完成请求",
     "err.keyInvalid": "API key 无效或未设置",
     "err.aboutLoad": "About 信息加载失败：",
@@ -129,13 +129,13 @@ const I18N = {
     "req.stoppedBadge": "已停止",
     "req.closed": "已关闭",
     "cc.cachedConv": "已缓存对话",
-    "cc.theirMemory": "其记忆",
-    "cc.enabledNote": "继续已缓存对话的请求会恢复状态，而无需重新阅读。",
-    "cc.disabledNote": "引擎保留上一次对话的状态，后续请求只需阅读新增内容。",
+    "cc.theirMemory": "记忆占用",
+    "cc.enabledNote": "继续已缓存的对话时，引擎会直接恢复状态，无需重新处理。",
+    "cc.disabledNote": "引擎保留上次对话的状态，后续请求只需处理新增内容。",
     "cc.lastReq": "上次请求",
     "cc.reusedSince": "自启动以来已复用",
     "cc.parkedRestored": "已暂停 / 已恢复",
-    "about.clientDesc": "任何兼容 OpenAI 或 Anthropic 的客户端都可使用以下地址。基础 URL：",
+    "about.clientDesc": "任何兼容 OpenAI 或 Anthropic 协议的客户端均可使用以下地址。接口地址：",
     "about.endpointPaths": "端点路径",
     "about.openaiLabel": "OpenAI",
     "about.anthropicLabel": "Anthropic",
@@ -151,8 +151,8 @@ const I18N = {
     "about.gpuCount": "GPU 数量",
     "about.igpu": "核显",
     "about.coresThreads": "核心 / 线程",
-    "about.openaiBase": "OpenAI 基础 URL",
-    "about.anthropicBase": "Anthropic 基础 URL",
+    "about.openaiBase": "OpenAI 接口地址",
+    "about.anthropicBase": "Anthropic 接口地址",
     "about.modelName": "模型名称",
     "about.modelAlias": "模型别名",
     "about.totalSlots": "总槽位",
@@ -160,18 +160,18 @@ const I18N = {
     "about.templater": "模板引擎",
     "about.vision": "视觉",
     "about.buildInfo": "构建信息",
-    "mon.decodeNow": "当前解码",
+    "mon.decodeNow": "实时解码",
     "mon.decodeLabel": "解码",
     "mon.notAvail": "不可用",
     "mon.limit": "上限",
     "mon.cores": "核心",
     "mon.threads": "线程",
     "conv.reusedOf": "复用",
-    "conv.ofPrompt": "提示词 token",
-    "conv.pctAll": "占全部提示词 token",
+    "conv.ofPrompt": "提示词 token 数",
+    "conv.pctAll": "占全部提示词",
     "conv.of": "/",
     "conv.tokens": "token",
-    "conv.ofAll": "占全部提示词 token",
+    "conv.ofAll": "占全部提示词",
     "toast.copied": "已复制",
     "toast.imgOver": "超过 20 MB",
     "toast.fileOver": "超过 512 KB",
@@ -184,6 +184,7 @@ const I18N = {
     "metric.pcie": "PCIe",
     "metric.cpu": "CPU",
     "metric.disk": "磁盘读取",
+    "metric.igpu": "核显频率",
 
     "apiMon.title": "请求检查",
     "apiMon.keyLabel": "API 密钥",
@@ -224,8 +225,8 @@ const I18N = {
     "brand.tag": "Local inference",
     "lang.title": "Switch language (CN / EN)",
     "state.connecting": "Connecting…",
-    "chat.title": "Ask the engine anything",
-    "chat.sub": "The model runs on this PC; nothing leaves it. Set the API key in the About tab.",
+    "chat.title": "Local inference engine",
+    "chat.sub": "The model runs locally — your data never leaves this device. Set the API key in the About tab.",
     "chat.sampler": "Sampler",
     "chat.seedLabel": "seed (-1 = random)",
     "chat.inputPh": "Type a message; Enter to send, Shift+Enter for a new line",
@@ -234,7 +235,7 @@ const I18N = {
     "chat.assistant": "Assistant",
     "chat.error": "Error",
     "chat.generating": "Generating…",
-    "chat.prefilling": "Reading the prompt… (prefill can take minutes on real weights)",
+    "chat.prefilling": "Processing prompt…",
     "chat.stopped": "Stopped",
     "chat.stoppedSuffix": " (stopped)",
     "chat.failedPrefix": "Request failed: ",
@@ -244,9 +245,9 @@ const I18N = {
     "chat.noExport": "Nothing to export",
     "chat.exportTitle": "Export as Markdown",
     "mon.state": "Model state",
-    "mon.retained": "Requests kept",
-    "mon.retainedSub": "entries (/api/requests)",
-    "mon.wall": "Last wall-clock",
+    "mon.retained": "Retained requests",
+    "mon.retainedSub": "request records",
+    "mon.wall": "Last duration",
     "mon.decode": "Last decode speed",
     "mon.searchPh": "Search path / model / state",
     "mon.filterTitle": "Filter by state",
@@ -261,10 +262,10 @@ const I18N = {
     "about.apiKeyHint": "Only needed if the server was started with --api-key",
     "about.apiKeyPh": "Not needed",
     "about.show": "Show",
-    "about.apiKeyNote": "The key stays in this browser only (localStorage, shared across tabs; never uploaded).",
+    "about.apiKeyNote": "The key is stored only in this browser's local storage, shared across tabs, and never uploaded.",
     "about.engine": "Model and engine",
     "about.props": "Capabilities (/props)",
-    "about.hw": "This PC",
+    "about.hw": "Hardware",
     "about.svc": "Service and protocols",
     "req.copy": "Copy",
     "req.copyFail": "Copy failed",
@@ -289,7 +290,7 @@ const I18N = {
     "hw.igpuFreq": "iGPU freq",
     "state.loaded": "Loaded",
     "state.unloaded": "Not loaded",
-    "mon.lastDecode": "Last request decode speed",
+    "mon.lastDecode": "Last decode speed",
     "mon.noDone": "No completed requests yet",
     "err.keyInvalid": "API key invalid or not set",
     "err.aboutLoad": "Failed to load About info: ",
@@ -298,7 +299,7 @@ const I18N = {
     "req.truncated": " (truncated)",
     "req.empty": " (empty)",
     "req.none": " (none)",
-    "req.apiResp": "API response (rebuilt from the record)",
+    "req.apiResp": "API response (rebuilt)",
     "about.tempDefault": "temperature default",
     "about.topPDefault": "top_p default",
     "about.seedDefault": "seed default",
@@ -336,13 +337,13 @@ const I18N = {
     "req.stoppedBadge": "Stopped",
     "req.closed": "Closed",
     "cc.cachedConv": "Cached conversations",
-    "cc.theirMemory": "Their memory",
-    "cc.enabledNote": "A request that continues a cached conversation gets its state back instead of reading it again.",
-    "cc.disabledNote": "The engine keeps the last conversation's state, so a follow-up reads only what is new.",
+    "cc.theirMemory": "Memory usage",
+    "cc.enabledNote": "Continuing a cached conversation restores its state without reprocessing.",
+    "cc.disabledNote": "The engine keeps the last conversation's state so follow-ups only process new content.",
     "cc.lastReq": "Last request",
-    "cc.reusedSince": "Reused since start",
-    "cc.parkedRestored": "Parked / restored",
-    "about.clientDesc": "Any OpenAI- or Anthropic-compatible client works with these addresses. Base URL:",
+    "cc.reusedSince": "Total reused",
+    "cc.parkedRestored": "Parked / Restored",
+    "about.clientDesc": "Any OpenAI- or Anthropic-compatible client can use these addresses. Base URL:",
     "about.endpointPaths": "Endpoint paths",
     "about.openaiLabel": "OpenAI",
     "about.anthropicLabel": "Anthropic",
@@ -367,13 +368,13 @@ const I18N = {
     "about.templater": "Templater",
     "about.vision": "Vision",
     "about.buildInfo": "Build info",
-    "mon.decodeNow": "Decode now",
+    "mon.decodeNow": "Current decode",
     "mon.decodeLabel": "Decode",
     "mon.notAvail": "not available",
     "mon.limit": "limit",
     "mon.cores": "cores",
     "mon.threads": "threads",
-    "conv.reusedOf": "of",
+    "conv.reusedOf": "reused of",
     "conv.ofPrompt": "prompt tokens",
     "conv.pctAll": "of all prompt tokens",
     "conv.of": "of",
@@ -391,6 +392,7 @@ const I18N = {
     "metric.pcie": "PCIe",
     "metric.cpu": "CPU",
     "metric.disk": "Disk read",
+    "metric.igpu": "iGPU freq",
 
     "apiMon.title": "Request monitor",
     "apiMon.keyLabel": "API key",
@@ -444,6 +446,18 @@ function tr(key) {
   return (I18N[lang] && I18N[lang][key]) || (I18N.en[key] || key);
 }
 
+// Translate raw server state strings into the current UI language
+var STATE_TR = {
+  idle: "state.idle",
+  reading: "state.reading",
+  generating: "state.generating",
+  queued: "state.queuedBadge",
+  error: "state.errorBadge",
+};
+function trState(s) {
+  return STATE_TR[s] ? tr(STATE_TR[s]) : s;
+}
+
 // Apply the UI language: data-i18n text, data-i18n-ph placeholders,
 // data-i18n-title/title tooltips; the toggle button label follows along.
 function applyLang() {
@@ -481,6 +495,11 @@ function applyLang() {
     r.textContent = b.classList.contains("user") ? tr("chat.you")
       : b.classList.contains("error") ? tr("chat.error") : tr("chat.assistant");
   });
+  // Refresh dynamically-rendered panels that use tr() at build time
+  // Re-render metric card labels (built once by initMetricCards)
+  initMetricCards();
+  if (window.lastMetrics) renderMonitorTab(window.lastMetrics);
+  if (!$("panel-about").classList.contains("hidden")) refreshAbout();
 }
 
 function toggleLang() {
@@ -883,9 +902,9 @@ async function pollMetrics() {
     const queued = l.queued === undefined ? 0 : l.queued;
     const tok = fmtRate(l.tok_s);
     var chatState = $("chat-state");
-    if (chatState) chatState.textContent = (tr("mon.stateLine") + " " + state + " \u00b7 " + tr("mon.queued") + " " + queued + " \u00b7 " + tok + " " + tr("unit.tokS"));
+    if (chatState) chatState.textContent = (tr("mon.stateLine") + " " + trState(state) + " \u00b7 " + tr("mon.queued") + " " + queued + " \u00b7 " + tok + " " + tr("unit.tokS"));
     setStatusDot(true);
-    if (state !== "idle" && state !== "?") setPill(state, tr("mon.stateLine") + " " + state + " \u00b7 " + tok + " " + tr("unit.tokS"));
+    if (state !== "idle" && state !== "?") setPill(state, tr("mon.stateLine") + " " + trState(state) + " \u00b7 " + tok + " " + tr("unit.tokS"));
     // Push sparkline data even when monitor tab isn't visible, so switching to it shows history
     pushSpark("tok_s", l.tok_s);
     pushSpark("gpu_util", hw.gpu_util);
@@ -895,6 +914,7 @@ async function pollMetrics() {
     pushSpark("gpu_pcie_rx_mb", hw.gpu_pcie_rx_mb);
     pushSpark("cpu", hw.cpu);
     pushSpark("disk_read_mb", hw.disk_read_mb);
+    pushSpark("igpu_freq_mhz", hw.igpu_freq_mhz);
   } catch (e) {
     setStatusDot(false);
     var chatStateEl = $("chat-state");
@@ -928,12 +948,6 @@ function initCommon() {
   if (th) {
     setTheme(currentTheme());   // sync the icon
     th.addEventListener("click", toggleTheme);
-  }
-  // About page dark theme toggle switch
-  var dt = $("dark-toggle");
-  if (dt) {
-    dt.setAttribute("aria-checked", String(currentTheme() === "dark"));
-    dt.addEventListener("click", toggleTheme);
   }
 }
 
@@ -1265,6 +1279,7 @@ var MON_METRICS = [
   {key: "pcie", labelKey: "metric.pcie", icon: "i-link", unit: "", series: "gpu_pcie_rx_mb", tone: "info"},
   {key: "cpu", labelKey: "metric.cpu", icon: "i-cpu", unit: "%", series: "cpu", max: 100},
   {key: "disk", labelKey: "metric.disk", icon: "i-disk", unit: "MB/s", series: "disk_read_mb", tone: "info"},
+  {key: "igpu", labelKey: "metric.igpu", icon: "i-gpu", unit: "MHz", series: "igpu_freq_mhz"},
 ];
 
 function initMetricCards() {
@@ -1503,6 +1518,7 @@ function renderMonitorTab(m) {
   pushSpark("gpu_pcie_rx_mb", hw.gpu_pcie_rx_mb);
   pushSpark("cpu", hw.cpu);
   pushSpark("disk_read_mb", hw.disk_read_mb);
+  pushSpark("igpu_freq_mhz", hw.igpu_freq_mhz);
 
   // Metric cards
   var speed = live.state === "generating" ? live.tok_s : null;
@@ -1520,6 +1536,11 @@ function renderMonitorTab(m) {
   setMetricValue("cpu", hw.cpu == null ? null : fmtNum(hw.cpu), "%",
     st.threads ? (st.cores ? st.cores + " " + tr("mon.cores") + " \u00b7 " : "") + st.threads + " " + tr("mon.threads") : "");
   setMetricValue("disk", hw.disk_read_mb == null ? null : fmtNum(hw.disk_read_mb, 1), "MB/s", "");
+  // iGPU frequency
+  var igpuSub = "";
+  if (hw.igpu_freq_max_mhz != null) igpuSub = tr("mon.limit") + " " + fmtNum(hw.igpu_freq_max_mhz) + " MHz";
+  if (st.igpu_name) igpuSub += (igpuSub ? " · " : "") + st.igpu_name;
+  setMetricValue("igpu", hw.igpu_freq_mhz == null ? null : fmtNum(hw.igpu_freq_mhz), "MHz", igpuSub);
 
   // Sparklines
   sparkline("sp-speed", sparkHistory.tok_s);
@@ -1530,6 +1551,7 @@ function renderMonitorTab(m) {
   sparkline("sp-pcie", sparkHistory.gpu_pcie_rx_mb);
   sparkline("sp-cpu", sparkHistory.cpu, 100);
   sparkline("sp-disk", sparkHistory.disk_read_mb);
+  sparkline("sp-igpu", sparkHistory.igpu_freq_mhz, hw.igpu_freq_max_mhz);
 
   // Context fill gauge
   var ctx = eng.max_context || 0;
@@ -1559,6 +1581,17 @@ function renderMonitorTab(m) {
   if (tempBar) tempBar.style.width = hw.gpu_temp != null ? Math.min(100, hw.gpu_temp) + "%" : "0%";
   var tempText = $("temp-text");
   if (tempText) tempText.textContent = hw.gpu_temp != null ? fmtNum(hw.gpu_temp) + " \u00b0C" : "\u2013";
+  // iGPU frequency bar
+  var igpuBar = $("igpu-bar");
+  if (igpuBar && hw.igpu_freq_max_mhz) igpuBar.style.width = Math.min(100, (100 * (hw.igpu_freq_mhz || 0)) / hw.igpu_freq_max_mhz) + "%";
+  var igpuText = $("igpu-text");
+  if (igpuText) {
+    if (hw.igpu_freq_mhz != null) {
+      igpuText.textContent = fmtNum(hw.igpu_freq_mhz) + " / " + fmtNum(hw.igpu_freq_max_mhz) + " MHz";
+    } else {
+      igpuText.textContent = "\u2013";
+    }
+  }
 
   // Recent requests table (last 10)
   var body = $("req-body");
@@ -1604,9 +1637,13 @@ function renderConvCache(c) {
     if (slotsBar) slotsBar.style.width = (c.slots ? Math.min(100, (100 * c.parked) / c.slots) : 0) + "%";
     var budget = c.budget_mib * 1048576;
     var memText = $("cc-mem-text");
-    if (memText) memText.textContent = (c.bytes / 1073741824).toFixed(1) + " / " + (budget / 1073741824).toFixed(0) + " GB";
+    if (memText) {
+      var bytesGB = (c.bytes != null && !isNaN(c.bytes)) ? (c.bytes / 1073741824).toFixed(1) : "\u2013";
+      var budgetGB = (budget && !isNaN(budget)) ? (budget / 1073741824).toFixed(0) : "\u2013";
+      memText.textContent = bytesGB + " / " + budgetGB + " GB";
+    }
     var memBar = $("cc-mem-bar");
-    if (memBar) memBar.style.width = (budget ? Math.min(100, (100 * c.bytes) / budget) : 0) + "%";
+    if (memBar) memBar.style.width = (budget && c.bytes != null ? Math.min(100, (100 * c.bytes) / budget) : 0) + "%";
   }
   var sum = $("cc-sum");
   if (sum) sum.textContent = c.requests ? fmtNum(c.requests_reused) + " " + tr("conv.reusedOf") + " " + fmtNum(c.requests) + " " + tr("conv.ofPrompt") : "";
@@ -1638,7 +1675,7 @@ async function refreshMonitor() {
     // Update the header pill from metrics
     var live = d.live || {};
     var tok = live.tok_s != null ? fmtNum(live.tok_s, 1) : "\u2014";
-    if (live.state !== "idle" && live.state !== "?") setPill(live.state, tr("mon.stateLine") + " " + live.state + " \u00b7 " + tok + " " + tr("unit.tokS"));
+    if (live.state !== "idle" && live.state !== "?") setPill(live.state, tr("mon.stateLine") + " " + trState(live.state) + " \u00b7 " + tok + " " + tr("unit.tokS"));
   } catch (e) {
     setStatusDot(false);
     var stateLabel = $("state-label");

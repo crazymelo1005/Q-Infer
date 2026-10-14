@@ -149,6 +149,8 @@
           <div class="st-progress"><div class="st-progress__bar" id="ram-bar" style="width:0%"></div></div>
           <div class="bar-row"><span data-i18n="mon.gpuTemp">GPU temperature</span><span class="muted" id="temp-text">&ndash;</span></div>
           <div class="st-progress" data-tone="warn"><div class="st-progress__bar" id="temp-bar" style="width:0%"></div></div>
+          <div class="bar-row"><span data-i18n="hw.igpuFreq">iGPU freq</span><span class="muted" id="igpu-text">&ndash;</span></div>
+          <div class="st-progress" data-tone="info"><div class="st-progress__bar" id="igpu-bar" style="width:0%"></div></div>
         </div>
         <div class="st-card req-card">
           <div class="req-head">
@@ -214,10 +216,6 @@
             <input id="api-key" class="st-input key-input" type="password" autocomplete="off" data-i18n-ph="about.apiKeyPh" placeholder="Not needed">
             <button id="btn-key-toggle" class="btn ghost" type="button" data-i18n="about.show">Show</button>
           </div>
-        </div>
-        <div class="toggle-row">
-          <span data-i18n="theme.dark">Dark theme</span>
-          <button class="st-toggle" id="dark-toggle" role="switch" aria-checked="false" aria-label="Dark theme" data-i18n-title="theme.title"></button>
         </div>
         <p class="dim small" data-i18n="about.apiKeyNote">The key stays in this browser only (localStorage, shared across tabs; never uploaded).</p>
       </div>
