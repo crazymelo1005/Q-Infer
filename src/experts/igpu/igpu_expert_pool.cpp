@@ -12,6 +12,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <mutex>
 #include <vector>
 
 namespace qinfer::experts::igpu {
@@ -239,35 +240,6 @@ void IgpuExpertPool::run(void* jobs_ptr, int n) {
         // Upload activation to device
         if (!rt.upload(job.act, kActQBufBytes, d_act, err)) return;
 
-        // Helper: run a GEMV with planar weight data from the blob
-        auto run_gemv = [&](const StrataPackRow& row, void* out_buf,
-                            std::uint32_t n_rows, std::uint32_t n_blocks,
-                            const char* what) -> bool {
-            // Upload weight codes for this row
-            std::uint64_t codes_bytes = static_cast<std::uint64_t>(n_rows) * n_blocks * 16;
-            std::uint64_t scales_bytes = static_cast<std::uint64_t>(n_rows) * n_blocks * 2;
-            if (!rt.upload(row.codes, codes_bytes, d_wcodes, err)) return false;
-            if (!rt.upload(row.scales, scales_bytes, d_wscales, err)) return false;
-
-            // Update descriptor set: wcodes, wscales, act, out
-            vk::Buffer b[4] = {
-                static_cast<vk::Buffer>(d_wcodes),
-                static_cast<vk::Buffer>(d_wscales),
-                static_cast<vk::Buffer>(d_act),
-                static_cast<vk::Buffer>(out_buf)
-            };
-            rt.update_set(set_gemv, b, 4);
-
-            GemvPc pc{n_rows, n_blocks};
-            std::uint32_t gx = (n_rows + 63) / 64;
-            std::string e2;
-            if (!rt.dispatch(pipe_gemv_, pl_gemv_, set_gemv, &pc, sizeof(pc), gx, 1, 1, e2)) {
-                err = std::string("pool GEMV ") + what + ": " + e2;
-                return false;
-            }
-            return true;
-        };
-
         // Gate GEMV: FF=640 rows, H/QK=40 blocks per row
         // For gate, we need to upload ALL rows at once (the shader processes all rows)
         // The planar blob has all gate rows contiguous. We upload the full gate codes
@@ -375,14 +347,13 @@ void IgpuExpertPool::run(void* jobs_ptr, int n) {
 
 void hybrid_expert_dispatch(void* user, const float* x_f, const int32_t* ids,
                             const float* weights, int64_t n_embd, int64_t k, float* out) {
-    // Lazy-init the pool (once).
+    // Lazy-init the pool (once, thread-safe).
     static IgpuExpertPool pool;
-    static bool initialized = false;
-    if (!initialized) {
+    static std::once_flag init_flag;
+    std::call_once(init_flag, []() {
         std::string err;
         pool.init(err);
-        initialized = true;
-    }
+    });
 
     // Route: large batches to iGPU, small to CPU.
     // The iGPU path requires a non-null user pointer (blob provider).
