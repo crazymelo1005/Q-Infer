@@ -1,0 +1,123 @@
+// Strata planar Q2_0 weights x ActQ activation row GEMV.
+//
+// Differs from q2_0_gemv.comp (GGUF-direct Q2_0 x Q8_0) in two ways:
+//   1. Weight codes and scales are in separate SSBOs (planar), not interleaved.
+//   2. Activation is ActQ (planar int8 codes + fp32 scales + fp32 hx corrections),
+//      not Q8_0 blocks (34 B each with fp16 scale).
+//
+// One Q2_0 weight block spans 64 weights (16 B codes + fp16 scale).
+// One ActQ chunk spans 32 elements (one int8 code each).
+// Therefore one weight block spans TWO activation chunks (2b and 2b+1).
+//
+// Per block b with fp16 weight scale d_w:
+//   For each half h in {0, 1}:
+//     chunk = 2*b + h
+//     dot_h = sum_{j=0}^{31} raw_code_j * q[chunk*32 + j]   (raw codes 0-3)
+//     acc  += d_w * scale[chunk] * float(dot_h)
+//     corr += d_w * hx[chunk]
+//   result = acc - corr
+//
+// The raw codes are 0-3 (representing -1..+2 after subtracting 1). The -1 offset
+// per code contributes -sum(q) per chunk, which is precomputed as hx[chunk] =
+// scale[chunk] * sum[chunk] and subtracted at the end.
+//
+// `precise` on all accumulators and scale multiplications forbids contraction/
+// reassociation: without it the Intel compiler fuses multiplications and results
+// differ from the host in the last bits.
+//
+// Build: glslangValidator -V strata_q2_0_gemv.comp -o strata_q2_0_gemv.spv
+#version 450
+
+layout(local_size_x = 64) in;
+
+// Weight codes: planar, 16 bytes per Q2_0 block. Row r at r * n_blocks * 16.
+layout(std430, binding = 0) readonly buffer WCodes { uint wcodes[]; };
+
+// Weight scales: planar, 2 bytes (fp16) per Q2_0 block. Row r at r * n_blocks * 2.
+layout(std430, binding = 1) readonly buffer WScales { uint wscales[]; };
+
+// ActQ activation buffer (3520 bytes = 880 uints):
+//   act[0..639]:   int8  q[2560]    -- activation codes
+//   act[640..719]: fp32  scale[80]  -- per-chunk scales
+//   act[720..799]: int32 sum[80]    -- per-chunk integer sums (unused with hx)
+//   act[800..879]: fp32  hx[80]     -- precomputed scale*sum corrections
+layout(std430, binding = 2) readonly buffer Act { uint act[]; };
+
+// Output: one fp32 per row.
+layout(std430, binding = 3) writeonly buffer Out { float out_arr[]; };
+
+layout(push_constant) uniform Pc {
+    uint n_rows;    // number of weight rows (FF=640 gate/up, H=2560 down)
+    uint n_blocks;  // Q2_0 blocks per row (H/QK=40 gate/up, FF/QK=10 down)
+} pc;
+
+// Byte access over uint-backed SSBOs (little-endian, same as the host).
+uint wc_byte(uint off)  { return (wcodes[off >> 2]  >> ((off & 3u) * 8u)) & 0xFFu; }
+uint ws_byte(uint off)  { return (wscales[off >> 2] >> ((off & 3u) * 8u)) & 0xFFu; }
+uint act_byte(uint off) { return (act[off >> 2]     >> ((off & 3u) * 8u)) & 0xFFu; }
+
+// fp16 bits -> fp32, matching kernels/fp16.hpp f16_bits_to_f32 (normal and
+// subnormal paths; the scale words are always finite in quantized data).
+float f16(uint h) {
+    uint s = (h >> 15) & 1u;
+    uint e = (h >> 10) & 0x1Fu;
+    uint m = h & 0x3FFu;
+    float v = 0.0;
+    if (e == 0u) {
+        v = ldexp(float(m), -24);
+    } else if (e != 31u) {
+        v = ldexp(1.0 + float(m) / 1024.0, int(e) - 15);
+    }
+    return s != 0u ? -v : v;
+}
+
+void main() {
+    uint row = gl_GlobalInvocationID.x;
+    if (row >= pc.n_rows) return;
+
+    uint wc_row_off = row * pc.n_blocks * 16u;  // byte offset into wcodes for this row
+    uint ws_row_off = row * pc.n_blocks * 2u;   // byte offset into wscales for this row
+
+    precise float acc  = 0.0;
+    precise float corr = 0.0;
+
+    for (uint b = 0u; b < pc.n_blocks; ++b) {
+        // Weight scale for this block (fp16 -> fp32).
+        uint ws_off = ws_row_off + b * 2u;
+        precise float d_w = f16(ws_byte(ws_off) | (ws_byte(ws_off + 1u) << 8));
+
+        // Weight codes byte offset for this block (16 bytes).
+        uint wc_blk_off = wc_row_off + b * 16u;
+
+        // Two halves per weight block, each mapping to one ActQ chunk.
+        for (uint h = 0u; h < 2u; ++h) {
+            uint chunk = 2u * b + h;
+
+            // Integer dot product: raw 2-bit codes (0-3) * signed int8 activation codes.
+            // 8 bytes of weight codes, 4 codes per byte = 32 codes total.
+            int sb = 0;
+            for (uint bi = 0u; bi < 8u; ++bi) {
+                uint code_byte = wc_byte(wc_blk_off + h * 8u + bi);
+                for (uint j = 0u; j < 4u; ++j) {
+                    int raw_code = int((code_byte >> (2u * j)) & 3u);
+                    int q = int(act_byte(chunk * 32u + bi * 4u + j));
+                    if (q > 127) q -= 256;  // interpret uint8 as signed int8
+                    sb += raw_code * q;
+                }
+            }
+
+            // Activation scale and precomputed correction for this chunk.
+            precise float a_scale = uintBitsToFloat(act[640u + chunk]);
+            precise float a_hx    = uintBitsToFloat(act[800u + chunk]);
+
+            // Scale the integer dot by activation scale, then by weight scale.
+            // Break into two precise steps to prevent the compiler from fusing
+            // d_w * a_scale * float(sb) into a single contracted expression.
+            precise float ds = d_w * a_scale;
+            acc  += ds * float(sb);
+            corr += d_w * a_hx;
+        }
+    }
+
+    out_arr[row] = acc - corr;
+}

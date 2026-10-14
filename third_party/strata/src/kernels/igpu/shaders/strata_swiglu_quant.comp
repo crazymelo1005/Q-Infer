@@ -1,0 +1,80 @@
+// Fused SwiGLU + ActQ quantization for Strata iGPU path.
+// Computes h = silu(gate) * up, then quantizes each 32-element chunk into
+// Strata's ActQ format: int8 codes, fp32 scales, int32 sums, fp32 hx corrections.
+//
+// One invocation per chunk (32 elements). With FF=640 and QKA=32 there are
+// 20 chunks; local_size_x=64 means 20 of 64 invocations do work per workgroup.
+//
+// Output buffer layout (binding 2, uint offsets):
+//   o[0..159]       int8  q[FF]        — 640 bytes of quantized codes
+//   o[160..179]     float scale[NC]    — 20 fp32 scales
+//   o[180..199]     int32 sum[NC]      — 20 integer sums of codes per chunk
+//   o[200..219]     float hx[NC]       — 20 fp32 scale*sum corrections
+// Where FF=640, NC=FF/QKA=20. Total = 220 uints = 880 bytes.
+//
+// Build: see README.md.
+#version 450
+
+layout(local_size_x = 64) in;
+
+// Input: gate and up projections, fp32, length FF=640
+layout(std430, binding = 0) readonly buffer G { float g[]; };
+layout(std430, binding = 1) readonly buffer U { float u[]; };
+
+// Output: ActQ format (planar arrays)
+layout(std430, binding = 2) buffer O { uint o[]; };
+
+layout(push_constant) uniform Pc {
+    uint n_elems;   // FF = 640
+    uint n_chunks;  // FF / QKA = 20
+} pc;
+
+const uint QKA = 32u;  // elements per chunk
+
+void main() {
+    uint k = gl_GlobalInvocationID.x;
+    if (k >= pc.n_chunks) return;
+
+    uint base = k * QKA;
+
+    // Pass 1: compute silu(g)*u and find amax
+    precise float amax = 0.0;
+    precise float h[QKA];
+    for (uint j = 0u; j < QKA; ++j) {
+        precise float x = g[base + j];
+        h[j] = (x / (1.0 + exp(-x))) * u[base + j];
+        float ax = abs(h[j]);
+        amax = ax > amax ? ax : amax;
+    }
+
+    // Compute scale (fp32) and inverse scale
+    precise float scale = amax / 127.0;
+    precise float inv = (scale > 0.0) ? 1.0 / scale : 0.0;
+
+    // Write scale as fp32
+    o[160u + k] = floatBitsToUint(scale);
+
+    // Pass 2: quantize, write codes, accumulate sum
+    precise int sum = 0;
+    for (uint j = 0u; j < QKA; ++j) {
+        precise float t = h[j] * inv;
+        // Round-half-away-from-zero: int(t + copysign(0.5, t))
+        float half_sign = (t >= 0.0) ? 0.5 : -0.5;
+        int q = int(t + half_sign);
+        q = clamp(q, -127, 127);
+        sum += q;
+
+        // Pack int8 into uint array at q region (offset 0)
+        // 4 int8 values per uint, little-endian byte order
+        uint idx = (base + j) >> 2u;     // which uint
+        uint byte_lane = (base + j) & 3u; // which byte within uint
+        uint shift = byte_lane * 8u;
+        uint existing = o[idx];
+        uint masked = existing & ~(0xFFu << shift);
+        o[idx] = masked | ((uint(q) & 0xFFu) << shift);
+    }
+
+    // Write sum and hx
+    o[180u + k] = uint(sum);
+    o[200u + k] = floatBitsToUint(scale * float(sum));
+}

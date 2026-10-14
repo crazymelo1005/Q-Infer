@@ -603,7 +603,7 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
 
   add_executable(strata src/program/generate.cpp)
   target_include_directories(strata PRIVATE ${_strata_gpu_include_directories})
-  target_link_libraries(strata PRIVATE strata_engine strata_prefill strata_spec ${_strata_gpu_runtime_target})
+  target_link_libraries(strata PRIVATE strata_engine strata_prefill strata_spec strata_igpu_pool ${_strata_gpu_runtime_target})
 
   if(STRATA_ENABLE_HIP)
     enable_testing()
@@ -1204,6 +1204,24 @@ endif()
 set_property(SOURCE src/kernels/cpu/q2_avx2.cpp APPEND PROPERTY COMPILE_DEFINITIONS ${_strata_avxvnni})
 find_package(Threads REQUIRED)
 target_link_libraries(strata_kernels_cpu PUBLIC Threads::Threads)
+
+# ---- strata_igpu_pool (iGPU Vulkan expert pool; opt-in via STRATA_IGPU_POOL=1) ----
+# Vulkan is loaded via dlopen at runtime, so no link-time Vulkan dependency.
+# The pool calls strata::kernels::cpu::act_quant_q8_1 (from strata_kernels_cpu)
+# and the CPU fallback is wired from generate.cpp.
+add_library(strata_igpu_pool STATIC
+  src/kernels/igpu/strata_pack_adapter.cpp
+  src/kernels/igpu/igpu_expert_pool.cpp
+  src/kernels/igpu/vulkan_runtime.cpp
+)
+target_include_directories(strata_igpu_pool PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(strata_igpu_pool PUBLIC strata_kernels_cpu Threads::Threads)
+# dl is needed for dlopen/dlsym/dlerror on Linux
+if(UNIX AND NOT APPLE)
+  target_link_libraries(strata_igpu_pool PRIVATE ${CMAKE_DL_LIBS})
+endif()
 
 # ---- plan v0.3 P6: the i-quant models' CPU experts (IQ2_XS / IQ3_XXS files) ----
 #

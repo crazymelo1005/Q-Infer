@@ -346,6 +346,11 @@ add_executable(test_igpu_expert_pool tests/test_igpu_expert_pool.cpp)
 target_link_libraries(test_igpu_expert_pool PRIVATE qinfer_experts)
 add_test(NAME igpu_expert_pool COMMAND test_igpu_expert_pool)
 
+# Strata iGPU pool: end-to-end integration test (act_quant, pack adapter, hybrid fallback).
+add_executable(test_strata_igpu_e2e tests/test_strata_igpu_e2e.cpp)
+target_link_libraries(test_strata_igpu_e2e PRIVATE qinfer_experts)
+add_test(NAME strata_igpu_e2e COMMAND test_strata_igpu_e2e)
+
 add_executable(test_thread_pool tests/test_thread_pool.cpp)
 target_link_libraries(test_thread_pool PRIVATE qinfer_experts)
 

@@ -77,6 +77,7 @@
 #include "strata/spec/suffix_drafter.hpp"
 #include "strata/program/batch_groups.hpp"
 #include "strata/kernels/cvec.hpp"
+#include "strata/kernels/igpu/igpu_expert_pool.hpp"
 #include "strata/core/progress.hpp"
 #include "strata/core/device.hpp"
 #include "strata/core/emulate.hpp"
@@ -1000,6 +1001,15 @@ void drive_pool(void* user, const float* x_f, const int32_t* ids, const float* w
         std::fwrite(ids, sizeof(int32_t), (size_t) k, t->routing);
         std::fwrite(weights, sizeof(float), (size_t) k, t->routing);
     }
+}
+
+// iGPU pool wrapper: bridges Drive* (the user pointer in this file) to
+// ExpertDispatch* (what the hybrid dispatcher and expert_pool_dispatch expect).
+// When STRATA_IGPU_POOL=1, pool_fn is set to this wrapper instead of drive_pool.
+static void igpu_drive_wrapper(void* user, const float* x_f, const int32_t* ids,
+                               const float* weights, int64_t n_embd, int64_t k, float* out) {
+    Drive* t = static_cast<Drive*>(user);
+    strata::kernels::igpu::hybrid_expert_dispatch(&t->d, x_f, ids, weights, n_embd, k, out);
 }
 
 /// Plan v0.3 P6: the pool for a verify window.
@@ -5690,7 +5700,21 @@ int main(int argc, char** argv) {
         }
         drive.routing = routing;
     }
-    strata::core::PoolFn pool_fn = o.no_pool ? nullptr : &drive_pool;
+    strata::core::PoolFn pool_fn = nullptr;
+    if (!o.no_pool) {
+        // STRATA_IGPU_POOL=1: route through the iGPU hybrid dispatcher (Vulkan compute
+        // shaders for large expert batches, CPU fallback for small ones).
+        const char* igpu_env = std::getenv("STRATA_IGPU_POOL");
+        if (igpu_env != nullptr && std::strcmp(igpu_env, "1") == 0) {
+            // Wire the CPU fallback to expert_pool_dispatch. The wrapper above
+            // extracts ExpertDispatch from Drive, so the user pointer is correct.
+            strata::kernels::igpu::set_cpu_dispatch_fn(&strata::core::expert_pool_dispatch);
+            pool_fn = &igpu_drive_wrapper;
+            std::fprintf(stderr, "strata generate: iGPU expert pool enabled (STRATA_IGPU_POOL=1)\n");
+        } else {
+            pool_fn = &drive_pool;
+        }
+    }
     // The hit hook rides the same switch as the pool: with no pool there is no `parts` staging to
     // write into, and a hit path with nowhere to write is a wrong token rather than an error.
     strata::core::HitFn hit_fn =
