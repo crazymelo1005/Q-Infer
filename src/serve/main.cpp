@@ -158,6 +158,11 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
         c.backend = v;
     }
     if (a.count("--engine-exe")) c.engine_exe = a["--engine-exe"];
+    // M5b: vision encoder (optional; when --mmproj is given, the server starts qinfer-vision
+    // and accepts image_url parts in chat requests).
+    if (a.count("--mmproj")) c.mmproj_path = a["--mmproj"];
+    if (a.count("--vision-binary")) c.vision_binary = a["--vision-binary"];
+    if (a.count("--media-root")) c.media_root = a["--media-root"];
     c.engine_args = std::move(engine_args);
     if (c.backend == "strata" && c.engine_exe.empty()) {
         err = "--backend defaults to strata, which needs --engine-exe <path to the vendored "
