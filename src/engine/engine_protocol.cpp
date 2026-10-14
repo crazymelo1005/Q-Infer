@@ -96,6 +96,31 @@ std::string build_bgen(int slot, int64_t max_new, const SamplingParams& p,
            " " + join_ids(ids);
 }
 
+// GENI/BGENI: vision embedding injection. Unlike GEN, the ids are space-separated (not
+// comma-joined), and an embedding file path precedes them.
+namespace {
+std::string join_ids_spaced(const std::vector<int32_t>& ids) {
+    std::string out;
+    for (std::size_t i = 0; i < ids.size(); ++i) {
+        if (i != 0) out += ' ';
+        out += std::to_string(ids[i]);
+    }
+    return out;
+}
+}  // namespace
+
+std::string build_geni(int64_t max_new, const SamplingParams& p,
+                       const std::string& emb_file, const std::vector<int32_t>& ids) {
+    return "GENI " + std::to_string(max_new) + sampling_keys(p) + " " + emb_file + " " +
+           join_ids_spaced(ids);
+}
+
+std::string build_bgeni(int slot, int64_t max_new, const SamplingParams& p,
+                        const std::string& emb_file, const std::vector<int32_t>& ids) {
+    return "BGENI " + std::to_string(slot) + " " + std::to_string(max_new) + sampling_keys(p) +
+           " " + emb_file + " " + join_ids_spaced(ids);
+}
+
 std::string build_bstop(int slot) { return "BSTOP " + std::to_string(slot); }
 std::string build_stop() { return "STOP"; }
 std::string build_quit() { return "QUIT"; }

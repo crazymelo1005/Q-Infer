@@ -102,6 +102,42 @@ int main(int argc, char** argv) {
     // An unrecognized line is kOther, never a failure: the protocol grows.
     CHECK(parse_event("SAVED").kind == EventKind::kOther);
 
+    // ---- GENI / BGENI (vision embedding injection) ----
+    // GENI <max_new>[ <key>=<value> ...] <emb_file> <id>[ <id> ...]
+    // ids are space-separated (unlike GEN which comma-joins), and the embedding file path
+    // comes before them.
+    {
+        SamplingParams gp;
+        auto line = build_geni(100, gp, "/path/to/emb.sve1", {248056, 248056});
+        CHECK(line == "GENI 100 /path/to/emb.sve1 248056 248056");
+    }
+    // Sampling keys are emitted the same way as GEN.
+    {
+        SamplingParams gp;
+        gp.temperature = 0.8f;
+        auto line = build_geni(50, gp, "/emb.sve1", {100});
+        CHECK(line == "GENI 50 temperature=0.8 /emb.sve1 100");
+    }
+    // No keys, single id.
+    {
+        SamplingParams gp;
+        auto line = build_geni(32, gp, "/x.sve1", {7});
+        CHECK(line == "GENI 32 /x.sve1 7");
+    }
+    // BGENI: batched variant with slot prefix.
+    {
+        SamplingParams gp;
+        auto line = build_bgeni(2, 100, gp, "/emb.sve1", {248056, 248056});
+        CHECK(line == "BGENI 2 100 /emb.sve1 248056 248056");
+    }
+    // BGENI with sampling keys.
+    {
+        SamplingParams gp;
+        gp.top_p = 0.95f;
+        auto line = build_bgeni(0, 64, gp, "/e.sve1", {42});
+        CHECK(line == "BGENI 0 64 top_p=0.95 /e.sve1 42");
+    }
+
     if (argc > 1) sweep(argv[1]);
     return 0;
 }

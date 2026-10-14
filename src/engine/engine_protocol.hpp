@@ -32,6 +32,13 @@ std::string sampling_keys(const SamplingParams&);
 
 std::string build_gen(int64_t max_new, const SamplingParams&, const std::vector<int32_t>& ids);
 std::string build_bgen(int slot, int64_t max_new, const SamplingParams&, const std::vector<int32_t>& ids);
+// GENI/BGENI: vision embedding injection. Same sampling-key shape as GEN/BGEN, but the token
+// list is an embedding file path followed by space-separated image token ids (not comma-joined).
+// Wire format: "GENI <max_new>[ <key>=<value> ...] <emb_file> <id>[ <id> ...]"
+std::string build_geni(int64_t max_new, const SamplingParams&,
+                       const std::string& emb_file, const std::vector<int32_t>& ids);
+std::string build_bgeni(int slot, int64_t max_new, const SamplingParams&,
+                        const std::string& emb_file, const std::vector<int32_t>& ids);
 std::string build_bstop(int slot);   // "BSTOP <slot>"
 std::string build_stop();            // "STOP"
 std::string build_quit();            // "QUIT"
