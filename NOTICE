@@ -91,3 +91,17 @@ commit 3cf03257f219afbe7334045ff7c6a06ac68c627d (llama.cpp, MIT) from a local ch
 `git archive` into the git-ignored `build-vision/llama.cpp/`. It is never downloaded and never
 vendored, and the built encoder is spawned by the serving layer rather than linked into
 `qinfer-server`, so the zero-runtime-dependency rule still holds (ADR-013, ADR-008).
+
+----------
+
+iGPU Expert Pool Shaders (ADR-020)
+-----------------------------------
+
+The Vulkan compute shaders for the Strata iGPU expert pool (`strata_q2_0_gemv.comp`,
+`strata_swiglu_quant.comp`) are original works developed for this project. They implement
+Q2_0 matrix-vector multiplication and fused SwiGLU+quantization for Intel iGPU hardware
+using the Vulkan 1.0 compute API.
+
+These shaders are compiled offline with glslangValidator and embedded as byte arrays
+in `spv_data.hpp`. The Vulkan runtime is loaded via dlopen at runtime, requiring no
+link-time dependency on libvulkan (ADR-008, ADR-020).

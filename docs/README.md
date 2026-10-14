@@ -41,6 +41,7 @@
 | [`design/adr/ADR-017-serve-engine-seam.md`](design/adr/ADR-017-serve-engine-seam.md) | 服务层引擎缝：`Backend` 接口与 `--backend strata|inhouse` | 接受 |
 | [`design/adr/ADR-018-default-backend-strata.md`](design/adr/ADR-018-default-backend-strata.md) | 默认计算后端切到厂商化引擎（P2 验收后） | 接受 |
 | [`design/adr/ADR-019-igpu-not-for-experts.md`](design/adr/ADR-019-igpu-not-for-experts.md) | 核显不参与未命中专家计算（P3a 证伪点读数：设备慢于 CPU 池） | 接受（关闭 ADR-005 第二节） |
+| [`design/adr/ADR-020-strata-igpu-pool.md`](design/adr/ADR-020-strata-igpu-pool.md) | Strata iGPU 专家池：缝外独立池承接未命中专家，批 >4 走 Vulkan，opt-in | 接受 |
 | [`design/adr/ADR-013-vision-port-and-dependency-boundary.md`](design/adr/ADR-013-vision-port-and-dependency-boundary.md) | 视觉编码器取材：移植 Strata tools/vision、llama.cpp 构建期物化、只 spawn 不链接 | 接受 |
 | [glossary.md](glossary.md) | 术语的唯一口径 | 完成 |
 | [hardware.md](hardware.md) | 两套测试环境的硬件规格 | 完成 |
