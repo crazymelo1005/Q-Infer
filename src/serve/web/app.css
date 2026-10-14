@@ -175,6 +175,7 @@ main{flex:1;min-height:0;display:flex}
 .st-metric__spark{display:block;overflow:visible}
 .st-metric__spark[data-tone="warn"]{color:var(--st-warn)}
 .st-metric__spark[data-tone="info"]{color:var(--st-info)}
+.st-metric__spark .axis-max,.st-metric__spark .axis-min{font:500 4px var(--st-font);fill:var(--st-ink-muted);opacity:0.7}
 
 /* Monitor row: fluid gauge + requests */
 .monitor-row{display:grid;grid-template-columns:minmax(180px,1fr) minmax(0,2.2fr);gap:var(--st-s-3)}

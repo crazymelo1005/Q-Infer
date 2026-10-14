@@ -179,6 +179,12 @@
                       stroke-dasharray="235.6 314.2" transform="rotate(135 60 60)"/>
               <circle class="st-gauge__fill" id="ctx-fill" cx="60" cy="60" r="50" fill="none" stroke-width="10"
                       stroke-linecap="round" stroke-dasharray="0 314.2" transform="rotate(135 60 60)"/>
+              <!-- Tick marks at 0%, 25%, 50%, 75%, 100% -->
+              <line class="st-gauge__tick" x1="60" y1="15" x2="60" y2="10" transform="rotate(135 60 60)"/>
+              <line class="st-gauge__tick" x1="60" y1="15" x2="60" y2="10" transform="rotate(202.5 60 60)"/>
+              <line class="st-gauge__tick" x1="60" y1="15" x2="60" y2="10" transform="rotate(270 60 60)"/>
+              <line class="st-gauge__tick" x1="60" y1="15" x2="60" y2="10" transform="rotate(337.5 60 60)"/>
+              <line class="st-gauge__tick" x1="60" y1="15" x2="60" y2="10" transform="rotate(45 60 60)"/>
             </svg>
             <div class="ctx-gauge__label">
               <span class="ctx-gauge__pct" id="ctx-pct">0%</span>
@@ -186,13 +192,13 @@
             </div>
           </div>
           <div class="bar-row"><span data-i18n="mon.vram">VRAM</span><span class="muted" id="vram-text">&ndash;</span></div>
-          <div class="st-progress"><div class="st-progress__bar" id="vram-bar" style="width:0%"></div></div>
+          <div class="st-progress st-progress--tick"><div class="st-progress__bar" id="vram-bar" style="width:0%"></div><div class="st-progress__ticks"><span style="left:25%"></span><span style="left:50%"></span><span style="left:75%"></span></div></div>
           <div class="bar-row"><span data-i18n="mon.sysRam">System RAM</span><span class="muted" id="ram-text">&ndash;</span></div>
-          <div class="st-progress"><div class="st-progress__bar" id="ram-bar" style="width:0%"></div></div>
+          <div class="st-progress st-progress--tick"><div class="st-progress__bar" id="ram-bar" style="width:0%"></div><div class="st-progress__ticks"><span style="left:25%"></span><span style="left:50%"></span><span style="left:75%"></span></div></div>
           <div class="bar-row"><span data-i18n="mon.gpuTemp">GPU temperature</span><span class="muted" id="temp-text">&ndash;</span></div>
-          <div class="st-progress" data-tone="warn"><div class="st-progress__bar" id="temp-bar" style="width:0%"></div></div>
+          <div class="st-progress st-progress--tick" data-tone="warn"><div class="st-progress__bar" id="temp-bar" style="width:0%"></div><div class="st-progress__ticks"><span style="left:25%"></span><span style="left:50%"></span><span style="left:75%"></span></div></div>
           <div class="bar-row"><span data-i18n="hw.igpuFreq">iGPU freq</span><span class="muted" id="igpu-text">&ndash;</span></div>
-          <div class="st-progress" data-tone="info"><div class="st-progress__bar" id="igpu-bar" style="width:0%"></div></div>
+          <div class="st-progress st-progress--tick" data-tone="info"><div class="st-progress__bar" id="igpu-bar" style="width:0%"></div><div class="st-progress__ticks"><span style="left:25%"></span><span style="left:50%"></span><span style="left:75%"></span></div></div>
         </div>
         <div class="st-card req-card">
           <div class="req-head">

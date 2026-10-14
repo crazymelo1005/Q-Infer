@@ -2280,6 +2280,8 @@ function initMetricCards() {
       '<svg class="st-metric__spark" id="sp-' + m.key + '" viewBox="0 0 100 32" preserveAspectRatio="none"' + toneAttr + '>' +
       '<path class="area" fill="currentColor" opacity=".12"/>' +
       '<path class="line" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>' +
+      '<text class="axis-max" x="98" y="5" text-anchor="end">0</text>' +
+      '<text class="axis-min" x="98" y="28" text-anchor="end">0</text>' +
       '</svg></div></div>';
   }).join("");
 }
@@ -2295,12 +2297,19 @@ function sparkline(id, values, max) {
     return;
   }
   var top = Math.max(max || 0, Math.max.apply(null, v), 1);
+  var min = Math.min.apply(null, v.filter(function(x) { return x > 0; })) || 0;
   var pts = v.map(function (x, i) {
     return [(i / (v.length - 1)) * 100, 30 - (x / top) * 26];
   });
   var line = pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(2) + "," + p[1].toFixed(2); }).join("");
   svg.querySelector(".line").setAttribute("d", line);
   svg.querySelector(".area").setAttribute("d", line + "L100,32L0,32Z");
+  
+  // Update axis labels
+  var maxLabel = svg.querySelector(".axis-max");
+  var minLabel = svg.querySelector(".axis-min");
+  if (maxLabel) maxLabel.textContent = top >= 1000 ? (top/1000).toFixed(1) + "k" : Math.round(top);
+  if (minLabel) minLabel.textContent = min >= 1000 ? (min/1000).toFixed(1) + "k" : Math.round(min);
 }
 
 function setMetricValue(key, value, unit, sub) {
