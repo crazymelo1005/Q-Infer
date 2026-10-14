@@ -27,7 +27,12 @@ BOLD_MAX_PER_100 = 10
 
 
 def md_files() -> list[Path]:
-    return sorted(p for p in ROOT.rglob("*.md") if ".git" not in p.parts)
+    return sorted(
+        p
+        for p in ROOT.rglob("*.md")
+        if ".git" not in p.parts
+        and not any(part.startswith("build-") for part in p.parts)
+    )
 
 
 def rel(path: Path) -> str:

@@ -79,3 +79,15 @@ Test data (P2): `tests/data/chat_golden.json` and `tests/data/chat_template.jinj
 from the same upstream checkout (`serve/`), used as the byte-parity oracle for our chat
 renderer (`tests/test_chat_golden.cpp`). They are data, not code; the renderer is ours.
 
+----------
+
+Vision encoder (M5a): `tools/vision/qinfer_vision.cpp` and `tools/vision/CMakeLists.txt` are a
+port of the same two files from Strata `tools/vision` (same MIT copyright holder as above),
+tag `v0.1.43.1`. `measure/vision_port_check.py` derives them from that tag and lists every
+allowed divergence; the stdout line protocol and the SVE1 byte layout are upstream's verbatim.
+
+That encoder links llama.cpp, which is NOT in this repository. `tools/build_vision.sh` extracts
+commit 3cf03257f219afbe7334045ff7c6a06ac68c627d (llama.cpp, MIT) from a local checkout with
+`git archive` into the git-ignored `build-vision/llama.cpp/`. It is never downloaded and never
+vendored, and the built encoder is spawned by the serving layer rather than linked into
+`qinfer-server`, so the zero-runtime-dependency rule still holds (ADR-013, ADR-008).
