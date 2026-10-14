@@ -2296,10 +2296,18 @@ function sparkline(id, values, max) {
     svg.querySelector(".area").setAttribute("d", "");
     return;
   }
-  var top = Math.max(max || 0, Math.max.apply(null, v), 1);
-  var min = Math.min.apply(null, v.filter(function(x) { return x > 0; })) || 0;
-  var pts = v.map(function (x, i) {
-    return [(i / (v.length - 1)) * 100, 30 - (x / top) * 26];
+  // vram stores bytes; convert to GB for display and shape calculation
+  var isVram = (id === "sp-vram");
+  var divisor = isVram ? 1073741824 : 1;
+  var vDisplay = v.map(function(x) { return x / divisor; });
+  var maxDisplay = max ? max / divisor : 0;
+  
+  var top = Math.max(maxDisplay, Math.max.apply(null, vDisplay), 0.01);
+  var positiveValues = vDisplay.filter(function(x) { return x > 0; });
+  var min = positiveValues.length ? Math.min.apply(null, positiveValues) : 0;
+  
+  var pts = vDisplay.map(function (x, i) {
+    return [(i / (vDisplay.length - 1)) * 100, 30 - (x / top) * 26];
   });
   var line = pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(2) + "," + p[1].toFixed(2); }).join("");
   svg.querySelector(".line").setAttribute("d", line);
@@ -2308,8 +2316,16 @@ function sparkline(id, values, max) {
   // Update axis labels
   var maxLabel = svg.querySelector(".axis-max");
   var minLabel = svg.querySelector(".axis-min");
-  if (maxLabel) maxLabel.textContent = top >= 1000 ? (top/1000).toFixed(1) + "k" : Math.round(top);
-  if (minLabel) minLabel.textContent = min >= 1000 ? (min/1000).toFixed(1) + "k" : Math.round(min);
+  if (maxLabel) maxLabel.textContent = fmtAxis(top);
+  if (minLabel) minLabel.textContent = fmtAxis(min);
+}
+
+function fmtAxis(v) {
+  if (v === 0) return "0";
+  if (v >= 1000) return (v / 1000).toFixed(1) + "k";
+  if (v >= 100) return Math.round(v);
+  if (v >= 10) return v.toFixed(1);
+  return v.toFixed(2);
 }
 
 function setMetricValue(key, value, unit, sub) {
