@@ -321,13 +321,23 @@ std::string parse_cpu_model_name(const std::string& line) {
     return line.substr(first, last - first + 1);
 }
 
-Telemetry::Telemetry(ExtraFn extra) : extra_(std::move(extra)) {
+Telemetry::Telemetry(ExtraFn extra, std::vector<int> gpu_filter) : extra_(std::move(extra)) {
     // 卡发现：NVML 优先（index 0..64 逐个取句柄到失败），全失败 → AMD sysfs 卡 0。
+    // When gpu_filter is non-empty, only discover GPUs whose index is in the filter list.
+    // This lets the Strata backend restrict monitoring to the GPUs the engine actually uses
+    // (parsed from --engine-arg --gpu), matching Strata's own monitoring convention.
     nvml_ = load_nvml();
     if (nvml_) {
         for (int i = 0; i < 64; ++i) {
             void* dev = nullptr;
             if (nvml_->get_handle(static_cast<unsigned>(i), &dev) != 0) break;
+            if (!gpu_filter.empty()) {
+                bool found = false;
+                for (int fi : gpu_filter) {
+                    if (fi == i) { found = true; break; }
+                }
+                if (!found) continue;
+            }
             auto* card = new NvmlCard();
             card->api = nvml_;
             card->dev = dev;

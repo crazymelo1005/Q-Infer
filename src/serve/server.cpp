@@ -277,7 +277,9 @@ Serve::Serve(ServeConfig cfg, std::shared_ptr<Backend> eng)
     // T13: telemetry starts in the constructor (launch is the per-request entry point; placed there,
     // tel_ would be null when there are no requests and the first frame of T14's /metrics would have
     // no data); sampling spans the process lifetime, destruction joins via tel_'s dtor.
-    tel_ = std::make_unique<Telemetry>([this] { return telemetry_extra(); });
+    // For the Strata backend, pass the engine's GPU selection so telemetry only monitors the GPUs
+    // the engine actually uses (matching Strata's own monitoring convention).
+    tel_ = std::make_unique<Telemetry>([this] { return telemetry_extra(); }, cfg_.strata_gpu_devices);
     tel_->start();
     // M5b: start vision encoder if configured.
     if (!cfg_.mmproj_path.empty()) {

@@ -73,6 +73,8 @@ struct ServeConfig {
     std::string backend = "strata";
     std::string engine_exe;                  // --engine-exe: path to the vendored engine binary
     std::vector<std::string> engine_args;    // --engine-arg ARG, repeatable (order preserved)
+    std::vector<int> strata_gpu_devices;     // parsed from --engine-arg --gpu for strata backend;
+                                             // empty = monitor all visible GPUs (engine default)
     // Facade geometry passthrough (defaults = real-model derived values; integration tests override).
     FacadeConfig facade;
     // Vision (M5b): optional image encoder. When mmproj_path is non-empty, the server starts

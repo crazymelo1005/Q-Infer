@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <map>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -166,6 +167,23 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     if (a.count("--vision-binary")) c.vision_binary = a["--vision-binary"];
     if (a.count("--media-root")) c.media_root = a["--media-root"];
     c.engine_args = std::move(engine_args);
+    // For the Strata backend, parse --gpu from engine_args so telemetry can monitor only the GPUs
+    // the engine actually uses (matching Strata's own monitoring convention). Without this, telemetry
+    // would show all visible GPUs regardless of what the engine subprocess is using.
+    if (c.backend == "strata") {
+        for (std::size_t i = 0; i + 1 < c.engine_args.size(); ++i) {
+            if (c.engine_args[i] == "--gpu") {
+                const std::string& v = c.engine_args[i + 1];
+                if (v != "auto") {
+                    std::istringstream ss(v);
+                    for (std::string tok; std::getline(ss, tok, ',');) {
+                        if (!tok.empty()) c.strata_gpu_devices.push_back(std::atoi(tok.c_str()));
+                    }
+                }
+                break;
+            }
+        }
+    }
     if (c.backend == "strata" && c.engine_exe.empty()) {
         err = "--backend defaults to strata, which needs --engine-exe <path to the vendored "
               "engine binary>; pass --backend inhouse or --backend native to use a built-in engine";

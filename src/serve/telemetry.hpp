@@ -77,7 +77,10 @@ class Telemetry {
 public:
     using ExtraFn = std::function<TelemetryExtra()>;
 
-    explicit Telemetry(ExtraFn extra = nullptr);
+    // gpu_filter: when non-empty, only monitor these GPU indices (NVML numbering).
+    // Used by the Strata backend to restrict monitoring to the GPUs the engine actually uses
+    // (parsed from --engine-arg --gpu). Empty = monitor all visible GPUs (default behavior).
+    explicit Telemetry(ExtraFn extra = nullptr, std::vector<int> gpu_filter = {});
     ~Telemetry();
     Telemetry(const Telemetry&) = delete;
     Telemetry& operator=(const Telemetry&) = delete;
