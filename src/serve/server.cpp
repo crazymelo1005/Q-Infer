@@ -1423,7 +1423,7 @@ void Serve::register_routes() {
         h.set("status", Json::strv("ok"));
         h.set("model", Json::strv(eng_->model_name()));
         h.set("max_context", Json::numv(static_cast<double>(eng_->config().max_context)));
-        h.set("images", Json::boolv(false));
+        h.set("images", Json::boolv(vision_ != nullptr));
         h.set("api_key", Json::boolv(!cfg_.api_key.empty()));
         h.set("loaded", Json::boolv(true));
         h.set("service", Json::strv("qinfer"));
@@ -1441,6 +1441,7 @@ void Serve::register_routes() {
         model.set("meta", std::move(meta));
         Json arch = Json::objv();
         Json in = Json::arrv(); in.push(Json::strv("text"));
+        if (vision_) in.push(Json::strv("image"));
         Json out = Json::arrv(); out.push(Json::strv("text"));
         arch.set("input_modalities", std::move(in));
         arch.set("output_modalities", std::move(out));
@@ -1506,9 +1507,10 @@ void Serve::register_routes() {
         dl.push(Json::strv("/v1/messages"));
         r.set("dialects", std::move(dl));
         Json vis = Json::objv();
-        vis.set("enabled", Json::boolv(false));
-        vis.set("available", Json::boolv(false));
-        vis.set("error", Json::nullv());
+        const bool vision_on = vision_ != nullptr;
+        vis.set("enabled", Json::boolv(vision_on));
+        vis.set("available", Json::boolv(vision_on));
+        vis.set("error", vision_on ? Json::nullv() : Json::strv("no --mmproj configured"));
         r.set("vision", std::move(vis));
         Json act = Json::objv();
         act.set("requests", Json::numv(static_cast<double>(req_id_.load())));
@@ -1614,7 +1616,7 @@ void Serve::register_routes() {
         caps.set("date", Json::boolv(false));
         r.set("chat_template_caps", std::move(caps));
         Json mod = Json::objv();
-        mod.set("vision", Json::boolv(false));
+        mod.set("vision", Json::boolv(vision_ != nullptr));
         r.set("modalities", std::move(mod));
         r.set("models_autoload", Json::boolv(false));
         r.set("is_sleeping", Json::boolv(false));
@@ -1642,7 +1644,7 @@ void Serve::register_routes() {
         Json eng = Json::objv();
         eng.set("model", Json::strv(eng_->model_name()));
         eng.set("max_context", Json::numv(static_cast<double>(ctx)));
-        eng.set("images", Json::boolv(false));
+        eng.set("images", Json::boolv(vision_ != nullptr));
         r.set("engine", std::move(eng));
         Json live = Json::objv();
         live.set("state", Json::strv(busy ? "generating" : "idle"));
