@@ -202,33 +202,12 @@
   <!-- ============================ About ============================ -->
   <section class="view panel hidden" id="panel-about" role="tabpanel">
     <div class="about-body">
-      <!-- Card 1: Model and engine facts -->
-      <div class="st-card">
-        <span class="card-title" data-i18n="about.engine">Model and engine</span>
-        <dl class="facts" id="facts-engine"></dl>
-      </div>
-      <!-- Card 2: Hardware facts -->
-      <div class="st-card">
-        <span class="card-title" data-i18n="about.hw">This PC</span>
-        <dl class="facts" id="facts-hw"></dl>
-      </div>
-      <!-- Card 3: API URLs with copy buttons -->
-      <div class="st-card">
-        <span class="card-title" data-i18n="about.svc">Service and protocols</span>
-        <p class="dim">Any OpenAI- or Anthropic-compatible client works with these addresses.</p>
-        <dl class="facts" id="facts-api"></dl>
-        <details class="st-collapse">
-          <summary>Endpoint paths</summary>
-          <div class="st-collapse__body">
-            <p>OpenAI: <code class="mono">/v1/chat/completions</code> (SSE streaming), <code class="mono">/v1/completions</code>, <code class="mono">/v1/models</code></p>
-            <p>Anthropic: <code class="mono">/v1/messages</code>, <code class="mono">/v1/messages/count_tokens</code></p>
-            <p>Monitoring: <code class="mono">/metrics</code>, <code class="mono">/api/requests</code></p>
-          </div>
-        </details>
-      </div>
-      <!-- Card 4: Settings (API key + dark theme toggle) -->
-      <div class="st-card">
-        <span class="card-title" data-i18n="about.apiKey">Connection settings</span>
+      <!-- API key (prominent, accent border) -->
+      <div class="st-card about-key-card">
+        <div class="about-section__head">
+          <svg class="st-icon"><use href="/web/sprite.svg#i-settings"/></svg>
+          <span class="card-title" data-i18n="about.apiKey">Connection settings</span>
+        </div>
         <div class="st-field">
           <label class="st-label" for="api-key"><span data-i18n="about.apiKeyLabel">API key</span> <output data-i18n="about.apiKeyHint">Only needed if the server was started with --api-key</output></label>
           <div class="key-row">
@@ -242,10 +221,58 @@
         </div>
         <p class="dim small" data-i18n="about.apiKeyNote">The key stays in this browser only (localStorage, shared across tabs; never uploaded).</p>
       </div>
-      <!-- Card 5: Capabilities (/props) -->
-      <div class="st-card">
-        <span class="card-title" data-i18n="about.props">Capabilities (/props)</span>
+
+      <hr class="about-sep">
+
+      <!-- Model and engine -->
+      <div class="st-card" id="about-engine">
+        <div class="about-section__head">
+          <svg class="st-icon"><use href="/web/sprite.svg#i-cpu"/></svg>
+          <span class="card-title" data-i18n="about.engine">Model and engine</span>
+        </div>
+        <dl class="facts" id="facts-engine"></dl>
+      </div>
+
+      <hr class="about-sep">
+
+      <!-- Capabilities (/props) -->
+      <div class="st-card" id="about-props">
+        <div class="about-section__head">
+          <svg class="st-icon"><use href="/web/sprite.svg#i-tool"/></svg>
+          <span class="card-title" data-i18n="about.props">Capabilities (/props)</span>
+        </div>
         <dl class="facts" id="facts-props"></dl>
+      </div>
+
+      <hr class="about-sep">
+
+      <!-- This PC (hardware) -->
+      <div class="st-card" id="about-hardware">
+        <div class="about-section__head">
+          <svg class="st-icon"><use href="/web/sprite.svg#i-layers"/></svg>
+          <span class="card-title" data-i18n="about.hw">This PC</span>
+        </div>
+        <dl class="facts" id="facts-hw"></dl>
+      </div>
+
+      <hr class="about-sep">
+
+      <!-- Service and protocols -->
+      <div class="st-card">
+        <div class="about-section__head">
+          <svg class="st-icon"><use href="/web/sprite.svg#i-link"/></svg>
+          <span class="card-title" data-i18n="about.svc">Service and protocols</span>
+        </div>
+        <p class="dim">Any OpenAI- or Anthropic-compatible client works with these addresses. Base URL: <span class="mono" id="about-ports"></span>.</p>
+        <dl class="facts" id="facts-api"></dl>
+        <details class="st-collapse">
+          <summary>Endpoint paths</summary>
+          <div class="st-collapse__body">
+            <p>OpenAI: <code class="mono">/v1/chat/completions</code> (SSE streaming), <code class="mono">/v1/completions</code>, <code class="mono">/v1/models</code></p>
+            <p>Anthropic: <code class="mono">/v1/messages</code>, <code class="mono">/v1/messages/count_tokens</code></p>
+            <p>Monitoring: <code class="mono">/metrics</code>, <code class="mono">/api/requests</code></p>
+          </div>
+        </details>
       </div>
     </div>
   </section>

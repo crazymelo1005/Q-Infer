@@ -336,8 +336,8 @@ grep -q 'pollMetrics' "$R" && grep -q 'panel-chat' "$R" \
 # 16. Frontend part two: index carries the Monitor/About skeleton, app.js exposes QinferRequests and sparkline,
 #     /api-monitor is shelled and monitor.js is reachable (reuses loadDetail).
 curl -s "http://$HOST:$PORT/" > "$R"
-grep -q 'id="card-state"' "$R" && grep -q 'id="req-detail"' "$R" && grep -q 'id="about-engine"' "$R" \
-  && ok "/ Monitor/About skeleton (card-state/req-detail/about-engine)" || bad "/ skeleton: $(head -c 200 "$R")"
+grep -q 'id="state-badges"' "$R" && grep -q 'id="req-detail"' "$R" && grep -q 'id="about-engine"' "$R" \
+  && ok "/ Monitor/About skeleton (state-badges/req-detail/about-engine)" || bad "/ skeleton: $(head -c 200 "$R")"
 curl -s "http://$HOST:$PORT/web/app.js" > "$R"
 grep -q 'QinferRequests' "$R" && grep -q 'initMonitor' "$R" && grep -q 'sparkline' "$R" \
   && ok "/web/app.js (Monitor/About/sparkline)" || bad "/web/app.js: $(head -c 200 "$R")"
@@ -579,7 +579,7 @@ for p in web/components.css web/app.css web/sprite.svg web/fonts/outfit-latin-wg
 done
 curl -s "http://$HOST:$PORT/" > "$R"
 grep -q 'st-header' "$R" && grep -q 'st-pill' "$R" && grep -q 'btn-theme' "$R" \
-  && grep -q 'id="panel-chat"' "$R" && grep -q 'id="card-state"' "$R" \
+  && grep -q 'id="panel-chat"' "$R" && grep -q 'id="metrics"' "$R" \
   && ok "25 Strata assets + new shell (st-header/st-pill/btn-theme, compatibility points preserved)" \
   || bad "25 new shell markers: $(head -c 200 "$R")"
 
@@ -754,6 +754,34 @@ else
 fi
 
 stop
+
+# Start a fresh server for capability tests.
+start --api-key testkey || exit 1
+
+# 31. /props reports vision capability (false when not configured, true when --mmproj is given).
+#     Since the fixture has no vision, we check that the key exists and is false.
+curl -s -H "$H" "http://$HOST:$PORT/props" > "$R"
+if [ "$(jget "$R" "d['modalities']['vision']")" = "False" ]; then
+  ok "31 /props modalities.vision=false when not configured"
+else
+  bad "31 /props vision capability: $(head -c 200 "$R")"
+fi
+
+# 32. /health reports images=false when vision not configured.
+curl -s -H "$H" "http://$HOST:$PORT/health" > "$R"
+if [ "$(jget "$R" "d['images']")" = "False" ]; then
+  ok "32 /health images=false when not configured"
+else
+  bad "32 /health images: $(head -c 200 "$R")"
+fi
+
+# 33. /v1/models includes text in input_modalities (vision would add image when configured).
+curl -s -H "$H" "http://$HOST:$PORT/v1/models" > "$R"
+if [ "$(jget "$R" "d['data'][0]['architecture']['input_modalities']")" = "['text']" ]; then
+  ok "33 /v1/models input_modalities=['text'] when vision not configured"
+else
+  bad "33 /v1/models input_modalities: $(head -c 200 "$R")"
+fi
 
 echo "serve integration: passed $PASS, failed $FAIL"
 [ "$FAIL" = 0 ]
