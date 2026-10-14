@@ -24,6 +24,8 @@ main{flex:1;min-height:0;display:flex}
 .bubble.assistant{align-self:flex-start;background:var(--st-surface);border:1px solid var(--st-line);border-bottom-left-radius:6px}
 .bubble.error{align-self:flex-start;background:var(--st-danger-tint);border:1px dashed var(--st-danger);color:var(--st-danger-text)}
 .bubble .bubble-body{white-space:pre-wrap;overflow-wrap:anywhere}
+.msg-images{display:flex;flex-wrap:wrap;gap:var(--st-s-2)}
+.msg-images img{max-width:220px;max-height:180px;border-radius:var(--st-r-md);border:1px solid var(--st-line);display:block}
 .cursor::after{content:"";display:inline-block;width:8px;height:1.1em;margin-left:2px;vertical-align:-3px;border-radius:2px;background:var(--st-accent);animation:blink 1s steps(2) infinite}
 @keyframes blink{50%{opacity:0}}
 .msg-waiting{display:flex;align-items:center;gap:8px;font-size:var(--st-fs-sm);color:var(--st-ink-muted)}
@@ -34,6 +36,14 @@ main{flex:1;min-height:0;display:flex}
    (measured 233px inside a 447px parent) and the whole composer read as a
    small floating box. */
 .st-composer{max-width:980px;width:100%;margin:0 auto}
+.st-composer.dragging{outline:2px dashed var(--st-accent);outline-offset:3px}
+.st-attachments{display:flex;flex-wrap:wrap;gap:var(--st-s-2);padding:2px 4px 0}
+.st-attachments:empty{display:none}
+.st-attach-chip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 6px 0 10px;border-radius:var(--st-r-pill);background:var(--st-surface-2);border:1px solid var(--st-line);font-size:var(--st-fs-xs);color:var(--st-ink-soft);max-width:200px}
+.st-attach-chip img{width:22px;height:22px;border-radius:4px;object-fit:cover;flex:none}
+.st-attach-chip .chip-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.st-attach-chip .st-btn--icon{width:22px;height:22px;border-radius:50%;flex:none}
+.st-attach-chip .st-btn--icon .st-icon{width:14px;height:14px}
 .chat-foot{flex:none;max-width:980px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:var(--st-s-2)}
 .drawer summary{cursor:pointer;color:var(--st-ink-muted);font-size:var(--st-fs-sm);user-select:none;display:flex;align-items:center;gap:6px}
 .drawer-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--st-s-3);margin-top:var(--st-s-2);padding:var(--st-s-3);background:var(--st-surface-2);border:1px solid var(--st-line);border-radius:var(--st-r-md)}
