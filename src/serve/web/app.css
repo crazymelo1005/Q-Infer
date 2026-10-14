@@ -175,7 +175,9 @@ main{flex:1;min-height:0;display:flex}
 .st-metric__spark{display:block;overflow:visible}
 .st-metric__spark[data-tone="warn"]{color:var(--st-warn)}
 .st-metric__spark[data-tone="info"]{color:var(--st-info)}
-.st-metric__spark .axis-max,.st-metric__spark .axis-min{font:600 5px var(--st-font);fill:var(--st-ink-muted);opacity:0.6}
+.spark-wrapper{display:flex;align-items:stretch;gap:6px;height:32px}
+.spark-wrapper .st-metric__spark{flex:1}
+.spark-axis{display:flex;flex-direction:column;justify-content:space-between;font:600 10px var(--st-font);color:var(--st-ink-muted);opacity:0.7;min-width:36px;text-align:right}
 
 /* Monitor row: fluid gauge + requests */
 .monitor-row{display:grid;grid-template-columns:minmax(180px,1fr) minmax(0,2.2fr);gap:var(--st-s-3)}

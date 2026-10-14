@@ -2277,12 +2277,13 @@ function initMetricCards() {
       '<span class="st-metric__label"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#' + m.icon + '"/></svg>' + esc(tr(m.labelKey)) + '</span>' +
       '<span class="st-metric__value" id="mv-' + m.key + '">\u2013</span>' +
       '<span class="st-metric__sub" id="ms-' + m.key + '"></span>' +
+      '<div class="spark-wrapper">' +
       '<svg class="st-metric__spark" id="sp-' + m.key + '" viewBox="0 0 100 32" preserveAspectRatio="none"' + toneAttr + '>' +
       '<path class="area" fill="currentColor" opacity=".12"/>' +
       '<path class="line" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>' +
-      '<text class="axis-max" x="98" y="5" text-anchor="end">0</text>' +
-      '<text class="axis-min" x="98" y="28" text-anchor="end">0</text>' +
-      '</svg></div></div>';
+      '</svg>' +
+      '<div class="spark-axis"><span class="axis-max">0</span><span class="axis-min">0</span></div>' +
+      '</div></div></div>';
   }).join("");
 }
 
@@ -2313,11 +2314,14 @@ function sparkline(id, values, max) {
   svg.querySelector(".line").setAttribute("d", line);
   svg.querySelector(".area").setAttribute("d", line + "L100,32L0,32Z");
   
-  // Update axis labels
-  var maxLabel = svg.querySelector(".axis-max");
-  var minLabel = svg.querySelector(".axis-min");
-  if (maxLabel) maxLabel.textContent = fmtAxis(top);
-  if (minLabel) minLabel.textContent = fmtAxis(min);
+  // Update axis labels (now in HTML, not SVG)
+  var wrapper = svg.parentElement;
+  if (wrapper) {
+    var maxLabel = wrapper.querySelector(".axis-max");
+    var minLabel = wrapper.querySelector(".axis-min");
+    if (maxLabel) maxLabel.textContent = fmtAxis(top);
+    if (minLabel) minLabel.textContent = fmtAxis(min);
+  }
 }
 
 function fmtAxis(v) {
