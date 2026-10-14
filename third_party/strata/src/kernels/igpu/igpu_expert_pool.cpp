@@ -18,7 +18,6 @@
 
 #include <cmath>
 #include <cstring>
-#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -363,24 +362,12 @@ void hybrid_expert_dispatch(void* user, const float* x_f, const int32_t* ids,
     });
 
     // Route: large batches to iGPU, small to CPU.
-    // TEMPORARY: force CPU fallback to isolate the act_quant_q8_1 crash.
-    const bool force_cpu = (std::getenv("STRATA_IGPU_FORCE_CPU") != nullptr);
-    std::fprintf(stderr, "strata igpu: dispatch layer=%lld k=%lld pool=%s src=%p force_cpu=%d\n",
-                 (long long)d->layers, (long long)k,
-                 pool.available() ? "yes" : "no", (void*)d->src, force_cpu);
-    if (!force_cpu && pool.available() && k > 4 && d->src != nullptr) {
+    if (pool.available() && k > 4 && d->src != nullptr) {
         // Quantize the activation once for all experts in this batch.
-        std::fprintf(stderr, "strata igpu: quantizing activation (n=%lld x_f=%p)\n", (long long)n_embd, (const void*)x_f);
-        // Probe: try reading first and last element of x_f to detect bad pointers.
-        volatile float probe_first = x_f[0];
-        volatile float probe_last = x_f[n_embd - 1];
-        std::fprintf(stderr, "strata igpu: probe OK (first=%f last=%f)\n", (double)probe_first, (double)probe_last);
         PoolActQ act;
         g_act_quant(x_f, static_cast<int>(n_embd), act);
-        std::fprintf(stderr, "strata igpu: quantization done, nchunks=%d\n", act.nchunks);
 
         // Notify the source that a new layer is starting (matches CPU path).
-        std::fprintf(stderr, "strata igpu: begin_layer(%lld, k=%lld)\n", (long long)d->layers, (long long)k);
         d->src->begin_layer(d->layers, ids, k);
 
         // Build job array, extracting blobs from ExpertSource.
@@ -409,7 +396,6 @@ void hybrid_expert_dispatch(void* user, const float* x_f, const int32_t* ids,
             jobs[static_cast<std::size_t>(i)].weight = weights ? weights[i] : 1.0f;
             jobs[static_cast<std::size_t>(i)].slot = static_cast<int>(i);
         }
-        std::fprintf(stderr, "strata igpu: %lld jobs built, calling pool.run()\n", (long long)k);
 
         std::string err;
         if (!pool.run(jobs.data(), static_cast<int>(k), err)) {
@@ -417,19 +403,13 @@ void hybrid_expert_dispatch(void* user, const float* x_f, const int32_t* ids,
             d->failed = true;
             d->fail = g_igpu_error.c_str();
             d->fail_layer = d->layers;
-            std::fprintf(stderr, "strata igpu: pool.run() FAILED: %s\n", err.c_str());
             return;
         }
-        std::fprintf(stderr, "strata igpu: pool.run() OK\n");
     } else {
         // CPU fallback.
-        std::fprintf(stderr, "strata igpu: CPU fallback (pool=%s k>4=%s src=%p)\n",
-                     pool.available() ? "yes" : "no",
-                     k > 4 ? "yes" : "no", (void*)d->src);
         if (g_cpu_dispatch != nullptr) {
             g_cpu_dispatch(user, x_f, ids, weights, n_embd, k, out);
         }
-        // If no CPU fallback is set, this is a no-op.
     }
 }
 
@@ -441,8 +421,6 @@ void hybrid_expert_dispatch_multi(void* user, const float* x_f, const int32_t* i
     if (d == nullptr || d->failed) return;
 
     d->layers = layer;
-
-    const bool force_cpu = (std::getenv("STRATA_IGPU_FORCE_CPU") != nullptr);
 
     // Lazy-init the pool (same static as single-token path).
     static IgpuExpertPool pool;
@@ -456,11 +434,7 @@ void hybrid_expert_dispatch_multi(void* user, const float* x_f, const int32_t* i
         }
     });
 
-    std::fprintf(stderr, "strata igpu: multi dispatch layer=%lld n_tok=%lld k=%lld pool=%s force_cpu=%d\n",
-                 (long long)layer, (long long)n_tok, (long long)k,
-                 pool.available() ? "yes" : "no", force_cpu);
-
-    if (!force_cpu && pool.available() && k > 4 && d->src != nullptr) {
+    if (pool.available() && k > 4 && d->src != nullptr) {
         // iGPU path: iterate over tokens.
         constexpr int64_t H = 2560;
         for (int64_t tok = 0; tok < n_tok; ++tok) {
@@ -468,7 +442,6 @@ void hybrid_expert_dispatch_multi(void* user, const float* x_f, const int32_t* i
             const int32_t* tok_ids = ids + tok * k;
             float* tok_out = out + tok * k * H;
 
-            std::fprintf(stderr, "strata igpu: tok %lld/%lld quantizing\n", (long long)tok, (long long)n_tok);
             PoolActQ act;
             g_act_quant(tok_x, static_cast<int>(H), act);
 
@@ -486,14 +459,11 @@ void hybrid_expert_dispatch_multi(void* user, const float* x_f, const int32_t* i
             }
             std::string err;
             if (!pool.run(jobs.data(), static_cast<int>(k), err)) {
-                std::fprintf(stderr, "strata igpu: pool.run() FAILED tok %lld: %s\n", (long long)tok, err.c_str());
                 d->failed = true; d->fail = "iGPU pool run failed"; d->fail_layer = layer; return;
             }
         }
-        std::fprintf(stderr, "strata igpu: multi iGPU done (%lld tokens)\n", (long long)n_tok);
     } else {
         // CPU fallback: use multi-token dispatcher directly.
-        std::fprintf(stderr, "strata igpu: multi CPU fallback\n");
         if (g_cpu_dispatch_multi != nullptr) {
             g_cpu_dispatch_multi(user, x_f, ids, n_tok, k, out, layer);
         }
