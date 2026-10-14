@@ -239,7 +239,7 @@ bool IgpuExpertPool::run(void* jobs_ptr, int n, std::string& err) {
             if (!rt.dispatch(pipe_gemv_, pl_gemv_, set_gemv, &pc, sizeof(pc),
                             (FF + 63) / 64, 1, 1, e2)) {
                 err = std::string("pool GEMV gate: ") + e2;
-                return;
+                return false;
             }
         }
 
@@ -263,7 +263,7 @@ bool IgpuExpertPool::run(void* jobs_ptr, int n, std::string& err) {
             if (!rt.dispatch(pipe_gemv_, pl_gemv_, set_gemv, &pc, sizeof(pc),
                             (FF + 63) / 64, 1, 1, e2)) {
                 err = std::string("pool GEMV up: ") + e2;
-                return;
+                return false;
             }
         }
 
@@ -280,7 +280,7 @@ bool IgpuExpertPool::run(void* jobs_ptr, int n, std::string& err) {
             if (!rt.dispatch(pipe_swiglu_, pl_swiglu_, set_swiglu, &pc, sizeof(pc),
                             (FF / QKA + 63) / 64, 1, 1, e2)) {
                 err = std::string("pool SwiGLU: ") + e2;
-                return;
+                return false;
             }
         }
 
@@ -304,7 +304,7 @@ bool IgpuExpertPool::run(void* jobs_ptr, int n, std::string& err) {
             if (!rt.dispatch(pipe_gemv_, pl_gemv_, set_gemv, &pc, sizeof(pc),
                             (H + 63) / 64, 1, 1, e2)) {
                 err = std::string("pool GEMV down: ") + e2;
-                return;
+                return false;
             }
         }
 
