@@ -49,6 +49,7 @@ add_library(qinfer_serve
   src/serve/prometheus.cpp
   src/serve/toolcall.cpp
   src/serve/backend_strata.cpp
+  src/serve/media_fetch.cpp
 )
 target_include_directories(qinfer_serve PUBLIC src)
 target_link_libraries(qinfer_serve PUBLIC qinfer_text qinfer_dense qinfer_ple qinfer_storage qinfer_kernels qinfer_engine)
@@ -194,6 +195,11 @@ target_link_libraries(test_prometheus PRIVATE qinfer_serve)
 add_executable(test_toolcall tests/test_toolcall.cpp)
 target_link_libraries(test_toolcall PRIVATE qinfer_serve)
 add_test(NAME toolcall COMMAND test_toolcall)
+
+# M5b: media fetch (data:/http(s)/file:// URL normalization to temp files).
+add_executable(test_media_fetch tests/test_media_fetch.cpp)
+target_link_libraries(test_media_fetch PRIVATE qinfer_serve)
+add_test(NAME media_fetch COMMAND test_media_fetch)
 
 add_executable(test_iq4nl tests/test_iq4nl.cpp)
 target_link_libraries(test_iq4nl PRIVATE qinfer_kernels)
