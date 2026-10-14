@@ -41,13 +41,14 @@ inline float siluf(float v) { return v * sigmoidf(v); }
 }  // namespace
 
 float rms_scale(const float* row, std::uint64_t n, float eps) {
-    // 化简在 n_embd 上、每条流一条：不是整栈一条。求和用 double 累加，避免长流的顺序敏感。
-    double ss = 0.0;
+    // 化简在 n_embd 上、每条流一条：不是整栈一条。FP32 累加，与 llama.cpp / Strata 一致
+    // （Strata gr.cu:195 明确记录："The ground truth is llama.cpp, and llama.cpp accumulates in FP32"）。
+    float ss = 0.0f;
     for (std::uint64_t i = 0; i < n; ++i) {
-        ss += static_cast<double>(row[i]) * static_cast<double>(row[i]);
+        ss += row[i] * row[i];
     }
-    const double ms = ss / static_cast<double>(n);
-    return static_cast<float>(1.0 / std::sqrt(ms + static_cast<double>(eps)));
+    const float ms = ss / static_cast<float>(n);
+    return 1.0f / std::sqrt(ms + eps);
 }
 
 bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, float* mixed,
@@ -100,13 +101,12 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
     scratch.lo.assign(static_cast<std::size_t>(lr), 0.0f);
     const auto lo_row = [&](std::uint64_t k) {
         const GrTensor wrow = row_view(w.w_down, k, hc_dim);
-        double acc = 0.0;
+        // FP32 累加：与 Strata gr_down_kernel 一致（gr.cu:214, "accumulated in double" → 改为 float）。
+        float acc = 0.0f;
         for (std::uint64_t i = 0; i < hc_dim; ++i) {
-            acc += static_cast<double>(scratch.act[static_cast<std::size_t>(i)]) *
-                   static_cast<double>(w_at(wrow, i));
+            acc += scratch.act[static_cast<std::size_t>(i)] * w_at(wrow, i);
         }
-        const float p = static_cast<float>(acc);
-        scratch.lo[static_cast<std::size_t>(k)] = siluf(p / static_cast<float>(hc));
+        scratch.lo[static_cast<std::size_t>(k)] = siluf(acc / static_cast<float>(hc));
     };
     if (scheduling::ThreadPool* p = scheduling::pool(); p != nullptr && lr > 1) {
         p->run_rows(lr, 8, [&](std::uint64_t b, std::uint64_t e) {
@@ -129,13 +129,12 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
         for (std::uint64_t c = 0; c < hc; ++c) {
             const std::uint64_t i = c * n + d;
             const GrTensor wrow = row_view(w.w_up, i, lr);
-            double acc = 0.0;
+            // FP32 累加：与 Strata gr_gate_kernel 一致（gr.cu:240）。
+            float acc = 0.0f;
             for (std::uint64_t k = 0; k < lr; ++k) {
-                acc += static_cast<double>(scratch.lq[static_cast<std::size_t>(k)]) *
-                       static_cast<double>(w_at(wrow, k));
+                acc += scratch.lq[static_cast<std::size_t>(k)] * w_at(wrow, k);
             }
-            const float g = static_cast<float>(acc);
-            m += scratch.xn[static_cast<std::size_t>(i)] * sigmoidf(g);
+            m += scratch.xn[static_cast<std::size_t>(i)] * sigmoidf(acc);
         }
         mixed[d] = m / static_cast<float>(hc);
     };
@@ -153,12 +152,12 @@ bool gr_read(const GrShapes& s, const GrWeights& w, const float* R, float eps, f
     if (w.w_inject.present()) {
         for (std::uint64_t c = 0; c < hc; ++c) {
             const GrTensor wrow = row_view(w.w_inject, c, hc_dim);
-            double acc = 0.0;
+            // FP32 累加：与 Strata gr_inject_kernel 一致（gr.cu:276）。
+            float acc = 0.0f;
             for (std::uint64_t i = 0; i < hc_dim; ++i) {
-                acc += static_cast<double>(scratch.act[static_cast<std::size_t>(i)]) *
-                       static_cast<double>(w_at(wrow, i));
+                acc += scratch.act[static_cast<std::size_t>(i)] * w_at(wrow, i);
             }
-            inject[c] = static_cast<float>(acc);
+            inject[c] = acc;
         }
     }
     if (phases != nullptr) phases->inject_ms += msx(p_inj, clk());

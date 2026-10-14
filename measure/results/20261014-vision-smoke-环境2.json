@@ -1,0 +1,16 @@
+{
+  "gate": "vision-smoke",
+  "date": "2026-10-14",
+  "env": "环境2",
+  "binary": "/home/crazymelo/projects/Q-Infer/build-vision/bin/qinfer-vision",
+  "mmproj": "/home/crazymelo/projects/strata_models/sc117-iq2_xs/mmproj-Qwen3.8-Flash-Next-BF16.gguf",
+  "probe": "/home/crazymelo/projects/Q-Infer/build-vision/probe.png",
+  "threads": 8,
+  "max_tokens": 256,
+  "n_embd": 2560,
+  "n_tokens": 256,
+  "nx": 16,
+  "ny": 16,
+  "ms": 1370,
+  "bytes": 2621460
+}

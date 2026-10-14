@@ -398,5 +398,6 @@ using PfnAllocateDescriptorSets = std::uint32_t (*)(Device, const DescriptorSetA
                                                     DescriptorSet*);
 using PfnUpdateDescriptorSets = void (*)(Device, std::uint32_t, const WriteDescriptorSet*,
                                          std::uint32_t, const void*);
+using PfnResetDescriptorPool = std::uint32_t (*)(Device, DescriptorPool, std::uint32_t);
 
 }  // namespace strata::kernels::igpu::vk

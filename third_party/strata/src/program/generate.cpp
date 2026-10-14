@@ -1012,6 +1012,35 @@ static void igpu_drive_wrapper(void* user, const float* x_f, const int32_t* ids,
     strata::kernels::igpu::hybrid_expert_dispatch(&t->d, x_f, ids, weights, n_embd, k, out);
 }
 
+// iGPU pool wrapper for multi-token path (verify window / speculative decode).
+// When STRATA_IGPU_POOL=1, win_pool_fn is set to this wrapper instead of drive_pool_multi.
+static void igpu_drive_wrapper_multi(void* user, const float* x_f, const int32_t* ids,
+                                     int64_t n_tok, int64_t k, float* out, int64_t layer) {
+    Drive* t = static_cast<Drive*>(user);
+    const Clock::time_point a = Clock::now();
+    strata::kernels::igpu::hybrid_expert_dispatch_multi(&t->d, x_f, ids, n_tok, k, out, layer);
+    t->cpu_ms += std::chrono::duration<double, std::milli>(Clock::now() - a).count();
+    ++t->calls;
+    // Routing trace: same format as drive_pool_multi.
+    if (t->routing != nullptr && layer >= 0 && layer < 48) {
+        for (int64_t tok = 0; tok < n_tok; ++tok) {
+            const int32_t rec[2] = {(int32_t) layer, (int32_t) k};
+            std::fwrite(rec, sizeof rec, 1, t->routing);
+            std::fwrite(ids + tok * k, sizeof(int32_t), (size_t) k, t->routing);
+            static const float one[64] = {};
+            std::fwrite(one, sizeof(float), (size_t) k, t->routing);
+        }
+    }
+}
+
+// CPU fallback for multi-token path: bridges back to expert_pool_dispatch_multi.
+static void cpu_drive_wrapper_multi(void* user, const float* x_f, const int32_t* ids,
+                                    int64_t n_tok, int64_t k, float* out, int64_t layer) {
+    Drive* t = static_cast<Drive*>(user);
+    t->d.layers = layer;
+    strata::core::expert_pool_dispatch_multi(t->d, x_f, ids, n_tok, k, out);
+}
+
 /// Plan v0.3 P6: the pool for a verify window.
 void drive_pool_multi(void* user, const float* x_f, const int32_t* ids, int64_t n_tok, int64_t k, float* out,
                       int64_t layer) {
@@ -5709,6 +5738,8 @@ int main(int argc, char** argv) {
             // Wire the CPU fallback to expert_pool_dispatch. The wrapper above
             // extracts ExpertDispatch from Drive, so the user pointer is correct.
             strata::kernels::igpu::set_cpu_dispatch_fn(&strata::core::expert_pool_dispatch);
+            // Wire the multi-token CPU fallback for the verify window path.
+            strata::kernels::igpu::set_cpu_dispatch_multi_fn(&cpu_drive_wrapper_multi);
             pool_fn = &igpu_drive_wrapper;
             std::fprintf(stderr, "strata generate: iGPU expert pool enabled (STRATA_IGPU_POOL=1)\n");
         } else {
@@ -7689,8 +7720,14 @@ int main(int argc, char** argv) {
                 stage_ver_p(st, 1).set_pcie_mode(o.pcie_mode == "dma" ? 0 : o.pcie_mode == "direct" ? 1 : 2);
             }
         }
-        // the pool the verify windows call: with a layer split, the wrapper that routes each layer to its stage
-        const strata::core::PoolMultiFn win_pool_fn = n_stages > 1 ? &drive_pool_split : &drive_pool_multi;
+        // the pool the verify windows call: with a layer split, the wrapper that routes each layer to its stage.
+        // STRATA_IGPU_POOL=1: use the iGPU hybrid dispatcher for the multi-token path.
+        const strata::core::PoolMultiFn win_pool_fn = [n_stages] {
+            const char* igpu = std::getenv("STRATA_IGPU_POOL");
+            if (igpu != nullptr && std::strcmp(igpu, "1") == 0)
+                return &igpu_drive_wrapper_multi;
+            return n_stages > 1 ? &drive_pool_split : &drive_pool_multi;
+        }();
         void* const win_pool_user = n_stages > 1 ? (void*) &split_drive : (void*) &drive;
         mem_mark("the verifier and the drafter's binding");
         ver.set_split(o.spec_split);

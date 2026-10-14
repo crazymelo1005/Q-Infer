@@ -1,0 +1,92 @@
+// IQ4_XS x Q8_K row GEMV for dense projections (P1 spike).
+// Mirrors src/kernels/iq4xs.cpp's iq4xs_dot_q8k line for line.
+// One thread per output row; n_blocks = cols / 256.
+//
+// IQ4_XS block (136 B per 256 values):
+//   [0..1] fp16 scale d
+//   [2..3] scales_h: u16, 2 bits per group (8 groups)
+//   [4..7] scales_l: 4 bytes, 4 bits per group (8 groups)
+//   [8..135] qs: 128 bytes, 32 nibbles per 32-value group (8 groups)
+//
+// Q8_K activation (292 B per 256 values):
+//   [0..3] float scale d
+//   [4..259] qs: 256 int8 values
+//   [260..291] bsums: 16 int16 values (unused in GEMV)
+//
+// Build: glslangValidator -V iq4xs_gemv.comp -o iq4xs_gemv.spv
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 0) readonly buffer W { uint w[]; };
+layout(std430, binding = 1) readonly buffer Y { uint y[]; };
+layout(std430, binding = 2) writeonly buffer O { float o[]; };
+
+layout(push_constant) uniform Pc {
+    uint n_rows;
+    uint n_blocks;
+} pc;
+
+// IQ4_NL codebook (16 entries, shared with IQ4_XS).
+const int iq4nl[16] = int[16](-127, -104, -83, -65, -49, -35, -22, -10,
+                               1, 13, 25, 38, 53, 69, 89, 113);
+
+uint wbyte(uint off) { return (w[off >> 2] >> ((off & 3u) * 8u)) & 0xFFu; }
+uint ybyte(uint off) { return (y[off >> 2] >> ((off & 3u) * 8u)) & 0xFFu; }
+
+float f16(uint h) {
+    uint s = (h >> 15) & 1u;
+    uint e = (h >> 10) & 0x1Fu;
+    uint m = h & 0x3FFu;
+    float v = 0.0;
+    if (e == 0u) {
+        v = ldexp(float(m), -24);
+    } else if (e != 31u) {
+        v = ldexp(1.0 + float(m) / 1024.0, int(e) - 15);
+    }
+    return s != 0u ? -v : v;
+}
+
+void main() {
+    uint row = gl_GlobalInvocationID.x;
+    if (row >= pc.n_rows) return;
+    uint row_base = row * pc.n_blocks * 136u;
+    precise float sumf = 0.0;
+    for (uint i = 0u; i < pc.n_blocks; ++i) {
+        uint blk = row_base + i * 136u;
+        // Weight block scale d (fp16)
+        precise float dw = f16(wbyte(blk) | (wbyte(blk + 1u) << 8));
+        // Activation block scale d (float, 4 bytes)
+        uint yb = i * 292u;
+        uint dy_bits = ybyte(yb) | (ybyte(yb + 1u) << 8) | (ybyte(yb + 2u) << 16) | (ybyte(yb + 3u) << 24);
+        precise float dy = uintBitsToFloat(dy_bits);
+        precise float d = dw * dy;
+        // scales_h at [2..3], scales_l at [4..7]
+        uint sh = wbyte(blk + 2u) | (wbyte(blk + 3u) << 8);
+        // 8 groups of 32 values each
+        for (uint ib = 0u; ib < 8u; ++ib) {
+            // 6-bit scale with -32 offset
+            uint sl_byte = wbyte(blk + 4u + ib / 2u);
+            uint sl = (sl_byte >> (4u * (ib % 2u))) & 0x0Fu;
+            uint sh_bits = (sh >> (2u * ib)) & 3u;
+            int ls = int(sl | (sh_bits << 4)) - 32;
+            precise float dl = d * float(ls);
+            // 32-value dot product
+            int sumi = 0;
+            uint qs_off = blk + 8u + ib * 16u;
+            uint q8_off = yb + 4u + ib * 32u;  // qs starts at offset 4
+            for (uint j = 0u; j < 16u; ++j) {
+                uint qs_byte = wbyte(qs_off + j);
+                int lo = iq4nl[qs_byte & 0x0Fu];
+                int hi = iq4nl[qs_byte >> 4];
+                int q8_lo = int(ybyte(q8_off + j));
+                int q8_hi = int(ybyte(q8_off + j + 16u));
+                if (q8_lo > 127) q8_lo -= 256;
+                if (q8_hi > 127) q8_hi -= 256;
+                sumi += lo * q8_lo + hi * q8_hi;
+            }
+            sumf += dl * float(sumi);
+        }
+    }
+    o[row] = sumf;
+}

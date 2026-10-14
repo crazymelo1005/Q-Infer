@@ -539,6 +539,9 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
     opts.seed = seed;
     if (mt <= 0) { send_json(res, 400, openai_err("max_tokens must be positive", "invalid_request_error", "max_tokens")); return; }
     opts.max_tokens = static_cast<std::uint64_t>(mt);
+    // Phase 2: session_id for multi-turn conversation persistence
+    const Json* sid = body.find("session_id");
+    if (sid != nullptr && sid->is_str()) opts.session_id = sid->str;
     if (!stop_param(body, opts.stop)) { send_json(res, 400, openai_err("stop must be a string or array of strings", "invalid_request_error", "stop")); return; }
     SamplerParams sp; sp.temperature = opts.temperature; sp.top_p = opts.top_p;
     if (!sp.valid()) { send_json(res, 400, openai_err("temperature must be non-negative and top_p in (0,1]", "invalid_request_error", nullptr)); return; }

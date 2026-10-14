@@ -212,6 +212,8 @@ bool VulkanRuntime::init_device(std::string& err) {
         reinterpret_cast<vk::PfnAllocateDescriptorSets>(dev_fn("vkAllocateDescriptorSets"));
     UpdateDescriptorSets_ =
         reinterpret_cast<vk::PfnUpdateDescriptorSets>(dev_fn("vkUpdateDescriptorSets"));
+    ResetDescriptorPool_ =
+        reinterpret_cast<vk::PfnResetDescriptorPool>(dev_fn("vkResetDescriptorPool"));
     reason_.clear();
     return true;
 }
@@ -609,6 +611,12 @@ void VulkanRuntime::update_set(vk::DescriptorSet set, const vk::Buffer* buffers,
         writes[i].pBufferInfo = &infos[i];
     }
     UpdateDescriptorSets_(device_, n, writes.data(), 0, nullptr);
+}
+
+void VulkanRuntime::reset_desc_pool() {
+    if (ResetDescriptorPool_ && desc_pool_) {
+        ResetDescriptorPool_(device_, desc_pool_, 0);
+    }
 }
 
 bool VulkanRuntime::dispatch(vk::Pipeline pipeline, vk::PipelineLayout layout,

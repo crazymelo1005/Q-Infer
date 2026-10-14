@@ -44,6 +44,8 @@ struct VulkanRuntime {
                                std::uint32_t n, std::string& err);
     // Repoint an existing set at new buffers (avoids allocating a set per call).
     void update_set(vk::DescriptorSet set, const vk::Buffer* buffers, std::uint32_t n);
+    // Reset the descriptor pool (frees all allocated sets).
+    void reset_desc_pool();
     // One dispatch: binds pipeline+set, pushes `push` (push_size bytes), dispatches
     // (x,y,z), waits on a fence.
     bool dispatch(vk::Pipeline pipeline, vk::PipelineLayout layout, vk::DescriptorSet set,
@@ -116,6 +118,7 @@ private:
     vk::PfnCreateDescriptorPool CreateDescriptorPool_ = nullptr;
     vk::PfnAllocateDescriptorSets AllocateDescriptorSets_ = nullptr;
     vk::PfnUpdateDescriptorSets UpdateDescriptorSets_ = nullptr;
+    vk::PfnResetDescriptorPool ResetDescriptorPool_ = nullptr;
     vk::DescriptorPool desc_pool_ = nullptr;
 };
 

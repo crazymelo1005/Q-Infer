@@ -101,4 +101,20 @@ CpuDispatchFn cpu_dispatch_fn();
 void hybrid_expert_dispatch(void* user, const float* x_f, const int32_t* ids,
                             const float* weights, int64_t n_embd, int64_t k, float* out);
 
+// CPU fallback function type for multi-token path. Matches PoolMultiFn signature.
+using CpuDispatchMultiFn = void (*)(void* user, const float* x_f, const int32_t* ids,
+                                    int64_t n_tok, int64_t k, float* out, int64_t layer);
+
+// Set the CPU fallback function for the multi-token hybrid dispatcher.
+void set_cpu_dispatch_multi_fn(CpuDispatchMultiFn fn);
+
+// Get the current CPU fallback function for multi-token path.
+CpuDispatchMultiFn cpu_dispatch_multi_fn();
+
+// Multi-token hybrid dispatcher: matches PoolMultiFn signature.
+// Iterates over n_tok tokens, calling hybrid_expert_dispatch for each.
+// If iGPU is available and k > 4, use iGPU; else call CPU fallback.
+void hybrid_expert_dispatch_multi(void* user, const float* x_f, const int32_t* ids,
+                                  int64_t n_tok, int64_t k, float* out, int64_t layer);
+
 }  // namespace strata::kernels::igpu

@@ -1312,7 +1312,6 @@ function collectMessages() {
 function setStreaming(on) {
   streaming = on;
   $("btn-send").disabled = on;
-  $("btn-new").disabled = on;
   $("btn-stop").classList.toggle("hidden", !on);
 }
 
@@ -1897,7 +1896,6 @@ function initChat() {
   initAttachmentHandlers();
   $("btn-send").addEventListener("click", sendChat);
   $("btn-stop").addEventListener("click", stopChat);
-  $("btn-new").addEventListener("click", newChat);
   $("btn-export").addEventListener("click", exportChat);
   const composer = $("composer");
   if (composer) composer.addEventListener("submit", function (e) { e.preventDefault(); sendChat(); });
