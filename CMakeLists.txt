@@ -116,6 +116,8 @@ add_library(qinfer_experts
   # compiles in the plain host build and activates only when a GPU is present.
   src/experts/igpu/vulkan_runtime.cpp
   src/experts/igpu/igpu_expert.cpp
+  # Strata iGPU pool: planar Q2_0 pack format adapter (view over the blob).
+  src/experts/igpu/strata_pack_adapter.cpp
 )
 target_include_directories(qinfer_experts PUBLIC src)
 target_link_libraries(qinfer_experts PUBLIC qinfer_artifact qinfer_kernels qinfer_storage
@@ -331,6 +333,11 @@ add_test(NAME igpu_iq1m COMMAND test_igpu_iq1m)
 add_executable(test_igpu_expert tests/test_igpu_expert.cpp)
 target_link_libraries(test_igpu_expert PRIVATE qinfer_experts)
 add_test(NAME igpu_expert COMMAND test_igpu_expert)
+
+# Strata iGPU pool: pack format adapter unit test (planar blob -> per-row view).
+add_executable(test_strata_pack_adapter tests/test_strata_pack_adapter.cpp)
+target_link_libraries(test_strata_pack_adapter PRIVATE qinfer_experts)
+add_test(NAME strata_pack_adapter COMMAND test_strata_pack_adapter)
 
 add_executable(test_thread_pool tests/test_thread_pool.cpp)
 target_link_libraries(test_thread_pool PRIVATE qinfer_experts)
