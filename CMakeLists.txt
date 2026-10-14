@@ -416,6 +416,9 @@ target_link_libraries(test_native_session PRIVATE qinfer_serve qinfer_dense qinf
 add_executable(test_native_backend tests/test_native_backend.cpp)
 target_link_libraries(test_native_backend PRIVATE qinfer_serve)
 
+add_executable(test_native_parity tests/test_native_parity.cpp)
+target_link_libraries(test_native_parity PRIVATE qinfer_serve)
+
 enable_testing()
 add_test(NAME page_table COMMAND test_page_table)
 add_test(NAME budget_arbiter COMMAND test_budget_arbiter)
@@ -485,6 +488,7 @@ add_test(NAME bf16_gemv COMMAND test_bf16_gemv)
 add_test(NAME step_record COMMAND test_step_record)
 add_test(NAME native_session COMMAND test_native_session)
 add_test(NAME native_backend COMMAND test_native_backend)
+add_test(NAME native_parity COMMAND test_native_parity)
 
 # ---- 引擎后端协议（厂商化 Strata；P0/P1）----
 # qinfer_engine 只依赖标准库与 pthreads，**不**并入 qinfer_serve：进程边界=依赖边界（ADR-008）。
