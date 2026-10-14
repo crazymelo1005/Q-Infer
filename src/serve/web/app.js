@@ -189,6 +189,36 @@ const I18N = {
     "apiMon.keyLabel": "API 密钥",
     "apiMon.keyPh": "可选",
     "apiMon.back": "返回主面板",
+
+    "chat.temperature": "温度",
+    "chat.topP": "top_p",
+    "filter.queued": "排队中",
+    "filter.completed": "已完成",
+    "filter.error": "错误",
+    "req.tabInput": "输入",
+    "req.tabOutput": "输出",
+    "req.tabReasoning": "推理",
+    "req.field.id": "ID",
+    "req.field.path": "路径",
+    "req.field.model": "模型",
+    "req.field.state": "状态",
+    "req.field.created": "创建时间",
+    "req.field.stream": "流式",
+    "req.field.responseFormat": "响应格式",
+    "req.field.queueS": "排队耗时",
+    "req.field.firstTokenS": "首 token",
+    "req.field.wallclockS": "总耗时",
+    "req.field.decodeTokS": "解码速度",
+    "req.field.promptTokens": "提示词 token",
+    "req.field.outputTokens": "输出 token",
+    "aria.remove": "移除",
+    "aria.copy": "复制",
+    "misc.pastedImage": "粘贴的图片",
+    "misc.gpu": "GPU",
+    "misc.evicted": "已驱逐",
+    "unit.tokS": "tok/s",
+    "unit.tokens": "tokens",
+    "unit.seconds": "s",
   },
   en: {
     "brand.tag": "Local inference",
@@ -366,6 +396,36 @@ const I18N = {
     "apiMon.keyLabel": "API key",
     "apiMon.keyPh": "optional",
     "apiMon.back": "Back to main panel",
+
+    "chat.temperature": "Temperature",
+    "chat.topP": "top_p",
+    "filter.queued": "Queued",
+    "filter.completed": "Completed",
+    "filter.error": "Error",
+    "req.tabInput": "Input",
+    "req.tabOutput": "Output",
+    "req.tabReasoning": "Reasoning",
+    "req.field.id": "ID",
+    "req.field.path": "Path",
+    "req.field.model": "Model",
+    "req.field.state": "State",
+    "req.field.created": "Created",
+    "req.field.stream": "Stream",
+    "req.field.responseFormat": "Response format",
+    "req.field.queueS": "Queue time",
+    "req.field.firstTokenS": "First token",
+    "req.field.wallclockS": "Wall clock",
+    "req.field.decodeTokS": "Decode speed",
+    "req.field.promptTokens": "Prompt tokens",
+    "req.field.outputTokens": "Output tokens",
+    "aria.remove": "Remove",
+    "aria.copy": "Copy",
+    "misc.pastedImage": "pasted image",
+    "misc.gpu": "GPU",
+    "misc.evicted": "evicted",
+    "unit.tokS": "tok/s",
+    "unit.tokens": "tokens",
+    "unit.seconds": "s",
   },
 };
 
@@ -823,9 +883,9 @@ async function pollMetrics() {
     const queued = l.queued === undefined ? 0 : l.queued;
     const tok = fmtRate(l.tok_s);
     var chatState = $("chat-state");
-    if (chatState) chatState.textContent = (tr("mon.stateLine") + " " + state + " \u00b7 " + tr("mon.queued") + " " + queued + " \u00b7 " + tok + " tok/s");
+    if (chatState) chatState.textContent = (tr("mon.stateLine") + " " + state + " \u00b7 " + tr("mon.queued") + " " + queued + " \u00b7 " + tok + " " + tr("unit.tokS"));
     setStatusDot(true);
-    if (state !== "idle" && state !== "?") setPill(state, tr("mon.stateLine") + " " + state + " \u00b7 " + tok + " tok/s");
+    if (state !== "idle" && state !== "?") setPill(state, tr("mon.stateLine") + " " + state + " \u00b7 " + tok + " " + tr("unit.tokS"));
     // Push sparkline data even when monitor tab isn't visible, so switching to it shows history
     pushSpark("tok_s", l.tok_s);
     pushSpark("gpu_util", hw.gpu_util);
@@ -958,9 +1018,24 @@ window.QinferRequests = {
       ["prompt_tokens", rec.prompt_tokens === undefined ? "—" : rec.prompt_tokens],
       ["output_tokens", rec.output_tokens === undefined ? "—" : rec.output_tokens],
     ];
+    const fieldLabels = {
+      "id": tr("req.field.id"),
+      "path": tr("req.field.path"),
+      "model": tr("req.field.model"),
+      "state": tr("req.field.state"),
+      "created": tr("req.field.created"),
+      "stream": tr("req.field.stream"),
+      "response_format": tr("req.field.responseFormat"),
+      "queue_s": tr("req.field.queueS"),
+      "first_token_s": tr("req.field.firstTokenS"),
+      "wallclock_s": tr("req.field.wallclockS"),
+      "decode_tok_s": tr("req.field.decodeTokS"),
+      "prompt_tokens": tr("req.field.promptTokens"),
+      "output_tokens": tr("req.field.outputTokens"),
+    };
     kv.forEach(function (p) {
       const dt = document.createElement("dt");
-      dt.textContent = p[0];
+      dt.textContent = fieldLabels[p[0]] || p[0];
       const dd = document.createElement("dd");
       dd.textContent = p[1];
       dl.appendChild(dt);
@@ -968,9 +1043,9 @@ window.QinferRequests = {
     });
     el.appendChild(dl);
     const tabs = [
-      ["input", "Input" + (rec.input_truncated ? tr("req.truncated") : ""), rec.input || tr("req.empty")],
-      ["output", "Output" + (rec.output_truncated ? tr("req.truncated") : ""), rec.output || tr("req.empty")],
-      ["reasoning", "Reasoning", rec.reasoning || tr("req.none")],
+      ["input", tr("req.tabInput") + (rec.input_truncated ? tr("req.truncated") : ""), rec.input || tr("req.empty")],
+      ["output", tr("req.tabOutput") + (rec.output_truncated ? tr("req.truncated") : ""), rec.output || tr("req.empty")],
+      ["reasoning", tr("req.tabReasoning"), rec.reasoning || tr("req.none")],
       ["response", tr("req.apiResp"), QinferRequests.apiResponseHtml(rec)],
     ];
     const set = document.createElement("div");
@@ -1074,7 +1149,7 @@ function renderAttachments() {
     var rm = document.createElement("button");
     rm.type = "button";
     rm.className = "st-btn st-btn--icon";
-    rm.setAttribute("aria-label", "Remove");
+    rm.setAttribute("aria-label", tr("aria.remove"));
     rm.innerHTML = '<svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-trash"/></svg>';
     rm.addEventListener("click", function () { attachments.splice(i, 1); renderAttachments(); });
     chip.appendChild(rm);
@@ -1086,7 +1161,7 @@ function addImageFile(f) {
   if (f.size > MAX_IMG_SIZE) { showToast(tr("chat.error"), "warn", f.name + " " + tr("toast.imgOver")); return; }
   var r = new FileReader();
   r.onload = function () {
-    attachments.push({ kind: "image", name: f.name || "pasted image", url: r.result });
+    attachments.push({ kind: "image", name: f.name || tr("misc.pastedImage"), url: r.result });
     renderAttachments();
   };
   r.readAsDataURL(f);
@@ -1263,7 +1338,7 @@ async function refreshAbout() {
 function factsHtml(rows) {
   return rows.filter(function (r) { return r[1] != null && r[1] !== ""; })
     .map(function (r) {
-      var copyBtn = r[2] ? '<button class="st-btn st-btn--icon" data-copy="' + esc(r[1]) + '" aria-label="Copy"><svg class="st-icon"><use href="/web/sprite.svg#i-copy"/></svg></button>' : "";
+      var copyBtn = r[2] ? '<button class="st-btn st-btn--icon" data-copy="' + esc(r[1]) + '" aria-label="' + esc(tr("aria.copy")) + '"><svg class="st-icon"><use href="/web/sprite.svg#i-copy"/></svg></button>' : "";
       return '<dt>' + esc(r[0]) + '</dt><dd>' + (r[2] ? '<code>' + esc(r[1]) + '</code>' + copyBtn : esc(r[1])) + '</dd>';
     }).join("");
 }
@@ -1287,7 +1362,7 @@ function renderAboutCards(eng, props, status, hs, hw) {
   var hwEl = $("facts-hw");
   if (hwEl) {
     hwEl.innerHTML = factsHtml([
-      ["GPU", hs.gpu_name || "\u2014"],
+      [tr("misc.gpu"), hs.gpu_name || "\u2014"],
       [tr("about.gpuCount"), hs.gpu_count !== undefined ? String(hs.gpu_count) : "\u2014"],
       [tr("about.igpu"), hs.igpu_name || "\u2014"],
       [tr("hw.cpu"), hs.cpu_name || "\u2014"],
@@ -1402,15 +1477,15 @@ function renderMonitorTab(m) {
     if (prog) prog.dataset.tone = "info";
     if (live.prompt_total) {
       pct = (100 * live.prompt_read) / live.prompt_total;
-      detail = fmtNum(live.prompt_read) + " / " + fmtNum(live.prompt_total) + " tokens \u00b7 " + fmtNum(pct) + "%";
+      detail = fmtNum(live.prompt_read) + " / " + fmtNum(live.prompt_total) + " " + tr("unit.tokens") + " \u00b7 " + fmtNum(pct) + "%";
     } else {
-      detail = fmtNum(live.prompt_tokens) + " tokens";
+      detail = fmtNum(live.prompt_tokens) + " " + tr("unit.tokens");
     }
   } else if (live.state === "generating") {
     label = live.phase ? live.phase[0].toUpperCase() + live.phase.slice(1) : tr("state.generating");
     if (prog) delete prog.dataset.tone;
     pct = live.max_tokens ? Math.min(100, (100 * live.generated) / live.max_tokens) : 0;
-    detail = fmtNum(live.generated) + " tokens \u00b7 " + fmtNum(live.tok_s, 1) + " tok/s";
+    detail = fmtNum(live.generated) + " " + tr("unit.tokens") + " \u00b7 " + fmtNum(live.tok_s, 1) + " " + tr("unit.tokS");
   }
   var stateLabel = $("state-label");
   if (stateLabel) stateLabel.textContent = label;
@@ -1501,7 +1576,7 @@ function renderMonitorTab(m) {
           '<td class="num">' + fmtNum(r.prompt_tokens) + '</td>' +
           '<td class="num">' + fmtNum(r.output_tokens) + '</td>' +
           '<td class="num">' + fmtNum(r.decode_tok_s, 1) + '</td>' +
-          '<td class="num">' + fmtNum(r.duration_s, 1) + ' s</td></tr>';
+          '<td class="num">' + fmtNum(r.duration_s, 1) + ' ' + tr("unit.seconds") + '</td></tr>';
       }).join("");
     }
   }
@@ -1541,7 +1616,7 @@ function renderConvCache(c) {
     factsEl.innerHTML =
       (c.last_prompt != null ? '<dt>' + esc(tr("cc.lastReq")) + '</dt><dd>' + fmtNum(c.last_reused || 0) + ' ' + tr("conv.reusedOf") + ' ' + fmtNum(c.last_prompt) + ' ' + tr("conv.ofPrompt") + '</dd>' : '') +
       (c.requests ? '<dt>' + esc(tr("cc.reusedSince")) + '</dt><dd>' + fmtNum(c.reused_tokens) + ' ' + tr("conv.tokens") + share + '</dd>' : '') +
-      (c.enabled ? '<dt>' + esc(tr("cc.parkedRestored")) + '</dt><dd>' + fmtNum(c.parks) + ' / ' + fmtNum(c.restores) + (c.evictions ? ' \u00b7 ' + fmtNum(c.evictions) + ' evicted' : '') + '</dd>' : '');
+      (c.enabled ? '<dt>' + esc(tr("cc.parkedRestored")) + '</dt><dd>' + fmtNum(c.parks) + ' / ' + fmtNum(c.restores) + (c.evictions ? ' \u00b7 ' + fmtNum(c.evictions) + ' ' + tr("misc.evicted") : '') + '</dd>' : '');
   }
   var note = $("cc-note");
   if (note) {
@@ -1563,7 +1638,7 @@ async function refreshMonitor() {
     // Update the header pill from metrics
     var live = d.live || {};
     var tok = live.tok_s != null ? fmtNum(live.tok_s, 1) : "\u2014";
-    if (live.state !== "idle" && live.state !== "?") setPill(live.state, tr("mon.stateLine") + " " + live.state + " \u00b7 " + tok + " tok/s");
+    if (live.state !== "idle" && live.state !== "?") setPill(live.state, tr("mon.stateLine") + " " + live.state + " \u00b7 " + tok + " " + tr("unit.tokS"));
   } catch (e) {
     setStatusDot(false);
     var stateLabel = $("state-label");

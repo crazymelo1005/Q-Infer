@@ -63,11 +63,11 @@
             <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-settings"/></svg><span data-i18n="chat.sampler">Sampler</span></summary>
           <div class="drawer-grid">
             <div class="field">
-              <label for="s-temp">temperature</label>
+              <label for="s-temp" data-i18n="chat.temperature">temperature</label>
               <input id="s-temp" class="input" type="number" min="0" max="2" step="0.05" value="0.8">
             </div>
             <div class="field">
-              <label for="s-top-p">top_p</label>
+              <label for="s-top-p" data-i18n="chat.topP">top_p</label>
               <input id="s-top-p" class="input" type="number" min="0.05" max="1" step="0.05" value="0.95">
             </div>
             <div class="field">
@@ -187,9 +187,9 @@
             <input id="req-search" class="input" type="search" data-i18n-ph="mon.searchPh" placeholder="Search path / model / state">
             <select id="req-filter" class="input" data-i18n-title="mon.filterTitle">
               <option value="" data-i18n="mon.all">All states</option>
-              <option value="queued">queued</option>
-              <option value="completed">completed</option>
-              <option value="error">error</option>
+              <option value="queued" data-i18n="filter.queued">queued</option>
+              <option value="completed" data-i18n="filter.completed">completed</option>
+              <option value="error" data-i18n="filter.error">error</option>
             </select>
           </div>
           <div id="req-list" class="req-list"><div class="note" data-i18n="mon.noReq">No requests yet</div></div>
