@@ -6,11 +6,15 @@
 // 20 chunks; local_size_x=64 means 20 of 64 invocations do work per workgroup.
 //
 // Output buffer layout (binding 2, uint offsets):
-//   o[0..159]       int8  q[FF]        — 640 bytes of quantized codes
-//   o[160..179]     float scale[NC]    — 20 fp32 scales
-//   o[180..199]     int32 sum[NC]      — 20 integer sums of codes per chunk
-//   o[200..219]     float hx[NC]       — 20 fp32 scale*sum corrections
-// Where FF=640, NC=FF/QKA=20. Total = 220 uints = 880 bytes.
+// Must match the full ActQ format the GEMV shader reads (H=2560 layout):
+//   o[0..639]       int8  q[H]         — 2560 bytes of quantized codes (FF=640 used, rest zero)
+//   o[640..719]     float scale[NC]    — 80 fp32 scales (FF/QKA=20 used, rest zero)
+//   o[720..799]     int32 sum[NC]      — 80 integer sums of codes per chunk
+//   o[800..879]     float hx[NC]       — 80 fp32 scale*sum corrections
+// Where FF=640, NC=FF/QKA=20, H=2560. Total = 880 uints = 3520 bytes.
+// The GEMV shader reads scale at act[640+chunk] and hx at act[800+chunk],
+// so the offsets must match the full H=2560 ActQ layout even though only
+// FF=640 elements are produced.
 //
 // Build: see README.md.
 #version 450
@@ -51,8 +55,8 @@ void main() {
     precise float scale = amax / 127.0;
     precise float inv = (scale > 0.0) ? 1.0 / scale : 0.0;
 
-    // Write scale as fp32
-    o[160u + k] = floatBitsToUint(scale);
+    // Write scale as fp32 (offset 640 matches the full H=2560 ActQ layout the GEMV reads)
+    o[640u + k] = floatBitsToUint(scale);
 
     // Pass 2: quantize, write codes, accumulate sum
     precise int sum = 0;
@@ -74,7 +78,7 @@ void main() {
         o[idx] = masked | ((uint(q) & 0xFFu) << shift);
     }
 
-    // Write sum and hx
-    o[180u + k] = uint(sum);
-    o[200u + k] = floatBitsToUint(scale * float(sum));
+    // Write sum and hx (offsets 720/800 match the full H=2560 ActQ layout)
+    o[720u + k] = uint(sum);
+    o[800u + k] = floatBitsToUint(scale * float(sum));
 }

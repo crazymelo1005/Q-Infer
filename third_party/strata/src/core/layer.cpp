@@ -18,6 +18,7 @@
 #include "strata/kernels/native_mmvq.hpp"
 #include "strata/kernels/native_moe.hpp"
 #include "strata/kernels/native_gdn.hpp"
+#include "strata/kernels/igpu/igpu_dense_projector.hpp"
 #include "strata/kernels/native_gdn_preprocess.hpp"
 #include "strata/kernels/native_router.hpp"
 #include "strata/kernels/native_qsa.hpp"
@@ -141,6 +142,54 @@ void project_bf16(const float* x, const uint16_t* x_bf16, const uint16_t* weight
 /// picks.  Producing only the one it thinks it needs is how the assumption gets baked in again.
 bool gemv_quantized(const WeightRef& w, const Planes& p, const strata::kernels::SForm& f, const uint8_t* x80, const uint8_t* xq8k,                    float* y, int64_t n_in, int64_t n_out, const std::string& name, void* stream,                    std::string& err, const float* x_f32 = nullptr, bool x_q8_1_ready = false) {
     using namespace strata::kernels;
+
+    // iGPU dense projection path: when igpu_data is set, route to iGPU instead of CUDA GPU
+    if (w.igpu_data != nullptr && x_f32 != nullptr) {
+        auto* proj = igpu::igpu_dense_projector();
+        if (proj != nullptr && proj->available()) {
+            // Use Strata's Q8_1 quantization (proper fp16 conversion)
+            // The native_q8_1 scratch is already allocated per-weight, but we need a temporary one here
+            const std::size_t q8_1_bytes = igpu::native_q8_1_bytes((int)n_in);
+            std::vector<uint8_t> q8_1_buf(q8_1_bytes);
+
+            // Quantize on CPU (no CUDA stream needed for CPU quantization)
+            // Note: This is a simplified CPU quantization; for production, use the CUDA kernel
+            const int n_blocks = (int)n_in / 32;
+            uint8_t* q8_codes = q8_1_buf.data();
+            uint16_t* q8_scales = reinterpret_cast<uint16_t*>(q8_codes + n_in);
+            uint16_t* q8_sums = q8_scales + n_blocks;
+
+            for (int b = 0; b < n_blocks; ++b) {
+                const float* block = x_f32 + b * 32;
+                float amax = 0.0f;
+                float sum = 0.0f;
+                for (int j = 0; j < 32; ++j) {
+                    amax = std::max(amax, std::fabs(block[j]));
+                    sum += block[j];
+                }
+                const float d = amax / 127.0f;
+                const float id = d != 0.0f ? 1.0f / d : 0.0f;
+
+                // Convert to fp16 using Strata's helper
+                q8_scales[b] = igpu::f32_to_f16(d);
+                q8_sums[b] = igpu::f32_to_f16(sum);
+
+                for (int j = 0; j < 32; ++j) {
+                    q8_codes[b * 32 + j] = (uint8_t)(int8_t)std::lround(block[j] * id);
+                }
+            }
+
+            // Execute on iGPU
+            std::string igpu_err;
+            if (proj->run(w.igpu_data, q8_1_buf.data(), y, (int)n_in, (int)n_out, igpu_err)) {
+                return true;
+            }
+            // Fall through to GPU path on iGPU failure
+            std::fprintf(stderr, "strata igpu dense: run %s failed: %s (falling back to GPU)\n",
+                         name.c_str(), igpu_err.c_str());
+        }
+    }
+
     if (w.native_data) {
         if (!x_f32 || !w.native_q8_1 || !stream || n_in != w.ne0 || n_out != w.ne1) {
             err = name + ": native projection requires matching FP32 input and session scratch";

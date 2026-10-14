@@ -12,7 +12,7 @@ time.
 """
 import pathlib
 
-SHADERS = ["q2_0_gemv", "swiglu_quant_q8_0", "iq2s_gemv", "iq2xxs_gemv", "iq1m_gemv", "strata_q2_0_gemv", "strata_swiglu_quant"]
+SHADERS = ["q2_0_gemv", "swiglu_quant_q8_0", "iq2s_gemv", "iq2xxs_gemv", "iq1m_gemv", "strata_q2_0_gemv", "strata_swiglu_quant", "strata_dense_q2_0_gemv", "strata_dense_q8_0_gemv", "strata_dense_iq4_xs_gemv", "strata_dense_iq3s_gemv"]
 
 
 def main() -> None:

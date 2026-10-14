@@ -90,6 +90,11 @@ struct WeightRef {
     const void* native_data = nullptr;
     void* native_q8_1 = nullptr;
     int native_type = -1;
+
+    // Optional iGPU projection data, owned by IgpuDenseProjector.
+    // When set, gemv_quantized() routes to iGPU instead of native_mmvq().
+    // Only valid for Q2_0 tensors when STRATA_IGPU_DENSE=1.
+    const void* igpu_data = nullptr;
     /// S23 experiment (STRATA_HC_Q8=1): a hyper-connection projection's Q8_0 bytes as the GGUF stores them, owned by
     /// NativeDense, for the verify window's read (every other path keeps the pack's BF16 `data`)
     const void* hc_q8 = nullptr;

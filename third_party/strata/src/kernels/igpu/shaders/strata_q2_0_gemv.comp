@@ -25,6 +25,11 @@
 // reassociation: without it the Intel compiler fuses multiplications and results
 // differ from the host in the last bits.
 //
+// Row stride: the uploaded weight buffer may be interleaved (gate/up alternating)
+// or contiguous. row_stride=2 means gate rows are at even indices and up rows at
+// odd indices (matching Strata's blob layout); row_stride=1 means contiguous rows
+// (used for the down projection).
+//
 // Build: glslangValidator -V strata_q2_0_gemv.comp -o strata_q2_0_gemv.spv
 #version 450
 
@@ -49,6 +54,7 @@ layout(std430, binding = 3) writeonly buffer Out { float out_arr[]; };
 layout(push_constant) uniform Pc {
     uint n_rows;    // number of weight rows (FF=640 gate/up, H=2560 down)
     uint n_blocks;  // Q2_0 blocks per row (H/QK=40 gate/up, FF/QK=10 down)
+    uint row_stride; // row stride in the uploaded buffer (2 for interleaved GU, 1 for contiguous down)
 } pc;
 
 // Byte access over uint-backed SSBOs (little-endian, same as the host).
@@ -75,8 +81,8 @@ void main() {
     uint row = gl_GlobalInvocationID.x;
     if (row >= pc.n_rows) return;
 
-    uint wc_row_off = row * pc.n_blocks * 16u;  // byte offset into wcodes for this row
-    uint ws_row_off = row * pc.n_blocks * 2u;   // byte offset into wscales for this row
+    uint wc_row_off = row * pc.row_stride * pc.n_blocks * 16u;  // byte offset into wcodes for this row
+    uint ws_row_off = row * pc.row_stride * pc.n_blocks * 2u;   // byte offset into wscales for this row
 
     precise float acc  = 0.0;
     precise float corr = 0.0;

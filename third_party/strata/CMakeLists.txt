@@ -1212,6 +1212,7 @@ target_link_libraries(strata_kernels_cpu PUBLIC Threads::Threads)
 add_library(strata_igpu_pool STATIC
   src/kernels/igpu/strata_pack_adapter.cpp
   src/kernels/igpu/igpu_expert_pool.cpp
+  src/kernels/igpu/igpu_dense_projector.cpp
   src/kernels/igpu/vulkan_runtime.cpp
 )
 target_include_directories(strata_igpu_pool PUBLIC

@@ -2849,7 +2849,12 @@ int main(int argc, char** argv) {
         }
     }
     // the canonical Q2_0 pack's CPU kernels are AVX-512 only; a native pack runs on AVX2 CPUs as well
-    if (!native_pack) strata::kernels::cpu::cpu_require_expert_support();
+    // When iGPU pool is enabled (STRATA_IGPU_POOL=1), the iGPU handles experts so skip the CPU check.
+    const char* igpu_env_check = std::getenv("STRATA_IGPU_POOL");
+    const bool igpu_enabled = igpu_env_check && std::strcmp(igpu_env_check, "1") == 0;
+    if (!native_pack && !igpu_enabled) strata::kernels::cpu::cpu_require_expert_support();
+    else if (!native_pack && igpu_enabled)
+        std::fprintf(stderr, "strata generate: iGPU pool enabled (STRATA_IGPU_POOL=1), CPU AVX-512 check skipped\n");
     else if (!strata::kernels::cpu::cpu_avx512_ok())
         std::fprintf(stderr, "strata generate: this CPU has no AVX-512: the expert kernels run on %s "
                              "(multi-token for the i-quant gate/up rows)\n",
@@ -13275,7 +13280,14 @@ int main(int argc, char** argv) {
             if (adapt_nowait()) apply_pending(false);
                 else if (pending.empty() || ++pending_age >= adapt_lag()) apply_pending(true);
             if (use_mtp && mtp.prob() && !from_sfx && T_mtp > 1 && o.spec_corrupt <= 0) ver.set_spec_q(mtp.spec_q(), T_mtp - 1);
-            if (!ver.run(T, window.data(), p, &drive_pool_multi, &drive, outv.data(), err)) {
+            // STRATA_IGPU_POOL=1: route through the iGPU hybrid dispatcher (same as the serve path's win_pool_fn).
+            const strata::core::PoolMultiFn gen_win_pool_fn = [] {
+                const char* igpu = std::getenv("STRATA_IGPU_POOL");
+                if (igpu != nullptr && std::strcmp(igpu, "1") == 0)
+                    return &igpu_drive_wrapper_multi;
+                return &drive_pool_multi;
+            }();
+            if (!ver.run(T, window.data(), p, gen_win_pool_fn, &drive, outv.data(), err)) {
                 std::fprintf(stderr, "strata generate: %s\n", err.c_str());
                 return 1;
             }

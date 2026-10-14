@@ -1,0 +1,106 @@
+// Strata dense projection Q8_0 weights x Q8_1 activation GEMV.
+//
+// For large GDN dense projections (ssm_out, ffn_down_shexp) on iGPU.
+// Q8_0 is the simplest quantized format: fp16 scale + 32 signed int8 codes per block.
+//
+// Weight format: Q8_0 interleaved (34 bytes per block)
+//   Each block: 2 bytes fp16 scale + 32 bytes int8 codes
+//   GGUF stores row-major: row 0 blocks, row 1 blocks, ...
+//
+// Activation format: Q8_1 planar (codes, then scales, then sums)
+//   codes:  n_blocks * 32 bytes (int8 codes, 32 per block)
+//   scales: n_blocks * 2 bytes (fp16 scale per block)
+//   sums:   n_blocks * 2 bytes (fp16 sum per block)
+//
+// Per block b:
+//   d_w = weight_scale[b]  (fp16 -> fp32)
+//   d_a = act_scale[b]     (fp16 -> fp32)
+//   dot = sum_{j=0}^{31} weight_code_j * act_code_j   (both signed int8)
+//   result += d_w * d_a * dot
+//
+// Build: glslangValidator -V strata_dense_q8_0_gemv.comp -o strata_dense_q8_0_gemv.spv
+#version 450
+
+layout(local_size_x = 64) in;
+
+// Weight buffer: interleaved Q8_0 blocks (34 bytes each: 2 scale + 32 codes)
+// Row r starts at r * n_blocks * 34
+layout(std430, binding = 0) readonly buffer Weights { uint weights[]; };
+
+// Q8_1 activation buffer (planar):
+//   codes:  n_blocks * 32 bytes (int8 codes, 32 per block)
+//   scales: n_blocks * 2 bytes (fp16 scale per block)
+//   sums:   n_blocks * 2 bytes (fp16 sum per block) -- unused for Q8_0 weights
+layout(std430, binding = 1) readonly buffer ActCodes { uint act_codes[]; };
+layout(std430, binding = 2) readonly buffer ActScales { uint act_scales[]; };
+layout(std430, binding = 3) readonly buffer ActSums { uint act_sums[]; };
+
+// Output: one fp32 per row.
+layout(std430, binding = 4) writeonly buffer Out { float out_arr[]; };
+
+layout(push_constant) uniform Pc {
+    uint n_rows;      // number of weight rows (e.g., 2560 for ssm_out)
+    uint n_blocks_w;  // Q8_0 blocks per weight row (n_in / 32)
+    uint n_blocks_a;  // Q8_1 blocks per activation (n_in / 32) = n_blocks_w
+} pc;
+
+// Byte access over uint-backed SSBOs (little-endian, same as the host).
+uint w_byte(uint off)   { return (weights[off >> 2]   >> ((off & 3u) * 8u)) & 0xFFu; }
+uint ac_byte(uint off)  { return (act_codes[off >> 2] >> ((off & 3u) * 8u)) & 0xFFu; }
+uint as_byte(uint off)  { return (act_scales[off >> 2] >> ((off & 3u) * 8u)) & 0xFFu; }
+
+// fp16 bits -> fp32
+float f16(uint h) {
+    uint s = (h >> 15) & 1u;
+    uint e = (h >> 10) & 0x1Fu;
+    uint m = h & 0x3FFu;
+    float v = 0.0;
+    if (e == 0u) {
+        v = ldexp(float(m), -24);
+    } else if (e != 31u) {
+        v = ldexp(1.0 + float(m) / 1024.0, int(e) - 15);
+    }
+    return s != 0u ? -v : v;
+}
+
+// Convert uint8 to signed int8 (interpret as -128..127)
+int to_i8(uint u) {
+    return (u > 127u) ? int(u) - 256 : int(u);
+}
+
+void main() {
+    uint row = gl_GlobalInvocationID.x;
+    if (row >= pc.n_rows) return;
+
+    // Row starts at row * n_blocks_w * 34 bytes (interleaved Q8_0)
+    uint w_row_off = row * pc.n_blocks_w * 34u;
+
+    precise float acc = 0.0;
+
+    // Each Q8_0 block spans 32 elements = 1 Q8_1 block
+    for (uint b = 0u; b < pc.n_blocks_w; ++b) {
+        uint w_blk_off = w_row_off + b * 34u;
+
+        // Weight scale at offset 0-1 (fp16 -> fp32)
+        precise float d_w = f16(w_byte(w_blk_off) | (w_byte(w_blk_off + 1u) << 8));
+
+        // Activation scale for this block (fp16 -> fp32)
+        uint as_off = b * 2u;
+        precise float d_a = f16(as_byte(as_off) | (as_byte(as_off + 1u) << 8));
+
+        // Integer dot product: signed int8 weight codes * signed int8 activation codes
+        // Weight codes at offset 2..33 (32 bytes)
+        // Activation codes at block b * 32 (32 bytes)
+        int dot = 0;
+        for (uint j = 0u; j < 32u; ++j) {
+            int wc = to_i8(w_byte(w_blk_off + 2u + j));
+            int ac = to_i8(ac_byte(b * 32u + j));
+            dot += wc * ac;
+        }
+
+        // Scale the integer dot by both scales
+        acc += d_w * d_a * float(dot);
+    }
+
+    out_arr[row] = acc;
+}

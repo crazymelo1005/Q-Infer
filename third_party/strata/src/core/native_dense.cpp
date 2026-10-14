@@ -5,6 +5,9 @@
 #include "strata/kernels/native_mmvq.hpp"
 #include "strata/platform/memory.hpp"
 
+// iGPU dense projection accelerator (optional, when STRATA_IGPU_DENSE=1)
+#include "strata/kernels/igpu/igpu_dense_projector.hpp"
+
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <climits>
@@ -319,6 +322,22 @@ bool NativeDense::load(const std::vector<std::string>& shards, WeightTable& tabl
                     }
                 }
                 pending.push_back(Pending{&ref, (int) tensor.type, bytes, std::move(data), std::move(packed)});
+
+                // iGPU dense acceleration: upload supported format tensors to iGPU when STRATA_IGPU_DENSE=1
+                if (strata::kernels::igpu::igpu_dense_enabled() &&
+                    (tensor.type == 42 || tensor.type == 8 || tensor.type == 23 || tensor.type == 21)) {  // Q2_0=42, Q8_0=8, IQ4_XS=23, IQ3_S=21
+                    auto* proj = strata::kernels::igpu::igpu_dense_projector();
+                    if (proj != nullptr && proj->available()) {
+                        std::string igpu_err;
+                        if (!proj->load(tensor.name, gguf.tensor_data(tensor), bytes,
+                                        (int)ref.ne0, (int)ref.ne1, (int)tensor.type, igpu_err)) {
+                            std::fprintf(stderr, "strata igpu dense: load %s failed: %s (continuing with GPU)\n",
+                                         tensor.name.c_str(), igpu_err.c_str());
+                        } else {
+                            ref.igpu_data = gguf.tensor_data(tensor);  // mark for iGPU routing
+                        }
+                    }
+                }
             }
             if (hc_q8_requested())
                 for (const auto& tensor : gguf.tensors()) {

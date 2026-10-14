@@ -93,6 +93,7 @@ struct BatchBufs {
 struct GemvPc {
     std::uint32_t n_rows;
     std::uint32_t n_blocks;
+    std::uint32_t row_stride;  // 2 for interleaved GU, 1 for contiguous down
 };
 
 // Push constants for the SwiGLU shader.
@@ -104,8 +105,9 @@ struct SwigluPc {
 // ActQ buffer size in bytes (matches the shader's layout: 880 uints = 3520 bytes).
 constexpr std::uint64_t kActQBufBytes = 880 * sizeof(std::uint32_t);
 
-// SwiGLU output buffer size (same layout as ActQ, 220 uints = 880 bytes for FF=640).
-constexpr std::uint64_t kSwigluOutBytes = 220 * sizeof(std::uint32_t);
+// SwiGLU output buffer size: must match the full ActQ format (880 uints = 3520 bytes)
+// because the down GEMV reads scale at act[640+chunk] and hx at act[800+chunk].
+constexpr std::uint64_t kSwigluOutBytes = 880 * sizeof(std::uint32_t);
 
 }  // namespace
 
@@ -203,18 +205,22 @@ bool IgpuExpertPool::run(void* jobs_ptr, int n, std::string& err) {
     void* d_wscales = nullptr;
 
     BatchBufs bufs;
-    // Weight buffers sized for gate/up (larger): FF rows * ROW_GU codes = 640*640 = 409600 bytes
-    // and FF rows * SC_GU*2 scales = 640*80 = 51200 bytes
-    constexpr std::uint64_t kMaxCodesBytes = 2 * FF * 640;  // gate+up codes region = 1280000
-    constexpr std::uint64_t kMaxScalesBytes = 2 * FF * 40 * 2;  // gate+up scales = 102400
+    // Weight buffers sized for the full interleaved GU region:
+    //   codes: 2*FF rows * ROW_GU(640) bytes = 819200 bytes
+    //   scales: 2*FF rows * SC_GU(40) * 2 bytes = 102400 bytes
+    // The GU region is interleaved (gate0, up0, gate1, up1, ...); we upload it
+    // whole and use row_stride=2 in the GEMV shader to select even rows (gate)
+    // or odd rows (up).
+    constexpr std::uint64_t kGUCodesBytes = 2 * FF * 640;    // 819200
+    constexpr std::uint64_t kGUScalesBytes = 2 * FF * 40 * 2; // 102400
 
     if (!bufs.make(rt, kActQBufBytes, d_act, err) ||
         !bufs.make(rt, FF * sizeof(float), d_gate, err) ||
         !bufs.make(rt, FF * sizeof(float), d_up, err) ||
         !bufs.make(rt, kSwigluOutBytes, d_swiglu_out, err) ||
         !bufs.make(rt, H * sizeof(float), d_down, err) ||
-        !bufs.make(rt, kMaxCodesBytes, d_wcodes, err) ||
-        !bufs.make(rt, kMaxScalesBytes, d_wscales, err)) {
+        !bufs.make(rt, kGUCodesBytes, d_wcodes, err) ||
+        !bufs.make(rt, kGUScalesBytes, d_wscales, err)) {
         return false;
     }
 
@@ -235,13 +241,14 @@ bool IgpuExpertPool::run(void* jobs_ptr, int n, std::string& err) {
         // Upload activation to device
         if (!rt.upload(job.act, kActQBufBytes, d_act, err)) return false;
 
-        // Gate GEMV: FF=640 rows, H/QK=40 blocks per row
+        // Gate GEMV: FF=640 rows, H/QK=40 blocks per row.
+        // Upload the full interleaved GU codes/scales region (gate0, up0, gate1, up1, ...).
+        // With row_stride=2 the shader reads even-indexed rows = gate rows.
         {
-            StrataPackRow gate_row = gu_row(job.blob, 0, false);
-            std::uint64_t gate_codes_bytes = FF * 640;
-            std::uint64_t gate_scales_bytes = FF * 40 * 2;
-            if (!rt.upload(gate_row.codes, gate_codes_bytes, d_wcodes, err)) return false;
-            if (!rt.upload(gate_row.scales, gate_scales_bytes, d_wscales, err)) return false;
+            const uint8_t* gu_codes = job.blob;  // O_GU_CODES = 0
+            const uint8_t* gu_scales = job.blob + 1228800;  // O_GU_SCALES
+            if (!rt.upload(gu_codes, kGUCodesBytes, d_wcodes, err)) return false;
+            if (!rt.upload(gu_scales, kGUScalesBytes, d_wscales, err)) return false;
 
             vk::Buffer b[4] = {
                 static_cast<vk::Buffer>(d_wcodes),
@@ -250,7 +257,7 @@ bool IgpuExpertPool::run(void* jobs_ptr, int n, std::string& err) {
                 static_cast<vk::Buffer>(d_gate)
             };
             rt.update_set(set_gemv, b, 4);
-            GemvPc pc{FF, H / QK};
+            GemvPc pc{FF, H / QK, 2};  // stride=2: even rows = gate
             std::string e2;
             if (!rt.dispatch(pipe_gemv_, pl_gemv_, set_gemv, &pc, sizeof(pc),
                             (FF + 63) / 64, 1, 1, e2)) {
@@ -259,13 +266,15 @@ bool IgpuExpertPool::run(void* jobs_ptr, int n, std::string& err) {
             }
         }
 
-        // Up GEMV: FF=640 rows, H/QK=40 blocks per row
+        // Up GEMV: FF=640 rows, H/QK=40 blocks per row.
+        // Same interleaved data, but offset by one row so stride=2 reads odd rows = up rows.
         {
-            StrataPackRow up_row = gu_row(job.blob, 0, true);
-            std::uint64_t up_codes_bytes = FF * 640;
-            std::uint64_t up_scales_bytes = FF * 40 * 2;
-            if (!rt.upload(up_row.codes, up_codes_bytes, d_wcodes, err)) return false;
-            if (!rt.upload(up_row.scales, up_scales_bytes, d_wscales, err)) return false;
+            constexpr int ROW_GU = 640;   // bytes of codes per gate/up row
+            constexpr int SC_GU = 40;     // weight blocks per gate/up row
+            const uint8_t* up_codes = job.blob + ROW_GU;  // offset to first up row
+            const uint8_t* up_scales = job.blob + 1228800 + SC_GU * 2;  // offset to first up row scales
+            if (!rt.upload(up_codes, kGUCodesBytes, d_wcodes, err)) return false;
+            if (!rt.upload(up_scales, kGUScalesBytes, d_wscales, err)) return false;
 
             vk::Buffer b[4] = {
                 static_cast<vk::Buffer>(d_wcodes),
@@ -274,7 +283,7 @@ bool IgpuExpertPool::run(void* jobs_ptr, int n, std::string& err) {
                 static_cast<vk::Buffer>(d_up)
             };
             rt.update_set(set_gemv, b, 4);
-            GemvPc pc{FF, H / QK};
+            GemvPc pc{FF, H / QK, 2};  // stride=2: odd rows (from offset) = up
             std::string e2;
             if (!rt.dispatch(pipe_gemv_, pl_gemv_, set_gemv, &pc, sizeof(pc),
                             (FF + 63) / 64, 1, 1, e2)) {
@@ -300,7 +309,8 @@ bool IgpuExpertPool::run(void* jobs_ptr, int n, std::string& err) {
             }
         }
 
-        // Down GEMV: H=2560 rows, FF/QK=10 blocks per row
+        // Down GEMV: H=2560 rows, FF/QK=10 blocks per row.
+        // Down region is contiguous (not interleaved), so row_stride=1.
         {
             StrataPackRow down_r = down_row(job.blob, 0);
             std::uint64_t down_codes_bytes = H * 160;
@@ -315,7 +325,7 @@ bool IgpuExpertPool::run(void* jobs_ptr, int n, std::string& err) {
                 static_cast<vk::Buffer>(d_down)
             };
             rt.update_set(set_gemv, b, 4);
-            GemvPc pc{H, FF / QK};
+            GemvPc pc{H, FF / QK, 1};  // stride=1: contiguous rows
             std::string e2;
             if (!rt.dispatch(pipe_gemv_, pl_gemv_, set_gemv, &pc, sizeof(pc),
                             (H + 63) / 64, 1, 1, e2)) {

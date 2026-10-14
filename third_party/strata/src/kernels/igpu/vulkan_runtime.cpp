@@ -495,12 +495,13 @@ vk::DescriptorSetLayout VulkanRuntime::make_set_layout(
 vk::PipelineLayout VulkanRuntime::make_layout(const vk::DescriptorSetLayout* sets,
                                               std::uint32_t n, std::string& err) {
     err.clear();
-    // One push-constant range covers the kernels' parameter block (two uints
-    // today); declaring it on layouts whose shader has no push block is legal.
+    // One push-constant range covers the kernels' parameter block (up to three
+    // uints today: n_rows, n_blocks, row_stride); declaring it on layouts whose
+    // shader has no push block is legal.
     vk::PushConstantRange r{};
     r.stageFlags = vk::SHADER_STAGE_COMPUTE;
     r.offset = 0;
-    r.size = 8;
+    r.size = 12;
     vk::PipelineLayoutCreateInfo ci{};
     ci.sType = vk::ST_PIPELINE_LAYOUT_CREATE_INFO;
     ci.setLayoutCount = n;
