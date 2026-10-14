@@ -23,7 +23,7 @@ Intel iGPU 在系统中可用但未被充分利用（设备优先级为 GPU > iG
 - 着色器位于 `third_party/strata/src/kernels/igpu/`，离线以 `glslangValidator` 编译，以字节数组形式嵌入 `spv_data.hpp`。
 - `IgpuExpertPool`（`third_party/strata/src/kernels/igpu/igpu_expert_pool.hpp/.cpp`）持有 Vulkan 管线、描述符集与设备侧缓冲区；在首次调用时惰性初始化，在池销毁时统一释放。
 - `hybrid_expert_dispatch()` 检查 `STRATA_IGPU_POOL` 环境变量与批大小，决定走 CPU 还是 iGPU；iGPU 不可用或批过小时自动回退到 CPU。
-- 整条路径不修改厂商化引擎源码（`third_party/strata/` 保持未改动），只在引擎外增加一层调度。
+- 对厂商化引擎源码（`third_party/strata/`）做了最小改动：`generate.cpp` 增加 `igpu_drive_wrapper` 和 `STRATA_IGPU_POOL` 环境变量分支；`CMakeLists.txt` 注册新增的 iGPU 源文件。核心调度逻辑在引擎外的 `igpu_expert_pool.cpp` 中。
 
 ## 备选方案
 
@@ -38,11 +38,12 @@ Intel iGPU 在系统中可用但未被充分利用（设备优先级为 GPU > iG
 - 未命中专家目标加速 2–3×（19.71 ms → 约 7–10 ms/token），前提是批大小足以填满 iGPU（与 ADR-019 的 P1 spike 读数一致：10240 行级别大矩阵可得 3.9× 加速）。
 - 优雅降级：iGPU 不可用或批太小时自动回退到 CPU，不影响正确性。
 - 复用既有 Vulkan 基础设施（任务 #135–#139 交付的运行时与着色器资产），不引入新的链接期依赖。
-- 不修改厂商化引擎源码，升引擎时不需要重验证补丁。
+- 对厂商化引擎的改动集中在 `generate.cpp`（约 15 行）和 `CMakeLists.txt`（源文件注册），升引擎时只需重验证这两处接线点。
 
 负面：
 
 - 两条代码路径需要维护（CPU 与 iGPU），着色器与 CPU 内核的档位布局若变动需同步更新；两者由逐位对拍测试约束。
+- `third_party/strata/` 不再保持未改动：`generate.cpp` 和 `CMakeLists.txt` 有接线改动，升引擎版本时需要重新合入这些改动（或重新验证兼容性）。
 - iGPU 路径要求 Vulkan-capable 硬件；在没有 Intel iGPU 或驱动不支持 `VK_KHR_shader_integer_dot_product` 的设备上，该路径不可用或性能特征不同（ADR-019 已指出该扩展的可用性不确定）。
 - 数值精度必须在 1e-6 相对容差内匹配 CPU 参考；这是一条需要持续验证的约束，不是一次性证明。
 

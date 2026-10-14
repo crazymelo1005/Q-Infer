@@ -13,6 +13,9 @@
 // Strata headers for the real act_quant_q8_1.
 #include "strata/kernels/cpu/expert.hpp"
 
+// ExpertDispatch: the user pointer passed by igpu_drive_wrapper in generate.cpp.
+#include "strata/core/expert_source.hpp"
+
 #include <cmath>
 #include <cstring>
 #include <mutex>
@@ -159,12 +162,16 @@ bool IgpuExpertPool::init(std::string& err) {
     return true;
 }
 
-void IgpuExpertPool::run(void* jobs_ptr, int n) {
-    if (!ready_ || n <= 0) return;
+bool IgpuExpertPool::run(void* jobs_ptr, int n, std::string& err) {
+    err.clear();
+    if (!ready_) {
+        err = "iGPU pool not initialized";
+        return false;
+    }
+    if (n <= 0) return true;
 
     auto* jobs = static_cast<PoolExpertJob*>(jobs_ptr);
     VulkanRuntime& rt = igpu_runtime();
-    std::string err;
 
     // Allocate device buffers:
     //   d_act: activation buffer (3520 bytes, reused across experts)
@@ -195,14 +202,14 @@ void IgpuExpertPool::run(void* jobs_ptr, int n) {
         !bufs.make(rt, H * sizeof(float), d_down, err) ||
         !bufs.make(rt, kMaxCodesBytes, d_wcodes, err) ||
         !bufs.make(rt, kMaxScalesBytes, d_wscales, err)) {
-        return;
+        return false;
     }
 
     // Descriptor sets: one for GEMV, one for SwiGLU (reused across dispatches).
     vk::DescriptorSet set_gemv = rt.make_set(sl_gemv_, nullptr, 0, err);
-    if (set_gemv == nullptr) return;
+    if (set_gemv == nullptr) return false;
     vk::DescriptorSet set_swiglu = rt.make_set(sl_swiglu_, nullptr, 0, err);
-    if (set_swiglu == nullptr) return;
+    if (set_swiglu == nullptr) return false;
 
     // Process each expert
     for (int e = 0; e < n; ++e) {
@@ -210,15 +217,15 @@ void IgpuExpertPool::run(void* jobs_ptr, int n) {
         if (job.blob == nullptr || job.act == nullptr || job.out == nullptr) continue;
 
         // Upload activation to device
-        if (!rt.upload(job.act, kActQBufBytes, d_act, err)) return;
+        if (!rt.upload(job.act, kActQBufBytes, d_act, err)) return false;
 
         // Gate GEMV: FF=640 rows, H/QK=40 blocks per row
         {
             StrataPackRow gate_row = gu_row(job.blob, 0, false);
             std::uint64_t gate_codes_bytes = FF * 640;
             std::uint64_t gate_scales_bytes = FF * 40 * 2;
-            if (!rt.upload(gate_row.codes, gate_codes_bytes, d_wcodes, err)) return;
-            if (!rt.upload(gate_row.scales, gate_scales_bytes, d_wscales, err)) return;
+            if (!rt.upload(gate_row.codes, gate_codes_bytes, d_wcodes, err)) return false;
+            if (!rt.upload(gate_row.scales, gate_scales_bytes, d_wscales, err)) return false;
 
             vk::Buffer b[4] = {
                 static_cast<vk::Buffer>(d_wcodes),
@@ -241,8 +248,8 @@ void IgpuExpertPool::run(void* jobs_ptr, int n) {
             StrataPackRow up_row = gu_row(job.blob, 0, true);
             std::uint64_t up_codes_bytes = FF * 640;
             std::uint64_t up_scales_bytes = FF * 40 * 2;
-            if (!rt.upload(up_row.codes, up_codes_bytes, d_wcodes, err)) return;
-            if (!rt.upload(up_row.scales, up_scales_bytes, d_wscales, err)) return;
+            if (!rt.upload(up_row.codes, up_codes_bytes, d_wcodes, err)) return false;
+            if (!rt.upload(up_row.scales, up_scales_bytes, d_wscales, err)) return false;
 
             vk::Buffer b[4] = {
                 static_cast<vk::Buffer>(d_wcodes),
@@ -282,8 +289,8 @@ void IgpuExpertPool::run(void* jobs_ptr, int n) {
             StrataPackRow down_r = down_row(job.blob, 0);
             std::uint64_t down_codes_bytes = H * 160;
             std::uint64_t down_scales_bytes = H * 10 * 2;
-            if (!rt.upload(down_r.codes, down_codes_bytes, d_wcodes, err)) return;
-            if (!rt.upload(down_r.scales, down_scales_bytes, d_wscales, err)) return;
+            if (!rt.upload(down_r.codes, down_codes_bytes, d_wcodes, err)) return false;
+            if (!rt.upload(down_r.scales, down_scales_bytes, d_wscales, err)) return false;
 
             vk::Buffer b[4] = {
                 static_cast<vk::Buffer>(d_wcodes),
@@ -302,14 +309,30 @@ void IgpuExpertPool::run(void* jobs_ptr, int n) {
         }
 
         // Download result
-        if (!rt.download(d_down, H * sizeof(float), job.out, err)) return;
+        if (!rt.download(d_down, H * sizeof(float), job.out, err)) return false;
     }
+    return true;
 }
 
 // ---- hybrid dispatcher ----
 
+// Thread-local error string for propagating iGPU errors through the const-char* fail field.
+static thread_local std::string g_igpu_error;
+
 void hybrid_expert_dispatch(void* user, const float* x_f, const int32_t* ids,
                             const float* weights, int64_t n_embd, int64_t k, float* out) {
+    // The user pointer is ExpertDispatch* (passed from igpu_drive_wrapper in generate.cpp).
+    auto* d = static_cast<strata::core::ExpertDispatch*>(user);
+    if (d == nullptr || d->failed) return;
+
+    // Geometry check: the shaders are compiled for fixed dimensions.
+    if (n_embd != H) {
+        d->failed = true;
+        d->fail = "iGPU pool: activation width mismatch (expected 2560)";
+        d->fail_layer = d->layers;
+        return;
+    }
+
     // Lazy-init the pool (once, thread-safe).
     static IgpuExpertPool pool;
     static std::once_flag init_flag;
@@ -319,25 +342,49 @@ void hybrid_expert_dispatch(void* user, const float* x_f, const int32_t* ids,
     });
 
     // Route: large batches to iGPU, small to CPU.
-    if (pool.available() && k > 4 && user != nullptr) {
+    if (pool.available() && k > 4 && d->src != nullptr) {
         // Quantize the activation once for all experts in this batch.
         PoolActQ act;
         g_act_quant(x_f, static_cast<int>(n_embd), act);
 
-        // Build job array from PoolFn arguments.
-        // The user pointer convention: cast to a blob array pointer.
-        // In the Strata integration, the blobs come from ExpertSource via
-        // the Drive wrapper in generate.cpp.
-        auto** blobs = static_cast<const uint8_t**>(user);
+        // Notify the source that a new layer is starting (matches CPU path).
+        d->src->begin_layer(d->layers, ids, k);
+
+        // Build job array, extracting blobs from ExpertSource.
         std::vector<PoolExpertJob> jobs(static_cast<std::size_t>(k));
         for (int64_t i = 0; i < k; ++i) {
-            jobs[static_cast<std::size_t>(i)].blob = blobs[ids[i]];
+            const int64_t e = ids[i];
+            if (e < 0 || e >= d->n_expert) {
+                d->failed = true;
+                d->fail = "iGPU pool: routed expert id out of range";
+                d->fail_layer = d->layers;
+                d->fail_expert = e;
+                return;
+            }
+            const uint8_t* b = d->src->blob(d->layers, e);
+            if (b == nullptr) {
+                d->failed = true;
+                d->fail = "iGPU pool: expert source returned null blob";
+                d->fail_layer = d->layers;
+                d->fail_expert = e;
+                ++d->missing;
+                return;
+            }
+            jobs[static_cast<std::size_t>(i)].blob = b;
             jobs[static_cast<std::size_t>(i)].act = &act;
             jobs[static_cast<std::size_t>(i)].out = out + i * n_embd;
-            jobs[static_cast<std::size_t>(i)].weight = weights[i];
+            jobs[static_cast<std::size_t>(i)].weight = weights ? weights[i] : 1.0f;
             jobs[static_cast<std::size_t>(i)].slot = static_cast<int>(i);
         }
-        pool.run(jobs.data(), static_cast<int>(k));
+
+        std::string err;
+        if (!pool.run(jobs.data(), static_cast<int>(k), err)) {
+            g_igpu_error = "iGPU pool run failed: " + err;
+            d->failed = true;
+            d->fail = g_igpu_error.c_str();
+            d->fail_layer = d->layers;
+            return;
+        }
     } else {
         // CPU fallback.
         if (g_cpu_dispatch != nullptr) {

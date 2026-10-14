@@ -66,7 +66,8 @@ public:
     // strata::kernels::cpu::ExpertJob, since the prefix layout matches).
     // For each expert: quantize activation, run gate/up/down GEMVs with
     // SwiGLU fusion in between, download results.
-    void run(void* jobs, int n);
+    // Returns true on success; on failure, returns false and writes to `err`.
+    bool run(void* jobs, int n, std::string& err);
 
 private:
     bool ready_ = false;
