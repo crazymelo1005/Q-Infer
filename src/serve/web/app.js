@@ -99,6 +99,92 @@ const I18N = {
     "state.unreachable": "不可达",
     "state.noResponse": "服务无响应",
 
+    "tab.chat": "对话",
+    "tab.monitor": "监控",
+    "tab.about": "关于",
+    "nav.views": "视图",
+    "chat.newChatTitle": "新会话",
+    "chat.exportTitleLong": "导出为 Markdown",
+    "chat.send": "发送",
+    "state.idle": "空闲",
+    "state.reading": "阅读中",
+    "state.generating": "生成中",
+    "state.queuedBadge": "排队中",
+    "state.errorBadge": "错误",
+    "mon.waiting": "等待请求",
+    "mon.ctxFill": "上下文填充",
+    "mon.vram": "显存",
+    "mon.sysRam": "系统内存",
+    "mon.gpuTemp": "GPU 温度",
+    "mon.recentReq": "最近请求",
+    "mon.convCache": "对话缓存",
+    "req.thTime": "时间",
+    "req.thStatus": "状态",
+    "req.thPrompt": "提示词",
+    "req.thOutput": "输出",
+    "req.thDecode": "解码 t/s",
+    "req.thDuration": "耗时",
+    "req.done": "完成",
+    "req.maxTokens": "最大 token",
+    "req.stoppedBadge": "已停止",
+    "req.closed": "已关闭",
+    "cc.cachedConv": "已缓存对话",
+    "cc.theirMemory": "其记忆",
+    "cc.enabledNote": "继续已缓存对话的请求会恢复状态，而无需重新阅读。",
+    "cc.disabledNote": "引擎保留上一次对话的状态，后续请求只需阅读新增内容。",
+    "cc.lastReq": "上次请求",
+    "cc.reusedSince": "自启动以来已复用",
+    "cc.parkedRestored": "已暂停 / 已恢复",
+    "about.clientDesc": "任何兼容 OpenAI 或 Anthropic 的客户端都可使用以下地址。基础 URL：",
+    "about.endpointPaths": "端点路径",
+    "about.openaiLabel": "OpenAI",
+    "about.anthropicLabel": "Anthropic",
+    "about.monitoringLabel": "监控",
+    "about.model": "模型",
+    "about.engineLabel": "引擎",
+    "about.service": "服务",
+    "about.started": "启动时间",
+    "about.uptime": "运行时长",
+    "about.maxCtx": "最大上下文",
+    "about.imagesCap": "图像",
+    "about.slotsCap": "槽位",
+    "about.gpuCount": "GPU 数量",
+    "about.igpu": "核显",
+    "about.coresThreads": "核心 / 线程",
+    "about.openaiBase": "OpenAI 基础 URL",
+    "about.anthropicBase": "Anthropic 基础 URL",
+    "about.modelName": "模型名称",
+    "about.modelAlias": "模型别名",
+    "about.totalSlots": "总槽位",
+    "about.chatTemplate": "对话模板",
+    "about.templater": "模板引擎",
+    "about.vision": "视觉",
+    "about.buildInfo": "构建信息",
+    "mon.decodeNow": "当前解码",
+    "mon.decodeLabel": "解码",
+    "mon.notAvail": "不可用",
+    "mon.limit": "上限",
+    "mon.cores": "核心",
+    "mon.threads": "线程",
+    "conv.reusedOf": "复用",
+    "conv.ofPrompt": "提示词 token",
+    "conv.pctAll": "占全部提示词 token",
+    "conv.of": "/",
+    "conv.tokens": "token",
+    "conv.ofAll": "占全部提示词 token",
+    "toast.copied": "已复制",
+    "toast.imgOver": "超过 20 MB",
+    "toast.fileOver": "超过 512 KB",
+    "toast.notText": "不是文本文件",
+    "metric.speed": "速度",
+    "metric.gpuLoad": "GPU 负载",
+    "metric.vram": "显存",
+    "metric.temp": "GPU 温度",
+    "metric.power": "功率",
+    "metric.pcie": "PCIe",
+    "metric.cpu": "CPU",
+    "metric.disk": "磁盘读取",
+
     "apiMon.title": "请求检查",
     "apiMon.keyLabel": "API 密钥",
     "apiMon.keyPh": "可选",
@@ -190,6 +276,92 @@ const I18N = {
     "state.unreachable": "Unreachable",
     "state.noResponse": "Service not responding",
 
+    "tab.chat": "Chat",
+    "tab.monitor": "Monitor",
+    "tab.about": "About",
+    "nav.views": "Views",
+    "chat.newChatTitle": "New chat",
+    "chat.exportTitleLong": "Export chat as Markdown",
+    "chat.send": "Send",
+    "state.idle": "Idle",
+    "state.reading": "Reading",
+    "state.generating": "Generating",
+    "state.queuedBadge": "Queued",
+    "state.errorBadge": "Error",
+    "mon.waiting": "Waiting for a request",
+    "mon.ctxFill": "Context fill",
+    "mon.vram": "VRAM",
+    "mon.sysRam": "System RAM",
+    "mon.gpuTemp": "GPU temperature",
+    "mon.recentReq": "Recent requests",
+    "mon.convCache": "Conversation cache",
+    "req.thTime": "Time",
+    "req.thStatus": "Status",
+    "req.thPrompt": "Prompt",
+    "req.thOutput": "Output",
+    "req.thDecode": "Decode t/s",
+    "req.thDuration": "Duration",
+    "req.done": "Done",
+    "req.maxTokens": "Max tokens",
+    "req.stoppedBadge": "Stopped",
+    "req.closed": "Closed",
+    "cc.cachedConv": "Cached conversations",
+    "cc.theirMemory": "Their memory",
+    "cc.enabledNote": "A request that continues a cached conversation gets its state back instead of reading it again.",
+    "cc.disabledNote": "The engine keeps the last conversation's state, so a follow-up reads only what is new.",
+    "cc.lastReq": "Last request",
+    "cc.reusedSince": "Reused since start",
+    "cc.parkedRestored": "Parked / restored",
+    "about.clientDesc": "Any OpenAI- or Anthropic-compatible client works with these addresses. Base URL:",
+    "about.endpointPaths": "Endpoint paths",
+    "about.openaiLabel": "OpenAI",
+    "about.anthropicLabel": "Anthropic",
+    "about.monitoringLabel": "Monitoring",
+    "about.model": "Model",
+    "about.engineLabel": "Engine",
+    "about.service": "Service",
+    "about.started": "Started",
+    "about.uptime": "Uptime",
+    "about.maxCtx": "Max context",
+    "about.imagesCap": "Images",
+    "about.slotsCap": "Slots",
+    "about.gpuCount": "GPU count",
+    "about.igpu": "iGPU",
+    "about.coresThreads": "Cores / threads",
+    "about.openaiBase": "OpenAI base URL",
+    "about.anthropicBase": "Anthropic base URL",
+    "about.modelName": "Model name",
+    "about.modelAlias": "Model alias",
+    "about.totalSlots": "Total slots",
+    "about.chatTemplate": "Chat template",
+    "about.templater": "Templater",
+    "about.vision": "Vision",
+    "about.buildInfo": "Build info",
+    "mon.decodeNow": "Decode now",
+    "mon.decodeLabel": "Decode",
+    "mon.notAvail": "not available",
+    "mon.limit": "limit",
+    "mon.cores": "cores",
+    "mon.threads": "threads",
+    "conv.reusedOf": "of",
+    "conv.ofPrompt": "prompt tokens",
+    "conv.pctAll": "of all prompt tokens",
+    "conv.of": "of",
+    "conv.tokens": "tokens",
+    "conv.ofAll": "of all prompt tokens",
+    "toast.copied": "Copied",
+    "toast.imgOver": "is over 20 MB",
+    "toast.fileOver": "is over 512 KB",
+    "toast.notText": "is not a text file",
+    "metric.speed": "Speed",
+    "metric.gpuLoad": "GPU load",
+    "metric.vram": "VRAM",
+    "metric.temp": "GPU temp",
+    "metric.power": "Power",
+    "metric.pcie": "PCIe",
+    "metric.cpu": "CPU",
+    "metric.disk": "Disk read",
+
     "apiMon.title": "Request monitor",
     "apiMon.keyLabel": "API key",
     "apiMon.keyPh": "optional",
@@ -227,6 +399,9 @@ function applyLang() {
     const k = el.dataset.i18nTitle;
     el.setAttribute("title", tr(k));
     el.setAttribute("aria-label", tr(k));
+  });
+  document.querySelectorAll("[data-i18n-aria]").forEach(function (el) {
+    el.setAttribute("aria-label", tr(el.dataset.i18nAria));
   });
   // Rich key with inline markup (e.g. the /props paragraph): safe here because
   // the dictionaries are static, no user input ever reaches them.
@@ -908,7 +1083,7 @@ function renderAttachments() {
 }
 
 function addImageFile(f) {
-  if (f.size > MAX_IMG_SIZE) { showToast(tr("chat.error"), "warn", f.name + " is over 20 MB"); return; }
+  if (f.size > MAX_IMG_SIZE) { showToast(tr("chat.error"), "warn", f.name + " " + tr("toast.imgOver")); return; }
   var r = new FileReader();
   r.onload = function () {
     attachments.push({ kind: "image", name: f.name || "pasted image", url: r.result });
@@ -922,12 +1097,12 @@ function addFiles(files) {
     var f = files[i];
     if (f.type.startsWith("image/")) { addImageFile(f); continue; }
     // Non-image files: show name preview, store as text if readable
-    if (f.size > MAX_FILE_SIZE) { showToast(tr("chat.error"), "warn", f.name + " is over 512 KB"); continue; }
+    if (f.size > MAX_FILE_SIZE) { showToast(tr("chat.error"), "warn", f.name + " " + tr("toast.fileOver")); continue; }
     (function (file) {
       var r = new FileReader();
       r.onload = function () {
         var text = String(r.result);
-        if (text.indexOf("\u0000") >= 0) { showToast(tr("chat.error"), "warn", file.name + " is not a text file"); return; }
+        if (text.indexOf("\u0000") >= 0) { showToast(tr("chat.error"), "warn", file.name + " " + tr("toast.notText")); return; }
         attachments.push({ kind: "file", name: file.name, text: text });
         renderAttachments();
       };
@@ -1007,14 +1182,14 @@ function kvTable(tbodyId, rows) {
 
 // Metric card definitions for the 4-column grid
 var MON_METRICS = [
-  {key: "speed", label: "Speed", icon: "i-gauge", unit: "t/s", series: "tok_s"},
-  {key: "gpu", label: "GPU load", icon: "i-gpu", unit: "%", series: "gpu_util", max: 100},
-  {key: "vram", label: "VRAM", icon: "i-layers", unit: "GB", series: "gpu_mem_used"},
-  {key: "temp", label: "GPU temp", icon: "i-thermometer", unit: "\u00b0C", series: "gpu_temp", tone: "warn"},
-  {key: "power", label: "Power", icon: "i-bolt", unit: "W", series: "gpu_power"},
-  {key: "pcie", label: "PCIe", icon: "i-link", unit: "", series: "gpu_pcie_rx_mb", tone: "info"},
-  {key: "cpu", label: "CPU", icon: "i-cpu", unit: "%", series: "cpu", max: 100},
-  {key: "disk", label: "Disk read", icon: "i-disk", unit: "MB/s", series: "disk_read_mb", tone: "info"},
+  {key: "speed", labelKey: "metric.speed", icon: "i-gauge", unit: "t/s", series: "tok_s"},
+  {key: "gpu", labelKey: "metric.gpuLoad", icon: "i-gpu", unit: "%", series: "gpu_util", max: 100},
+  {key: "vram", labelKey: "metric.vram", icon: "i-layers", unit: "GB", series: "gpu_mem_used"},
+  {key: "temp", labelKey: "metric.temp", icon: "i-thermometer", unit: "\u00b0C", series: "gpu_temp", tone: "warn"},
+  {key: "power", labelKey: "metric.power", icon: "i-bolt", unit: "W", series: "gpu_power"},
+  {key: "pcie", labelKey: "metric.pcie", icon: "i-link", unit: "", series: "gpu_pcie_rx_mb", tone: "info"},
+  {key: "cpu", labelKey: "metric.cpu", icon: "i-cpu", unit: "%", series: "cpu", max: 100},
+  {key: "disk", labelKey: "metric.disk", icon: "i-disk", unit: "MB/s", series: "disk_read_mb", tone: "info"},
 ];
 
 function initMetricCards() {
@@ -1023,7 +1198,7 @@ function initMetricCards() {
   el.innerHTML = MON_METRICS.map(function (m) {
     var toneAttr = m.tone ? ' data-tone="' + m.tone + '"' : '';
     return '<div class="st-card metric-card"><div class="st-metric">' +
-      '<span class="st-metric__label"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#' + m.icon + '"/></svg>' + esc(m.label) + '</span>' +
+      '<span class="st-metric__label"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#' + m.icon + '"/></svg>' + esc(tr(m.labelKey)) + '</span>' +
       '<span class="st-metric__value" id="mv-' + m.key + '">\u2013</span>' +
       '<span class="st-metric__sub" id="ms-' + m.key + '"></span>' +
       '<svg class="st-metric__spark" id="sp-' + m.key + '" viewBox="0 0 100 32" preserveAspectRatio="none"' + toneAttr + '>' +
@@ -1098,14 +1273,14 @@ function renderAboutCards(eng, props, status, hs, hw) {
   var engEl = $("facts-engine");
   if (engEl) {
     engEl.innerHTML = factsHtml([
-      ["Model", eng.model || "\u2014"],
-      ["Engine", status.engine || "\u2014"],
-      ["Service", status.service || "\u2014"],
-      ["Started", QinferRequests.timeOf(status.started)],
-      ["Uptime", status.uptime_s !== undefined ? status.uptime_s.toFixed(0) + "s" : "\u2014"],
-      ["Max context", eng.max_context !== undefined ? String(eng.max_context) : "\u2014"],
-      ["Images", eng.images !== undefined ? String(eng.images) : "\u2014"],
-      ["Slots", status.concurrency ? String(status.concurrency.serving) : "\u2014"],
+      [tr("about.model"), eng.model || "\u2014"],
+      [tr("about.engineLabel"), status.engine || "\u2014"],
+      [tr("about.service"), status.service || "\u2014"],
+      [tr("about.started"), QinferRequests.timeOf(status.started)],
+      [tr("about.uptime"), status.uptime_s !== undefined ? status.uptime_s.toFixed(0) + "s" : "\u2014"],
+      [tr("about.maxCtx"), eng.max_context !== undefined ? String(eng.max_context) : "\u2014"],
+      [tr("about.imagesCap"), eng.images !== undefined ? String(eng.images) : "\u2014"],
+      [tr("about.slotsCap"), status.concurrency ? String(status.concurrency.serving) : "\u2014"],
     ]);
   }
   // Card 2: Hardware facts
@@ -1113,11 +1288,11 @@ function renderAboutCards(eng, props, status, hs, hw) {
   if (hwEl) {
     hwEl.innerHTML = factsHtml([
       ["GPU", hs.gpu_name || "\u2014"],
-      ["GPU count", hs.gpu_count !== undefined ? String(hs.gpu_count) : "\u2014"],
-      ["iGPU", hs.igpu_name || "\u2014"],
-      ["CPU", hs.cpu_name || "\u2014"],
-      ["Cores / threads", (hs.cores !== undefined ? hs.cores : "\u2014") + " / " + (hs.threads !== undefined ? hs.threads : "\u2014")],
-      ["RAM", hw.ram_total ? (hw.ram_total / 1073741824).toFixed(1) + " GB" : "\u2014"],
+      [tr("about.gpuCount"), hs.gpu_count !== undefined ? String(hs.gpu_count) : "\u2014"],
+      [tr("about.igpu"), hs.igpu_name || "\u2014"],
+      [tr("hw.cpu"), hs.cpu_name || "\u2014"],
+      [tr("about.coresThreads"), (hs.cores !== undefined ? hs.cores : "\u2014") + " / " + (hs.threads !== undefined ? hs.threads : "\u2014")],
+      [tr("hw.ram"), hw.ram_total ? (hw.ram_total / 1073741824).toFixed(1) + " GB" : "\u2014"],
     ]);
   }
   // Card 3: API URLs with copy buttons
@@ -1125,9 +1300,9 @@ function renderAboutCards(eng, props, status, hs, hw) {
   if (apiEl) {
     var base = location.origin;
     apiEl.innerHTML = factsHtml([
-      ["OpenAI base URL", base + "/v1", true],
-      ["Anthropic base URL", base, true],
-      ["Model name", eng.model || "\u2014", true],
+      [tr("about.openaiBase"), base + "/v1", true],
+      [tr("about.anthropicBase"), base, true],
+      [tr("about.modelName"), eng.model || "\u2014", true],
     ]);
   }
   // Card 4: Ports info
@@ -1141,15 +1316,15 @@ function renderAboutCards(eng, props, status, hs, hw) {
     var caps = props.chat_template_caps || {};
     var ct = props.chat_template || "";
     propsEl.innerHTML = factsHtml([
-      ["Model alias", props.model_alias || "\u2014"],
-      ["Total slots", props.total_slots !== undefined ? String(props.total_slots) : "\u2014"],
-      ["Chat template", ct.length > 120 ? ct.slice(0, 120) + "\u2026" : ct],
-      ["Templater", caps.templater || "\u2014"],
-      ["Vision", props.modalities && props.modalities.vision !== undefined ? String(props.modalities.vision) : "\u2014"],
+      [tr("about.modelAlias"), props.model_alias || "\u2014"],
+      [tr("about.totalSlots"), props.total_slots !== undefined ? String(props.total_slots) : "\u2014"],
+      [tr("about.chatTemplate"), ct.length > 120 ? ct.slice(0, 120) + "\u2026" : ct],
+      [tr("about.templater"), caps.templater || "\u2014"],
+      [tr("about.vision"), props.modalities && props.modalities.vision !== undefined ? String(props.modalities.vision) : "\u2014"],
       [tr("about.tempDefault"), prm.temperature !== undefined ? String(prm.temperature) : "\u2014"],
       [tr("about.topPDefault"), prm.top_p !== undefined ? String(prm.top_p) : "\u2014"],
       [tr("about.seedDefault"), prm.seed !== undefined ? String(prm.seed) : "\u2014"],
-      ["Build info", props.build_info || "\u2014"],
+      [tr("about.buildInfo"), props.build_info || "\u2014"],
     ]);
   }
 }
@@ -1160,7 +1335,7 @@ document.addEventListener("click", function (e) {
   if (!btn) return;
   var text = btn.dataset.copy;
   navigator.clipboard.writeText(text).then(function () {
-    showToast("Copied", "success");
+    showToast(tr("toast.copied"), "success");
   }).catch(function () {
     // Fallback for non-HTTPS contexts
     var ta = document.createElement("textarea");
@@ -1169,7 +1344,7 @@ document.addEventListener("click", function (e) {
     ta.select();
     document.execCommand("copy");
     ta.remove();
-    showToast("Copied", "success");
+    showToast(tr("toast.copied"), "success");
   });
 });
 
@@ -1221,9 +1396,9 @@ function renderMonitorTab(m) {
 
   // State card label/detail/progress
   var prog = $("state-progress");
-  var label = "Waiting for a request", detail = "", pct = 0;
+  var label = tr("mon.waiting"), detail = "", pct = 0;
   if (live.state === "reading") {
-    label = "Reading prompt";
+    label = tr("state.reading");
     if (prog) prog.dataset.tone = "info";
     if (live.prompt_total) {
       pct = (100 * live.prompt_read) / live.prompt_total;
@@ -1232,7 +1407,7 @@ function renderMonitorTab(m) {
       detail = fmtNum(live.prompt_tokens) + " tokens";
     }
   } else if (live.state === "generating") {
-    label = live.phase ? live.phase[0].toUpperCase() + live.phase.slice(1) : "Generating";
+    label = live.phase ? live.phase[0].toUpperCase() + live.phase.slice(1) : tr("state.generating");
     if (prog) delete prog.dataset.tone;
     pct = live.max_tokens ? Math.min(100, (100 * live.generated) / live.max_tokens) : 0;
     detail = fmtNum(live.generated) + " tokens \u00b7 " + fmtNum(live.tok_s, 1) + " tok/s";
@@ -1257,18 +1432,18 @@ function renderMonitorTab(m) {
   // Metric cards
   var speed = live.state === "generating" ? live.tok_s : null;
   setMetricValue("speed", speed == null ? null : fmtNum(speed, 1), "t/s",
-    live.state === "generating" ? "Decode now" : "Decode");
+    live.state === "generating" ? tr("mon.decodeNow") : tr("mon.decodeLabel"));
   setMetricValue("gpu", hw.gpu_util == null ? null : fmtNum(hw.gpu_util), "%",
-    st.gpu_name || (st.gpu_note ? "not available" : ""));
+    st.gpu_name || (st.gpu_note ? tr("mon.notAvail") : ""));
   var vramUsed = hw.gpu_mem_used != null ? (hw.gpu_mem_used / 1073741824).toFixed(2) : null;
   var vramTotal = hw.gpu_mem_total ? " / " + (hw.gpu_mem_total / 1073741824).toFixed(0) + " GB" : " GB";
   setMetricValue("vram", vramUsed, vramTotal, "");
   setMetricValue("temp", hw.gpu_temp == null ? null : fmtNum(hw.gpu_temp), "\u00b0C", "");
   setMetricValue("power", hw.gpu_power == null ? null : fmtNum(hw.gpu_power), "W",
-    hw.gpu_power_limit ? "of " + fmtNum(hw.gpu_power_limit) + " W limit" : "");
+    hw.gpu_power_limit ? tr("mon.limit") + " " + fmtNum(hw.gpu_power_limit) + " W" : "");
   setMetricValue("pcie", hw.gpu_pcie_rx_mb == null ? null : fmtNum(hw.gpu_pcie_rx_mb, 1), "MB/s", "");
   setMetricValue("cpu", hw.cpu == null ? null : fmtNum(hw.cpu), "%",
-    st.threads ? (st.cores ? st.cores + " cores \u00b7 " : "") + st.threads + " threads" : "");
+    st.threads ? (st.cores ? st.cores + " " + tr("mon.cores") + " \u00b7 " : "") + st.threads + " " + tr("mon.threads") : "");
   setMetricValue("disk", hw.disk_read_mb == null ? null : fmtNum(hw.disk_read_mb, 1), "MB/s", "");
 
   // Sparklines
@@ -1314,11 +1489,11 @@ function renderMonitorTab(m) {
   var body = $("req-body");
   if (body) {
     if (!requests.length) {
-      body.innerHTML = '<tr><td colspan="6" class="muted">No requests yet</td></tr>';
+      body.innerHTML = '<tr><td colspan="6" class="muted">' + esc(tr("mon.noReq")) + '</td></tr>';
     } else {
       body.innerHTML = requests.slice(0, 10).map(function (r) {
-        var badge = {stop: ["", "Done"], length: ["", "Max tokens"], cancel: ["st-badge--queued", "Stopped"],
-                     disconnect: ["st-badge--queued", "Closed"], error: ["st-badge--error", "Error"]};
+        var badge = {stop: ["", tr("req.done")], length: ["", tr("req.maxTokens")], cancel: ["st-badge--queued", tr("req.stoppedBadge")],
+                     disconnect: ["st-badge--queued", tr("req.closed")], error: ["st-badge--error", tr("chat.error")]};
         var bInfo = badge[r.finish] || ["", r.finish || "\u2013"];
         var t = new Date(r.time * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
         return '<tr><td>' + esc(t) + '</td>' +
@@ -1359,20 +1534,20 @@ function renderConvCache(c) {
     if (memBar) memBar.style.width = (budget ? Math.min(100, (100 * c.bytes) / budget) : 0) + "%";
   }
   var sum = $("cc-sum");
-  if (sum) sum.textContent = c.requests ? fmtNum(c.requests_reused) + " of " + fmtNum(c.requests) + " requests reused part of their prompt" : "";
+  if (sum) sum.textContent = c.requests ? fmtNum(c.requests_reused) + " " + tr("conv.reusedOf") + " " + fmtNum(c.requests) + " " + tr("conv.ofPrompt") : "";
   var factsEl = $("cc-facts");
   if (factsEl) {
-    var share = c.prompt_tokens ? " (" + fmtNum((100 * c.reused_tokens) / c.prompt_tokens) + "% of all prompt tokens)" : "";
+    var share = c.prompt_tokens ? " (" + fmtNum((100 * c.reused_tokens) / c.prompt_tokens) + "% " + tr("conv.pctAll") + ")" : "";
     factsEl.innerHTML =
-      (c.last_prompt != null ? '<dt>Last request</dt><dd>' + fmtNum(c.last_reused || 0) + ' of ' + fmtNum(c.last_prompt) + ' prompt tokens reused</dd>' : '') +
-      (c.requests ? '<dt>Reused since start</dt><dd>' + fmtNum(c.reused_tokens) + ' tokens' + share + '</dd>' : '') +
-      (c.enabled ? '<dt>Parked / restored</dt><dd>' + fmtNum(c.parks) + ' / ' + fmtNum(c.restores) + (c.evictions ? ' \u00b7 ' + fmtNum(c.evictions) + ' evicted' : '') + '</dd>' : '');
+      (c.last_prompt != null ? '<dt>' + esc(tr("cc.lastReq")) + '</dt><dd>' + fmtNum(c.last_reused || 0) + ' ' + tr("conv.reusedOf") + ' ' + fmtNum(c.last_prompt) + ' ' + tr("conv.ofPrompt") + '</dd>' : '') +
+      (c.requests ? '<dt>' + esc(tr("cc.reusedSince")) + '</dt><dd>' + fmtNum(c.reused_tokens) + ' ' + tr("conv.tokens") + share + '</dd>' : '') +
+      (c.enabled ? '<dt>' + esc(tr("cc.parkedRestored")) + '</dt><dd>' + fmtNum(c.parks) + ' / ' + fmtNum(c.restores) + (c.evictions ? ' \u00b7 ' + fmtNum(c.evictions) + ' evicted' : '') + '</dd>' : '');
   }
   var note = $("cc-note");
   if (note) {
     note.textContent = c.enabled
-      ? "A request that continues a cached conversation gets its state back instead of reading it again."
-      : "The engine keeps the last conversation's state, so a follow-up reads only what is new.";
+      ? tr("cc.enabledNote")
+      : tr("cc.disabledNote");
   }
 }
 

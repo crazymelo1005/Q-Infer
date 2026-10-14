@@ -25,14 +25,14 @@
 </head>
 <body>
 <header class="st-header topbar">
-  <span class="st-header__brand logo">Q-Infer <small>Local inference</small></span>
-  <nav class="st-tabs tab-bar" role="tablist" aria-label="Views">
+  <span class="st-header__brand logo">Q-Infer <small data-i18n="brand.tag">Local inference</small></span>
+  <nav class="st-tabs tab-bar" role="tablist" data-i18n-aria="nav.views">
     <button class="st-tab tab-btn active" role="tab" data-tab="chat" type="button" aria-selected="true">
-      <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-chat"/></svg>Chat</button>
+      <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-chat"/></svg><span data-i18n="tab.chat">Chat</span></button>
     <button class="st-tab tab-btn" role="tab" data-tab="monitor" type="button" aria-selected="false">
-      <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-activity"/></svg>Monitor</button>
+      <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-activity"/></svg><span data-i18n="tab.monitor">Monitor</span></button>
     <button class="st-tab tab-btn" role="tab" data-tab="about" type="button" aria-selected="false">
-      <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-info"/></svg>About</button>
+      <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-info"/></svg><span data-i18n="tab.about">About</span></button>
   </nav>
   <span class="st-header__spacer"></span>
   <span class="st-pill" id="pill" data-state="idle" role="status" aria-live="polite">
@@ -81,14 +81,14 @@
           <textarea id="chat-input" class="input chat-input" rows="2"
                     placeholder="Type a message; Enter to send, Shift+Enter for a new line" data-i18n-ph="chat.inputPh"></textarea>
           <div class="st-composer__bar">
-            <button type="button" class="st-btn st-btn--icon" id="btn-new" title="New chat" aria-label="New chat">
+            <button type="button" class="st-btn st-btn--icon" id="btn-new" data-i18n-title="chat.newChatTitle">
               <svg class="st-icon"><use href="/web/sprite.svg#i-new-chat"/></svg></button>
-            <button type="button" class="st-btn st-btn--icon" id="btn-export" title="Export chat as Markdown" aria-label="Export chat as Markdown">
+            <button type="button" class="st-btn st-btn--icon" id="btn-export" data-i18n-title="chat.exportTitleLong">
               <svg class="st-icon"><use href="/web/sprite.svg#i-download"/></svg></button>
             <span class="spacer"></span>
             <button type="button" class="st-btn st-btn--secondary" id="btn-stop" hidden>
               <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-stop"/></svg><span data-i18n="chat.stop">Stop</span></button>
-            <button type="submit" class="st-btn st-btn--primary st-btn--send" id="btn-send" aria-label="Send">
+            <button type="submit" class="st-btn st-btn--primary st-btn--send" id="btn-send" data-i18n-aria="chat.send">
               <svg class="st-icon"><use href="/web/sprite.svg#i-send"/></svg></button>
           </div>
         </form>
@@ -108,15 +108,15 @@
         <div class="state-card__head">
           <span class="card-title" data-i18n="mon.state">Model state</span>
           <span class="state-badges" id="state-badges">
-            <span class="st-badge" data-s="idle">Idle</span>
-            <span class="st-badge st-badge--reading" data-s="reading">Reading</span>
-            <span class="st-badge st-badge--generating" data-s="generating">Generating</span>
-            <span class="st-badge st-badge--queued" data-s="queued">Queued</span>
-            <span class="st-badge st-badge--error" data-s="error">Error</span>
+            <span class="st-badge" data-s="idle" data-i18n="state.idle">Idle</span>
+            <span class="st-badge st-badge--reading" data-s="reading" data-i18n="state.reading">Reading</span>
+            <span class="st-badge st-badge--generating" data-s="generating" data-i18n="state.generating">Generating</span>
+            <span class="st-badge st-badge--queued" data-s="queued" data-i18n="state.queuedBadge">Queued</span>
+            <span class="st-badge st-badge--error" data-s="error" data-i18n="state.errorBadge">Error</span>
           </span>
         </div>
         <div class="state-card__row">
-          <span id="state-label">Waiting for a request</span>
+          <span id="state-label" data-i18n="mon.waiting">Waiting for a request</span>
           <span class="muted" id="state-detail"></span>
         </div>
         <div class="st-progress" id="state-progress">
@@ -130,7 +130,7 @@
       <!-- Monitor row: context gauge + recent requests -->
       <div class="monitor-row">
         <div class="st-card ctx-card">
-          <span class="card-title">Context fill</span>
+          <span class="card-title" data-i18n="mon.ctxFill">Context fill</span>
           <div class="ctx-gauge">
             <svg class="st-gauge" viewBox="0 0 120 120" aria-hidden="true">
               <circle class="st-gauge__track" cx="60" cy="60" r="50" fill="none" stroke-width="10" stroke-linecap="round"
@@ -143,22 +143,22 @@
               <span class="muted" id="ctx-sub">&ndash;</span>
             </div>
           </div>
-          <div class="bar-row"><span>VRAM</span><span class="muted" id="vram-text">&ndash;</span></div>
+          <div class="bar-row"><span data-i18n="mon.vram">VRAM</span><span class="muted" id="vram-text">&ndash;</span></div>
           <div class="st-progress"><div class="st-progress__bar" id="vram-bar" style="width:0%"></div></div>
-          <div class="bar-row"><span>System RAM</span><span class="muted" id="ram-text">&ndash;</span></div>
+          <div class="bar-row"><span data-i18n="mon.sysRam">System RAM</span><span class="muted" id="ram-text">&ndash;</span></div>
           <div class="st-progress"><div class="st-progress__bar" id="ram-bar" style="width:0%"></div></div>
-          <div class="bar-row"><span>GPU temperature</span><span class="muted" id="temp-text">&ndash;</span></div>
+          <div class="bar-row"><span data-i18n="mon.gpuTemp">GPU temperature</span><span class="muted" id="temp-text">&ndash;</span></div>
           <div class="st-progress" data-tone="warn"><div class="st-progress__bar" id="temp-bar" style="width:0%"></div></div>
         </div>
         <div class="st-card req-card">
           <div class="req-head">
-            <span class="card-title">Recent requests</span>
+            <span class="card-title" data-i18n="mon.recentReq">Recent requests</span>
           </div>
           <div class="table-wrap">
             <table class="st-table">
-              <thead><tr><th>Time</th><th>Status</th><th class="num">Prompt</th><th class="num">Output</th>
-                <th class="num">Decode t/s</th><th class="num">Duration</th></tr></thead>
-              <tbody id="req-body"><tr><td colspan="6" class="muted">No requests yet</td></tr></tbody>
+              <thead><tr><th data-i18n="req.thTime">Time</th><th data-i18n="req.thStatus">Status</th><th class="num" data-i18n="req.thPrompt">Prompt</th><th class="num" data-i18n="req.thOutput">Output</th>
+                <th class="num" data-i18n="req.thDecode">Decode t/s</th><th class="num" data-i18n="req.thDuration">Duration</th></tr></thead>
+              <tbody id="req-body"><tr><td colspan="6" class="muted" data-i18n="mon.noReq">No requests yet</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -167,13 +167,13 @@
       <!-- Conversation cache card -->
       <div class="st-card cc-card" id="cc-card">
         <div class="req-head">
-          <span class="card-title">Conversation cache</span>
+          <span class="card-title" data-i18n="mon.convCache">Conversation cache</span>
           <span class="muted small" id="cc-sum"></span>
         </div>
         <div class="cc-bars" id="cc-bars" hidden>
-          <div><div class="bar-row"><span>Cached conversations</span><span class="muted" id="cc-slots-text">&ndash;</span></div>
+          <div><div class="bar-row"><span data-i18n="cc.cachedConv">Cached conversations</span><span class="muted" id="cc-slots-text">&ndash;</span></div>
             <div class="st-progress"><div class="st-progress__bar" id="cc-slots-bar" style="width:0%"></div></div></div>
-          <div><div class="bar-row"><span>Their memory</span><span class="muted" id="cc-mem-text">&ndash;</span></div>
+          <div><div class="bar-row"><span data-i18n="cc.theirMemory">Their memory</span><span class="muted" id="cc-mem-text">&ndash;</span></div>
             <div class="st-progress"><div class="st-progress__bar" id="cc-mem-bar" style="width:0%"></div></div></div>
         </div>
         <dl class="facts" id="cc-facts"></dl>
@@ -263,14 +263,14 @@
           <svg class="st-icon"><use href="/web/sprite.svg#i-link"/></svg>
           <span class="card-title" data-i18n="about.svc">Service and protocols</span>
         </div>
-        <p class="dim">Any OpenAI- or Anthropic-compatible client works with these addresses. Base URL: <span class="mono" id="about-ports"></span>.</p>
+        <p class="dim"><span data-i18n="about.clientDesc">Any OpenAI- or Anthropic-compatible client works with these addresses. Base URL:</span> <span class="mono" id="about-ports"></span>.</p>
         <dl class="facts" id="facts-api"></dl>
         <details class="st-collapse">
-          <summary>Endpoint paths</summary>
+          <summary data-i18n="about.endpointPaths">Endpoint paths</summary>
           <div class="st-collapse__body">
-            <p>OpenAI: <code class="mono">/v1/chat/completions</code> (SSE streaming), <code class="mono">/v1/completions</code>, <code class="mono">/v1/models</code></p>
-            <p>Anthropic: <code class="mono">/v1/messages</code>, <code class="mono">/v1/messages/count_tokens</code></p>
-            <p>Monitoring: <code class="mono">/metrics</code>, <code class="mono">/api/requests</code></p>
+            <p><span data-i18n="about.openaiLabel">OpenAI</span>: <code class="mono">/v1/chat/completions</code> (SSE streaming), <code class="mono">/v1/completions</code>, <code class="mono">/v1/models</code></p>
+            <p><span data-i18n="about.anthropicLabel">Anthropic</span>: <code class="mono">/v1/messages</code>, <code class="mono">/v1/messages/count_tokens</code></p>
+            <p><span data-i18n="about.monitoringLabel">Monitoring</span>: <code class="mono">/metrics</code>, <code class="mono">/api/requests</code></p>
           </div>
         </details>
       </div>

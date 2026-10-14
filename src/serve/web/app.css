@@ -4,7 +4,7 @@
 html,body{height:100%}
 body{display:flex;flex-direction:column;overflow:hidden}
 main{flex:1;min-height:0;display:flex}
-.view{flex:1;min-height:0;display:flex;flex-direction:column}
+.view{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .muted{color:var(--st-ink-muted)}
 .small{font-size:var(--st-fs-xs)}
 .card-title{font-weight:700;font-size:var(--st-fs-base);color:var(--st-ink)}
@@ -60,8 +60,8 @@ main{flex:1;min-height:0;display:flex}
 
 /* ---- Monitor / About ---- */
 .view--monitor,.view--about{overflow-y:auto}
-.monitor{max-width:1240px;width:100%;margin:0 auto;padding:var(--st-s-6);display:flex;flex-direction:column;gap:var(--st-s-5)}
-.about-body{max-width:860px;width:100%;margin:0 auto;padding:var(--st-s-6);display:flex;flex-direction:column;gap:var(--st-s-5)}
+.monitor{max-width:1240px;width:100%;margin:0 auto;padding:var(--st-s-6);display:flex;flex-direction:column;gap:var(--st-s-5);overflow-y:auto}
+.about-body{max-width:860px;width:100%;margin:0 auto;padding:var(--st-s-6);display:flex;flex-direction:column;gap:var(--st-s-5);overflow-y:auto}
 .monitor{min-height:100%}
 
 /* State card */
