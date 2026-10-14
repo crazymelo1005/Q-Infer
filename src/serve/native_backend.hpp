@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "artifact/gguf_table.hpp"
@@ -50,7 +51,8 @@ private:
     std::string chat_template_;
     std::string model_name_;
     std::int32_t eos_ = -1;
-    NativeSession session_;
+    NativeSession session_;   // 默认会话（session_id 为空时使用）
+    std::unordered_map<std::string, NativeSession> sessions_;   // Phase 2: 命名会话池
 };
 
 }  // namespace qinfer::serve

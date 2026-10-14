@@ -96,4 +96,36 @@ bool NativeSession::run_token(const artifact::GgufFile& gguf,
     return true;
 }
 
+void NativeSession::reset() {
+    pos_ = 0;
+    // Note: scratch_ and KV state are reset by prepare() at the start of each generate() call.
+    // reset() just clears the position counter for session reuse.
+}
+
+bool NativeSession::prefill_chunked(const artifact::GgufFile& gguf,
+                                     const dense::TokenEmbed& te,
+                                     const std::vector<std::int32_t>& tokens,
+                                     std::size_t chunk_size,
+                                     const std::function<void(std::size_t)>& on_progress,
+                                     std::string& err) {
+    if (chunk_size == 0) {
+        err = "chunk_size must be > 0";
+        return false;
+    }
+
+    const std::size_t n = tokens.size();
+    for (std::size_t i = 0; i < n; i += chunk_size) {
+        const std::size_t end = std::min(i + chunk_size, n);
+        for (std::size_t j = i; j < end; ++j) {
+            if (!run_token(gguf, te, static_cast<std::uint64_t>(tokens[j]), err)) {
+                return false;
+            }
+        }
+        if (on_progress) {
+            on_progress(end);
+        }
+    }
+    return true;
+}
+
 }  // namespace qinfer::serve

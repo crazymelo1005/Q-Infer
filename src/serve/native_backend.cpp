@@ -81,8 +81,26 @@ bool NativeBackend::generate(const std::vector<std::int32_t>& prompt,
         (static_cast<std::uint64_t>(prompt.size()) + opt.max_tokens + 8 +
          cfg_.idx_block - 1) / cfg_.idx_block;
 
-    // Reuse session (model already loaded in open()). Just re-prepare scratch.
-    if (!session_.prepare(n_pages, 0, cfg_.kv_slots, err)) return false;
+    // Phase 2: session persistence
+    // If session_id is provided, reuse that session (or create new one).
+    // Otherwise use the default session_ member (fresh each time).
+    NativeSession* sess = &session_;
+    bool is_new_session = true;
+    if (!opt.session_id.empty()) {
+        auto it = sessions_.find(opt.session_id);
+        if (it != sessions_.end()) {
+            sess = &it->second;
+            is_new_session = false;   // reusing existing session
+        } else {
+            // Create new named session
+            sess = &sessions_[opt.session_id];
+        }
+    }
+
+    // Prepare scratch only for new sessions (or default session which resets each time)
+    if (is_new_session || opt.session_id.empty()) {
+        if (!sess->prepare(n_pages, 0, cfg_.kv_slots, err)) return false;
+    }
 
     Sampler sampler(opt.seed);
     res = GenResult{};
@@ -90,7 +108,7 @@ bool NativeBackend::generate(const std::vector<std::int32_t>& prompt,
 
     // Prefill: run all prompt tokens
     for (std::size_t i = 0; i < prompt.size(); ++i) {
-        if (!session_.run_token(gguf_, te_, static_cast<std::uint64_t>(prompt[i]), err))
+        if (!sess->run_token(gguf_, te_, static_cast<std::uint64_t>(prompt[i]), err))
             return false;
     }
 
@@ -101,7 +119,7 @@ bool NativeBackend::generate(const std::vector<std::int32_t>& prompt,
     std::string text;
 
     for (;;) {
-        const auto& logits = session_.logits();
+        const auto& logits = sess->logits();
         if (logits.empty()) { err = "empty logits"; return false; }
         const std::uint32_t id = sampler.sample(logits.data(), logits.size(), sp);
         if (static_cast<std::int32_t>(id) == eos_) {
@@ -147,7 +165,7 @@ bool NativeBackend::generate(const std::vector<std::int32_t>& prompt,
             res.text = text;
             break;
         }
-        if (!session_.run_token(gguf_, te_, id, err)) return false;
+        if (!sess->run_token(gguf_, te_, id, err)) return false;
     }
     return true;
 }

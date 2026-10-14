@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,19 @@ public:
 
     // Position tracking
     std::uint64_t position() const { return pos_; }
+
+    // Reset session state for a new conversation (clears position, scratch, KV)
+    void reset();
+
+    // Prefill with chunked processing (for long prompts)
+    // chunk_size: number of tokens per chunk
+    // on_progress: called after each chunk with cumulative token count
+    bool prefill_chunked(const artifact::GgufFile& gguf,
+                         const dense::TokenEmbed& te,
+                         const std::vector<std::int32_t>& tokens,
+                         std::size_t chunk_size,
+                         const std::function<void(std::size_t)>& on_progress,
+                         std::string& err);
 
 private:
     dense::StepModel model_;
