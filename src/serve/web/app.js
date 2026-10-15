@@ -1171,6 +1171,31 @@ function filterThinkingContent(text) {
   text = text.replace(/<\|[^|>]+\|>/g, "");
   return text;
 }
+
+// Parse  tags from text, returning { answer, thinking }
+function parseThinkingContent(text) {
+  if (!text) return { answer: "", thinking: "" };
+  var answer = "";
+  var thinking = "";
+  var buf = text;
+  var inThink = false;
+  while (true) {
+    if (!inThink) {
+      var otIdx = buf.indexOf("<think>");
+      if (otIdx < 0) { answer += buf; break; }
+      answer += buf.substring(0, otIdx);
+      buf = buf.substring(otIdx + 7);
+      inThink = true;
+    } else {
+      var ctIdx = buf.indexOf("</think>");
+      if (ctIdx < 0) { thinking += buf; break; }
+      thinking += buf.substring(0, ctIdx);
+      buf = buf.substring(ctIdx + 8);
+      inThink = false;
+    }
+  }
+  return { answer: answer, thinking: thinking };
+}
 // Render Markdown in an assistant message body (called after streaming completes)
 function renderMsgMarkdown(bodyEl) {
   if (!bodyEl || !bodyEl.textContent) return;
@@ -1567,6 +1592,10 @@ async function doChatRound() {
   // Finalize: flush any remaining thinking content
   if (thinkingSec && thinkBuf) {
     if (thinkingBody) thinkingBody.textContent += thinkBuf;
+  }
+  // Store thinking text for saveCurrent()
+  if (thinkingBody && thinkingBody.textContent) {
+    out.parentElement._thinkingText = thinkingBody.textContent;
   }
   // Render Markdown for completed assistant messages
   if (out.textContent) renderMsgMarkdown(out);
@@ -2192,8 +2221,23 @@ var QinferConv = {
           addMsg("user", msg.content);
         } else if (msg.role === "assistant") {
           var body = addMsg("assistant", "");
-          body.innerHTML = QinferMD.render(msg.content);
-          body.parentElement._rawText = msg.content;
+          // Parse thinking content from saved data
+          var parsed = parseThinkingContent(msg.content);
+          var answerText = parsed.answer || msg.content;
+          var thinkingText = parsed.thinking || msg.thinking || "";
+          // Render answer as Markdown
+          if (answerText) {
+            body.innerHTML = QinferMD.render(answerText);
+          }
+          body.parentElement._rawText = answerText;
+          // Populate thinking panel if present
+          if (thinkingText) {
+            var tSec = body.parentElement._thinkingSection;
+            var tBody = body.parentElement._thinkingBody;
+            if (tBody) tBody.textContent = thinkingText;
+            if (tSec) tSec.style.display = "";
+            body.parentElement._thinkingText = thinkingText;
+          }
         }
       });
     }
@@ -2212,7 +2256,15 @@ var QinferConv = {
       if (b.classList.contains("tool-call") || b.classList.contains("tool-result")) return;
       var role = b.classList.contains("user") ? "user" : "assistant";
       var text = b._rawText || b.querySelector(".bubble-body").textContent;
-      if (text) messages.push({ role: role, content: text });
+      if (text) {
+        var msg = { role: role, content: text };
+        // Save thinking content separately for assistant messages
+        if (role === "assistant") {
+          var thinkingText = b._thinkingText || "";
+          if (thinkingText) msg.thinking = thinkingText;
+        }
+        messages.push(msg);
+      }
     });
     conv.messages = messages;
     conv.updated = Date.now();
