@@ -11,8 +11,8 @@
 | [gates.md](gates.md) | 哪些假设必须先测量、怎么测 | 进行中（G-14 未判定） |
 | [risks.md](risks.md) | 风险登记 | 完成 |
 | [proposals.md](proposals.md) | 候选方向（未验证，非规格） | 完成 |
-| [native-engine-garbled-output-and-multi-gpu-design.md](native-engine-garbled-output-and-multi-gpu-design.md) | 自研引擎乱码与多卡协同的当时设计 | 历史（已由厂商化引擎路线取代） |
-| [native-engine-investigation-status.md](native-engine-investigation-status.md) | 自研引擎乱码的调查状态 | 历史 |
+| [native-engine-garbled-output-and-multi-gpu-design.md](native-engine/garbled-output-and-multi-gpu-design.md) | 自研引擎乱码与多卡协同的当时设计 | 历史（已由厂商化引擎路线取代） |
+| [native-engine-investigation-status.md](native-engine/investigation-status.md) | 自研引擎乱码的调查状态 | 历史 |
 
 ## 决策记录（ADR）
 
