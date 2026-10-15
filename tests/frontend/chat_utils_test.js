@@ -50,6 +50,33 @@ eq("single over budget kept", truncateMessages([m("user", long)], 10).length, 1)
 eq("system head kept",
    truncateMessages([m("system", long), m("user", long)], 10).map(x => x.role), ["system", "user"]);
 
+// --- QinferMD: Markdown tables ----------------------------------------------
+function tr(k) { return k; }   // stub: the renderer uses tr() for the copy label
+const s3 = src.indexOf("var QinferMD = {");
+const e3 = src.indexOf("const I18N = {", s3);
+if (s3 < 0 || e3 < s3) throw new Error("missing QinferMD source");
+eval(src.slice(s3, e3) + "\n");
+if (typeof QinferMD === "undefined") {
+  report("QinferMD not defined", {});
+} else {
+  const t1 = QinferMD.render("| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |");
+  if (t1.indexOf('<table class="md-table">') < 0 || t1.indexOf("<th>a</th>") < 0 ||
+      t1.indexOf("<td>1</td>") < 0 || t1.indexOf("<td>4</td>") < 0 ||
+      t1.indexOf("<tbody>") < 0 || t1.indexOf("</tbody></table>") < 0) {
+    report("table renders cells", { got: t1 });
+  } else console.log("ok   markdown table renders head and body cells");
+
+  // A pipe row with no separator is not a table.
+  const t2 = QinferMD.render("a | b | c");
+  if (t2.indexOf("<table") >= 0) report("pipe row without a separator is not a table", { got: t2 });
+  else console.log("ok   a pipe row with no separator is not a table");
+
+  // Cells keep inline formatting.
+  const t3 = QinferMD.render("| h |\n| --- |\n| **bold** |");
+  if (t3.indexOf("<strong>bold</strong>") < 0) report("table cell keeps inline formatting", { got: t3 });
+  else console.log("ok   table cell keeps inline formatting");
+}
+
 // --- i18n zh/en key parity ---------------------------------------------------
 const s2 = src.indexOf("const I18N = {");
 const e2 = src.indexOf("function tr(", s2);

@@ -19,6 +19,41 @@ var QinferMD = {
     return text.replace(/[&<>"']/g, function(m) { return map[m]; });
   },
 
+  // A table row carries at least one pipe and is not the |---|---| separator.
+  isTableRow: function(line) {
+    var t = (line || '').trim();
+    return t.indexOf('|') >= 0 && !this.isTableSep(t);
+  },
+  isTableSep: function(line) {
+    var t = (line || '').trim();
+    if (t.indexOf('|') < 0) return false;
+    return /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$/.test(t);
+  },
+  // If lines[i] opens a table (header row + separator), return { html, next } where
+  // next is the first line after the table; otherwise null.
+  tableAt: function(lines, i, inlineCodes) {
+    if (!this.isTableRow(lines[i])) return null;
+    if (i + 1 >= lines.length || !this.isTableSep(lines[i + 1])) return null;
+    var self = this;
+    var cells = function(row) {
+      return row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(function(c) { return c.trim(); });
+    };
+    var head = cells(lines[i]);
+    var rows = [];
+    var j = i + 2;
+    while (j < lines.length && this.isTableRow(lines[j])) { rows.push(cells(lines[j])); j++; }
+    var h = '<table class="md-table"><thead><tr>';
+    head.forEach(function(c) { h += '<th>' + self.processInline(c, inlineCodes) + '</th>'; });
+    h += '</tr></thead><tbody>';
+    rows.forEach(function(r) {
+      h += '<tr>';
+      for (var k = 0; k < head.length; k++) h += '<td>' + self.processInline(r[k] || '', inlineCodes) + '</td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+    return { html: h, next: j };
+  },
+
   // Render Markdown to HTML
   render: function(text) {
     if (!text) return '';
@@ -63,6 +98,16 @@ var QinferMD = {
         continue;
       }
       
+      // Markdown table: a header row followed by a |---| separator row.
+      var tbl = this.tableAt(lines, i, inlineCodes);
+      if (tbl) {
+        if (inList) { result.push(listType === 'ul' ? '</ul>' : '</ol>'); inList = false; }
+        if (inBlockquote) { result.push('</blockquote>'); inBlockquote = false; }
+        result.push(tbl.html);
+        i = tbl.next - 1;
+        continue;
+      }
+
       // Headings
       var headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
       if (headingMatch) {

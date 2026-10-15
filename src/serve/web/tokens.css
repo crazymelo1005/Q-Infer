@@ -193,3 +193,16 @@
   color: var(--st-text-dim, var(--muted));
   opacity: 0.75;
 }
+
+/* Markdown tables */
+.md-table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+}
+.md-table th, .md-table td {
+  border: 1px solid var(--st-border, rgba(127,127,127,.3));
+  padding: 4px 10px;
+  text-align: left;
+}
+.md-table thead th { font-weight: 600; }
