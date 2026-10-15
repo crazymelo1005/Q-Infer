@@ -163,3 +163,26 @@
   max-height: 400px;
   overflow-y: auto;
 }
+
+/* Thinking toggle button in composer bar */
+.thinking-toggle {
+  position: relative;
+  transition: all var(--st-dur) var(--st-ease);
+}
+
+.thinking-toggle.active {
+  color: var(--st-accent);
+  background: var(--st-accent-soft);
+}
+
+.thinking-toggle.active:hover {
+  background: var(--st-accent-soft-hover);
+}
+
+.thinking-toggle:not(.active) {
+  opacity: 0.5;
+}
+
+.thinking-toggle:not(.active):hover {
+  opacity: 0.8;
+}

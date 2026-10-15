@@ -88,7 +88,7 @@
             <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-settings"/></svg><span data-i18n="chat.sampler">Sampler</span></summary>
           <div class="drawer-grid">
             <div class="field">
-              <label for="s-temp" data-i18n="chat.temperature">temperature</label>
+              <label for="s-temp" data-i18n="chat.temperature">Temperature</label>
               <input id="s-temp" class="input" type="number" min="0" max="2" step="0.05" value="0.8">
             </div>
             <div class="field">
@@ -96,11 +96,31 @@
               <input id="s-top-p" class="input" type="number" min="0.05" max="1" step="0.05" value="0.95">
             </div>
             <div class="field">
+              <label for="s-top-k" data-i18n="chat.topK">top_k</label>
+              <input id="s-top-k" class="input" type="number" min="0" max="1000" step="1" value="40">
+            </div>
+            <div class="field">
+              <label for="s-min-p" data-i18n="chat.minP">min_p</label>
+              <input id="s-min-p" class="input" type="number" min="0" max="1" step="0.01" value="0.05">
+            </div>
+            <div class="field">
+              <label for="s-pres-pen" data-i18n="chat.presPen">presence_penalty</label>
+              <input id="s-pres-pen" class="input" type="number" min="0" max="2" step="0.1" value="0">
+            </div>
+            <div class="field">
+              <label for="s-freq-pen" data-i18n="chat.freqPen">frequency_penalty</label>
+              <input id="s-freq-pen" class="input" type="number" min="0" max="2" step="0.1" value="0">
+            </div>
+            <div class="field">
+              <label for="s-rep-pen" data-i18n="chat.repPen">repeat_penalty</label>
+              <input id="s-rep-pen" class="input" type="number" min="1" max="2" step="0.05" value="1">
+            </div>
+            <div class="field">
               <label for="s-seed" data-i18n="chat.seedLabel">seed (-1 = random)</label>
               <input id="s-seed" class="input" type="number" step="1" value="-1">
             </div>
             <div class="field">
-              <label for="s-max-tokens" data-i18n="chat.maxTokens">max tokens</label>
+              <label for="s-max-tokens" data-i18n="chat.maxTokens">Max tokens</label>
               <input id="s-max-tokens" class="input" type="number" min="1" max="32768" step="1" value="2048">
             </div>
           </div>
@@ -112,6 +132,8 @@
           <div class="st-composer__bar">
             <button type="button" class="st-btn st-btn--icon" id="btn-export" data-i18n-title="chat.exportTitleLong">
               <svg class="st-icon"><use href="/web/sprite.svg#i-download"/></svg></button>
+            <button type="button" class="st-btn st-btn--icon thinking-toggle active" id="btn-thinking" data-i18n-title="chat.thinkingToggle">
+              <svg class="st-icon"><use href="/web/sprite.svg#i-thinking"/></svg></button>
             <span class="spacer"></span>
             <button type="button" class="st-btn st-btn--secondary" id="btn-stop" hidden>
               <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-stop"/></svg><span data-i18n="chat.stop">Stop</span></button>

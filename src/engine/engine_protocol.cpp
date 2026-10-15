@@ -78,9 +78,9 @@ std::string sampling_keys(const SamplingParams& p) {
     if (p.top_p >= 0.0f) append_key(out, "top_p", fmt_float(p.top_p));
     if (p.top_k >= 0) append_key(out, "top_k", std::to_string(p.top_k));
     if (p.min_p >= 0.0f) append_key(out, "min_p", fmt_float(p.min_p));
-    if (p.penalty_repeat >= 0) append_key(out, "penalty_repeat", std::to_string(p.penalty_repeat));
-    if (p.penalty_freq >= 0) append_key(out, "penalty_freq", std::to_string(p.penalty_freq));
-    if (p.penalty_present >= 0) append_key(out, "penalty_present", std::to_string(p.penalty_present));
+    if (p.penalty_repeat >= 0.0f) append_key(out, "penalty_repeat", fmt_float(p.penalty_repeat));
+    if (p.penalty_freq >= 0.0f) append_key(out, "penalty_freq", fmt_float(p.penalty_freq));
+    if (p.penalty_present >= 0.0f) append_key(out, "penalty_present", fmt_float(p.penalty_present));
     if (p.penalty_last_n >= 0) append_key(out, "penalty_last_n", std::to_string(p.penalty_last_n));
     if (p.seed >= 0) append_key(out, "seed", std::to_string(p.seed));
     return out;

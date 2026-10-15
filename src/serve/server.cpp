@@ -549,6 +549,15 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
     opts.seed = seed;
     if (mt <= 0) { send_json(res, 400, openai_err("max_tokens must be positive", "invalid_request_error", "max_tokens")); return; }
     opts.max_tokens = static_cast<std::uint64_t>(mt);
+    // Extended sampling parameters (top_k, min_p, penalties)
+    double dk; if (num_param(body, "top_k", -1.0, dk)) opts.top_k = static_cast<float>(dk);
+    double dm; if (num_param(body, "min_p", -1.0, dm)) opts.min_p = static_cast<float>(dm);
+    double dp; if (num_param(body, "presence_penalty", 0.0, dp)) opts.presence_penalty = static_cast<float>(dp);
+    double df; if (num_param(body, "frequency_penalty", 0.0, df)) opts.frequency_penalty = static_cast<float>(df);
+    double dr; if (num_param(body, "repeat_penalty", 1.0, dr)) opts.repeat_penalty = static_cast<float>(dr);
+    // Thinking mode toggle
+    const Json* etv = body.find("enable_thinking");
+    if (etv != nullptr && etv->is_bool()) opts.enable_thinking = etv->b;
     // Phase 2: session_id for multi-turn conversation persistence
     const Json* sid = body.find("session_id");
     if (sid != nullptr && sid->is_str()) opts.session_id = sid->str;
@@ -560,8 +569,11 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
     std::string prompt;
     std::string rerr;
     Json tj = tools_array(tools);
+    // Build template vars: inject enable_thinking so the chat template can toggle thinking mode
+    Json vars = Json::objv();
+    vars.set("enable_thinking", Json::boolv(opts.enable_thinking));
     if (!render_chat(eng_->chat_template(), conv, /*add_generation_prompt=*/true, prompt, rerr,
-                     tools.empty() ? nullptr : &tj)) {
+                     tools.empty() ? nullptr : &tj, &vars)) {
         // The templater is a trimmed subset (fallback per spec §11): no silent mis-rendering, an
         // explicit 500 with explanation.
         send_json(res, 500, openai_err("Structure not supported by the chat template: " + rerr, "server_error", nullptr));

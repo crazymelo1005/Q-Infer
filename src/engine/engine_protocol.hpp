@@ -21,9 +21,9 @@ struct SamplingParams {
     float min_p = -1.0f;
     int top_k = -1;
     long long seed = -1;
-    int penalty_repeat = -1;
-    int penalty_freq = -1;
-    int penalty_present = -1;
+    float penalty_repeat = -1.0f;
+    float penalty_freq = -1.0f;
+    float penalty_present = -1.0f;
     int penalty_last_n = -1;
 };
 

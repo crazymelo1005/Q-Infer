@@ -49,6 +49,12 @@ bool StrataBackend::generate(const std::vector<std::int32_t>& prompt, const GenO
     req.sampling.temperature = opt.temperature;
     req.sampling.top_p = opt.top_p;
     req.sampling.seed = opt.seed;
+    // Extended sampling parameters: only set when explicitly provided (non-default)
+    if (opt.top_k > 0) req.sampling.top_k = static_cast<int>(opt.top_k);
+    if (opt.min_p >= 0) req.sampling.min_p = opt.min_p;
+    if (opt.repeat_penalty != 1.0f) req.sampling.penalty_repeat = opt.repeat_penalty;
+    if (opt.frequency_penalty != 0.0f) req.sampling.penalty_freq = opt.frequency_penalty;
+    if (opt.presence_penalty != 0.0f) req.sampling.penalty_present = opt.presence_penalty;
 
     std::string text;
     std::vector<std::int32_t> ids;

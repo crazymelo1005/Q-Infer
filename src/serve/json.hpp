@@ -27,6 +27,7 @@ public:
     static Json objv() { Json j; j.kind = kObj; return j; }
 
     bool is_null() const { return kind == kNull; }
+    bool is_bool() const { return kind == kBool; }
     bool is_str() const { return kind == kStr; }
     bool is_num() const { return kind == kNum; }
     bool is_arr() const { return kind == kArr; }

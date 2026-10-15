@@ -189,6 +189,14 @@ const I18N = {
     "chat.generating": "生成中…",
     "chat.prefilling": "正在处理提示词…",
     "chat.thinking": "思考中…",
+    "chat.thinkingToggle": "思考模式",
+    "chat.thinkingOn": "思考模式已开启",
+    "chat.thinkingOff": "思考模式已关闭",
+    "chat.topK": "top_k",
+    "chat.minP": "min_p",
+    "chat.presPen": "存在惩罚",
+    "chat.freqPen": "频率惩罚",
+    "chat.repPen": "重复惩罚",
     "chat.stopped": "已停止",
     "chat.stoppedSuffix": "（已停止）",
     "chat.failedPrefix": "请求失败：",
@@ -427,6 +435,14 @@ const I18N = {
     "chat.generating": "Generating…",
     "chat.prefilling": "Processing prompt…",
     "chat.thinking": "Thinking…",
+    "chat.thinkingToggle": "Thinking mode",
+    "chat.thinkingOn": "Thinking mode enabled",
+    "chat.thinkingOff": "Thinking mode disabled",
+    "chat.topK": "top_k",
+    "chat.minP": "min_p",
+    "chat.presPen": "presence_penalty",
+    "chat.freqPen": "frequency_penalty",
+    "chat.repPen": "repeat_penalty",
     "chat.stopped": "Stopped",
     "chat.stoppedSuffix": " (stopped)",
     "chat.failedPrefix": "Request failed: ",
@@ -1045,6 +1061,11 @@ function saveSampler() {
   const s = {
     temperature: parseFloat($("s-temp").value),
     top_p: parseFloat($("s-top-p").value),
+    top_k: parseInt($("s-top-k").value, 10),
+    min_p: parseFloat($("s-min-p").value),
+    presence_penalty: parseFloat($("s-pres-pen").value),
+    frequency_penalty: parseFloat($("s-freq-pen").value),
+    repeat_penalty: parseFloat($("s-rep-pen").value),
     seed: parseInt($("s-seed").value, 10),
     max_tokens: parseInt($("s-max-tokens").value, 10),
   };
@@ -1057,6 +1078,11 @@ function loadSampler() {
     const s = JSON.parse(raw);
     if (s.temperature !== undefined) $("s-temp").value = s.temperature;
     if (s.top_p !== undefined) $("s-top-p").value = s.top_p;
+    if (s.top_k !== undefined) $("s-top-k").value = s.top_k;
+    if (s.min_p !== undefined) $("s-min-p").value = s.min_p;
+    if (s.presence_penalty !== undefined) $("s-pres-pen").value = s.presence_penalty;
+    if (s.frequency_penalty !== undefined) $("s-freq-pen").value = s.frequency_penalty;
+    if (s.repeat_penalty !== undefined) $("s-rep-pen").value = s.repeat_penalty;
     if (s.seed !== undefined) $("s-seed").value = s.seed;
     if (s.max_tokens !== undefined) $("s-max-tokens").value = s.max_tokens;
     return !!$("s-temp");
@@ -1195,6 +1221,253 @@ function parseThinkingContent(text) {
     }
   }
   return { answer: answer, thinking: thinking };
+}
+// Control tags that must never be painted as content.
+var SPECIAL_TOKENS = [
+  '<|im_end|>', '<|im_start|>', '<|im_sep|>', '<think>', '</think>'
+];
+
+var TAG_PREFIXES = SPECIAL_TOKENS.map(function (t) { return t.substring(0, t.length - 1); });
+
+function stripSpecialTokens(text) {
+  if (!text) return text;
+  var t = text;
+  for (var i = 0; i < SPECIAL_TOKENS.length; i++) {
+    if (t.indexOf(SPECIAL_TOKENS[i]) >= 0) t = t.split(SPECIAL_TOKENS[i]).join("");
+  }
+  return t;
+}
+
+// The delimiters a reply can carry. Any of them can arrive split across streaming
+// deltas, so text next to an unfinished one is held back until the token either
+// completes or the stream ends.
+var CONTROL_TOKENS = SPECIAL_TOKENS.slice()
+  .sort(function (a, b) { return b.length - a.length; });
+
+var CHATML_TOKENS = CONTROL_TOKENS.filter(function (t) {
+  return t.indexOf("|") >= 0;
+});
+
+// The control token starting at index i of text, or null.
+function tokenStartingAt(text, i) {
+  for (var k = 0; k < CONTROL_TOKENS.length; k++) {
+    if (text.startsWith(CONTROL_TOKENS[k], i)) return CONTROL_TOKENS[k];
+  }
+  return null;
+}
+
+// Length of the longest suffix of buf that could still grow into a ChatML control
+// token. These only ever end a turn, so an unfinished one at the very end of a
+// stream is control text, while an unfinished thinking delimiter may be a delimiter
+// the next delta completes.
+function partialChatToken(buf) {
+  var max = 0;
+  for (var i = 0; i < CHATML_TOKENS.length; i++) {
+    var n = partialThinkTag(buf, CHATML_TOKENS[i]);
+    if (n > max) max = n;
+  }
+  return max;
+}
+
+// Length of the longest suffix of buf that could still grow into a control token.
+function partialControlToken(buf) {
+  var max = 0;
+  for (var i = 0; i < CONTROL_TOKENS.length; i++) {
+    var n = partialThinkTag(buf, CONTROL_TOKENS[i]);
+    if (n > max) max = n;
+  }
+  return max;
+}
+
+// Mid-stream the answer may hold an unterminated code fence; close it for display
+// so raw triple backticks do not leak into the bubble as literal text.
+function safePartialMarkdown(text) {
+  if (!text) return text;
+  var fences = (text.match(/```/g) || []).length;
+  return (fences % 2 === 1) ? text + "\n```" : text;
+}
+
+// --- Streaming think-tag router ----------------------------------------------
+// Delimiters of a thinking run. The reply stream carries these; ChatML markers are
+// a different family and are only ever stripped, never used as structure.
+var THINK_OPEN = "<" + "think>";
+var THINK_CLOSE = "<" + "/think>";
+
+// Length of the longest suffix of buf that is a proper prefix of tag. A delimiter
+// can be split across deltas, and a delimiter painted as content is unrecoverable,
+// so text next to such a tail waits in the buffer until the delimiter completes or
+// the stream ends.
+function partialThinkTag(buf, tag) {
+  var max = Math.min(tag.length - 1, buf.length);
+  for (var n = max; n > 0; n--) {
+    if (tag.lastIndexOf(buf.substring(buf.length - n)) === 0) return n;
+  }
+  return 0;
+}
+
+// The engine streams a reply as text, and a thinking run is the text a closing
+// delimiter ends. The opening delimiter may be present or swallowed by the chat
+// template, and reply text may come before an explicit block, so attribution is a
+// guess the stream corrects. The router holds delimiters back until they either
+// complete or the stream ends, so a control token is never painted and a torn
+// answer is never truncated:
+//
+//   - a leading run (state "pre") streams live into the thinking panel, since in
+//     thinking mode the head of a reply is almost always the reasoning;
+//   - a closing delimiter confirms that run as thinking; an opening delimiter
+//     instead means the head was the reply, so the provisional run moves back to
+//     the answer bubble;
+//   - after the first delimiter the reply streams straight into the answer bubble,
+//     and a later block introduced by an opening delimiter streams into the
+//     thinking panel until its closing delimiter settles it;
+//   - a block the model never closes is the reply after all: it is shown rather
+//     than hidden, so content is never lost;
+//   - ChatML markers and thinking delimiters are never painted, and a torn
+//     delimiter at the very end is dropped rather than shown as text.
+//
+// `blockStart` is where the provisional run begins inside `thinking`, so only the
+// still-undecided run is ever reclaimed - an already-confirmed block is kept.
+function ensureThinkStream(plain) {
+  return {
+    buf: "",          // text not yet attributed to a destination
+    thinking: "",     // visible thinking (scrubbed)
+    answer: "",       // visible answer (scrubbed)
+    rThinking: "",    // raw thinking, before control tokens are dropped
+    rAnswer: "",      // raw answer
+    state: plain ? "answer" : "pre",   // pre | think | answer
+    plain: !!plain,   // nothinking mode: no thinking blocks, delimiters are stripped
+    blockStart: 0,    // index in `rThinking` where the provisional run starts
+    // Feed one delta. Returns true once anything is on screen for either panel.
+    push: function (chunk) {
+      this.buf += chunk;
+      this.scan();
+      // Control tokens can be formed by joining text across deltas, so scrub the
+      // whole accumulated run rather than each fragment.
+      this.answer = this.scrub(this.rAnswer);
+      this.thinking = this.scrub(this.rThinking);
+      return this.thinking.length > 0 || this.answer.length > 0;
+    },
+    // One delta can carry several delimiters, so step until the buffer holds
+    // nothing that can be decided yet.
+    scan: function () {
+      for (var guard = 0; guard < 64 && this.step(); guard++) {}
+    },
+    step: function () {
+      var o = this.plain ? -1 : this.buf.indexOf(THINK_OPEN);
+      var c = this.plain ? -1 : this.buf.indexOf(THINK_CLOSE);
+      if (c >= 0 && (o < 0 || c < o)) {
+        var run = this.takeUpTo(c);
+        this.buf = this.buf.substring(THINK_CLOSE.length);
+        if (this.state === "answer") {
+          // The delimiter closes nothing: the run before it is already reply text,
+          // and the delimiter itself is control text.
+          this.emit(run, "answer");
+        } else {
+          // A leading run ("pre") or an open block ("think"): the delimiter settles
+          // it as thinking.
+          this.emit(run, "thinking");
+        }
+        this.state = "answer";
+        return true;
+      }
+      if (o >= 0) {
+        var head = this.takeUpTo(o);
+        this.buf = this.buf.substring(THINK_OPEN.length);
+        if (this.state === "pre") {
+          // Text before an explicit block was the reply, not reasoning: the whole
+          // provisional run moves back to the answer bubble.
+          this.emit(head, "thinking");
+          this.reclaimToAnswer();
+        } else {
+          this.emit(head, this.state === "think" ? "thinking" : "answer");
+        }
+        this.state = "think";
+        this.blockStart = this.rThinking.length;
+        return true;
+      }
+      if (this.state === "pre" || this.state === "think") {
+        // The provisional run streams live; only a torn delimiter is held back.
+        var keepRun = partialControlToken(this.buf);
+        if (keepRun >= this.buf.length) return false;
+        this.emit(this.takeUpTo(this.buf.length - keepRun), "thinking");
+        return true;
+      }
+      var keep = partialControlToken(this.buf);
+      if (keep >= this.buf.length) return false;
+      this.emit(this.takeUpTo(this.buf.length - keep), "answer");
+      return true;
+    },
+    // Append text to a destination. Control tokens are dropped later, when the
+    // whole run is scrubbed - a token may only become complete once the next
+    // fragment joins it.
+    emit: function (text, dest) {
+      if (!text) return;
+      if (dest === "thinking") this.rThinking += text; else this.rAnswer += text;
+    },
+    // Move the still-undecided provisional run out of thinking into the answer.
+    reclaimToAnswer: function () {
+      if (this.blockStart >= this.rThinking.length) return;
+      this.rAnswer += this.rThinking.substring(this.blockStart);
+      this.rThinking = this.rThinking.substring(0, this.blockStart);
+    },
+    // Drop control text: ChatML markers are never content, and neither are the
+    // thinking delimiters themselves. Removing an inner token can join the text
+    // around it into a new token, so keep sweeping until nothing is left to drop.
+    // A fragment that is only the beginning of a token is left visible - it may be
+    // text the model produced.
+    scrub: function (text) {
+      if (!text) return "";
+      var cur = text;
+      for (var sweep = 0; sweep < 32; sweep++) {
+        var out = "";
+        var changed = false;
+        for (var i = 0; i < cur.length; i++) {
+          var tok = tokenStartingAt(cur, i);
+          if (tok) { i += tok.length - 1; changed = true; continue; }
+          out += cur.charAt(i);
+        }
+        cur = out;
+        if (!changed) break;
+      }
+      return cur;
+    },
+    takeUpTo: function (n) {
+      var head = this.buf.substring(0, n);
+      this.buf = this.buf.substring(n);
+      return head;
+    },
+    // End of stream: attribute whatever is still held back.
+    finish: function () {
+      // A held tail is control text when it is nothing but the start of any control
+      // token. While the leading run is still undecided ("pre") a torn *opening*
+      // delimiter is kept instead: the model may have meant to write it as text.
+      var anyControl = function (t) { return t.length > 0 && partialControlToken(t) === t.length; };
+      var preControl = function (t) {
+        return t.length > 0 &&
+          (partialChatToken(t) === t.length || partialThinkTag(t, THINK_CLOSE) === t.length);
+      };
+      if (this.state === "pre") {
+        // The leading run was never settled by a delimiter: it is the reply. The
+        // provisional run precedes the buffer, so move it over first, then the tail.
+        this.reclaimToAnswer();
+        if (!preControl(this.buf)) this.emit(this.buf, "answer");
+        this.buf = "";
+      } else if (this.state === "think") {
+        // A block the model never closed is the reply after all.
+        if (!anyControl(this.buf)) this.emit(this.buf, "answer");
+        this.buf = "";
+        this.reclaimToAnswer();
+      } else if (this.buf) {
+        if (!anyControl(this.buf)) this.emit(this.buf, "answer");
+        this.buf = "";
+      }
+      this.state = "answer";
+      this.blockStart = 0;
+      this.answer = this.scrub(this.rAnswer);
+      this.thinking = this.scrub(this.rThinking);
+      return true;
+    },
+  };
 }
 // Render Markdown in an assistant message body (called after streaming completes)
 function renderMsgMarkdown(bodyEl) {
@@ -1446,7 +1719,13 @@ async function doChatRound() {
     max_tokens: parseInt($("s-max-tokens").value, 10) || 2048,
     temperature: parseFloat($("s-temp").value),
     top_p: parseFloat($("s-top-p").value),
+    top_k: parseInt($("s-top-k").value, 10),
+    min_p: parseFloat($("s-min-p").value),
+    presence_penalty: parseFloat($("s-pres-pen").value),
+    frequency_penalty: parseFloat($("s-freq-pen").value),
+    repeat_penalty: parseFloat($("s-rep-pen").value),
     seed: parseInt($("s-seed").value, 10),
+    enable_thinking: $("btn-thinking").classList.contains("active"),
   };
   if (tools.length) body.tools = tools;
   var out = addMsg("assistant", "");
@@ -1462,6 +1741,20 @@ async function doChatRound() {
   // Accumulate tool calls from streaming deltas
   var toolCallAccum = {}; // index → { id, function: { name, arguments } }
   var finishReason = null;
+  // Incremental think-tag router. In nothinking mode there is nothing to hold
+  // back: the engine emits the opening tag itself and the template swallows it,
+  // so the reply is plain text. Declared at function scope because the finalizer
+  // below runs after the try/catch - a block-scoped declaration inside the try
+  // would not be visible there.
+  var think = ensureThinkStream(!body.enable_thinking);
+  var thinkingBody = out.parentElement._thinkingBody;
+  var thinkingSec = out.parentElement._thinkingSection;
+  function paintThinking() {
+    if (!thinkingBody) return;
+    thinkingBody.textContent = think.thinking;
+    if (thinkingSec && think.thinking) thinkingSec.style.display = "";
+    out.parentElement._thinkingText = think.thinking;
+  }
   try {
     var res = await api("/v1/chat/completions", {
       method: "POST",
@@ -1481,12 +1774,7 @@ async function doChatRound() {
       if (res.status === 401) showBanner(tr("err.keyInvalid"), "err");
       return { error: msg };
     }
-    // Track thinking state
-    var thinkBuf = "";
-    var thinkingBody = out.parentElement._thinkingBody;
-    var thinkingSec = out.parentElement._thinkingSection;
-    var hasThinkTag = false;  // Track if we've seen any think tags
-
+    // Incremental think-tag router and paint helper are declared above the try.
     await readSSE(res, function (ev) {
       if (ev.error) {
         waitRow.remove();
@@ -1498,51 +1786,18 @@ async function doChatRound() {
       var d = ev.choices[0].delta || {};
       if (ev.choices[0].finish_reason) finishReason = ev.choices[0].finish_reason;
 
-      // --- Text content: route  tags ---
+      // --- Text content: feed the think-tag state machine ---
       if (d.content !== undefined && d.content !== null) {
-        if (waitRow.parentElement) waitRow.remove();
-        var content = d.content;
-
-        // Accumulate raw content
-        thinkBuf += content;
-
-        // Check for  tag (Strata backend may strip )
-        var ctIdx = thinkBuf.indexOf("");
-        if (ctIdx >= 0) {
-          hasThinkTag = true;
-          // Everything before  is thinking content
-          if (ctIdx > 0 && thinkingBody) {
-            thinkingBody.textContent += thinkBuf.substring(0, ctIdx);
-          }
-          thinkBuf = thinkBuf.substring(ctIdx + 8);
-          if (thinkingSec) thinkingSec.style.display = "";
-          // Store thinking text for saveCurrent()
-          if (thinkingBody && thinkingBody.textContent) {
-            out.parentElement._thinkingText = thinkingBody.textContent;
-          }
-          // Flush any remaining buffer as answer content
-          if (thinkBuf) {
-            out.textContent += thinkBuf;
-            thinkBuf = "";
-          }
-        } else if (hasThinkTag) {
-          // We've seen  already, so this is answer content
-          out.textContent += thinkBuf;
-          thinkBuf = "";
+        if (think.push(d.content)) {
+          if (waitRow.parentElement) waitRow.remove();
+          paintThinking();
+          out.textContent = safePartialMarkdown(think.answer);
         } else {
-          // No tags yet — buffer everything until we see 
-          // Use safe zone to avoid partial tag issues
-          var safe = thinkBuf.length - 7;
-          if (safe > 0) {
-            // Don't put into main bubble yet — keep buffering
-            // We'll route it correctly once we see 
-            thinkBuf = thinkBuf.substring(safe);
-          }
+          // Still deciding where the leading run belongs: keep the spinner row
+          // and label it as reasoning rather than a stalled prompt.
+          waitTxt.textContent = tr("chat.thinking");
         }
       }
-        }
-      }
-
       // Tool calls (streaming: accumulated by index)
       if (d.tool_calls) {
         if (waitRow.parentElement) waitRow.remove();
@@ -1585,20 +1840,10 @@ async function doChatRound() {
     addToolCallMsg(toolCalls);
     return { toolCalls: toolCalls };
   }
-  // Finalize: flush any remaining buffered content
-  if (thinkBuf) {
-    if (hasThinkTag) {
-      // We saw , so remaining buffer is answer content
-      out.textContent += thinkBuf;
-    } else {
-      // No  tag found, treat entire buffer as answer content
-      out.textContent += thinkBuf;
-    }
-  }
-  // Store thinking text for saveCurrent()
-  if (thinkingBody && thinkingBody.textContent) {
-    out.parentElement._thinkingText = thinkingBody.textContent;
-  }
+  // Finalize: flush any held-back tail and paint the thinking panel
+  think.finish();
+  paintThinking();
+  out.textContent = think.answer;
   // Render Markdown for completed assistant messages
   if (out.textContent) renderMsgMarkdown(out);
   return { text: out.textContent };
@@ -1676,7 +1921,11 @@ async function pollMetrics() {
     var chatState = $("chat-state");
     if (chatState) chatState.textContent = (tr("mon.stateLine") + " " + trState(state) + " \u00b7 " + tr("mon.queued") + " " + queued + " \u00b7 " + tok + " " + tr("unit.tokS"));
     setStatusDot(true);
-    if (state !== "idle" && state !== "?") setPill(state, tr("mon.stateLine") + " " + trState(state) + " \u00b7 " + tok + " " + tr("unit.tokS"));
+    if (state !== "idle" && state !== "?") {
+      setPill(state, tr("mon.stateLine") + " " + trState(state) + " \u00b7 " + tok + " " + tr("unit.tokS"));
+    } else {
+      setPill("idle", tr("state.idle"));
+    }
     // Push sparkline data even when monitor tab isn't visible, so switching to it shows history
     pushSpark("tok_s", l.tok_s);
     pushSpark("gpu_util", hw.gpu_util);
@@ -2006,9 +2255,17 @@ function initAttachmentHandlers() {
 
 /* ---- Chat setup ---- */
 function initChat() {
-  ["s-temp", "s-top-p", "s-seed", "s-max-tokens"].forEach(function (id) {
+  ["s-temp", "s-top-p", "s-top-k", "s-min-p", "s-pres-pen", "s-freq-pen", "s-rep-pen", "s-seed", "s-max-tokens"].forEach(function (id) {
     $(id).addEventListener("change", saveSampler);
   });
+  // Thinking toggle
+  var thinkBtn = $("btn-thinking");
+  if (thinkBtn) {
+    thinkBtn.addEventListener("click", function() {
+      thinkBtn.classList.toggle("active");
+      showToast(thinkBtn.classList.contains("active") ? tr("chat.thinkingOn") : tr("chat.thinkingOff"));
+    });
+  }
   initAttachmentHandlers();
   $("btn-send").addEventListener("click", sendChat);
   $("btn-stop").addEventListener("click", stopChat);

@@ -57,10 +57,16 @@ enum class Finish { kLength, kStop, kStopString };
 struct GenOptions {
     float temperature = 0.8f;
     float top_p = 0.95f;
+    float top_k = -1.0f;              // <=0 = disabled (engine default)
+    float min_p = -1.0f;              // <0 = disabled (engine default)
+    float presence_penalty = 0.0f;    // 0 = no penalty
+    float frequency_penalty = 0.0f;   // 0 = no penalty
+    float repeat_penalty = 1.0f;      // 1.0 = no penalty
     std::int64_t seed = -1;
     std::uint64_t max_tokens = 512;
     std::vector<std::string> stop;   // 生成的字节流出现这些子串即终止（截到命中处）
     std::string session_id;          // 会话标识（Phase 2）：非空时保持会话状态跨请求；空=每次全新会话
+    bool enable_thinking = true;     // thinking mode toggle (chat template variable)
 };
 
 struct GenResult {

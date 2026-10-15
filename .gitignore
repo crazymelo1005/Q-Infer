@@ -33,3 +33,7 @@ cache/
 
 # git worktrees (isolated feature workspaces)
 .worktrees/
+
+# ---- local scratch (benchmarks, throwaway patches) ----
+/bench_*
+/.tmp-*/
