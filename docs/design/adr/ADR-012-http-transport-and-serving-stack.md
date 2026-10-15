@@ -41,4 +41,4 @@
 
 ## 相关
 
-`ADR-008-implementation-stack-and-kernel-reuse.md`（实现栈）、`ADR-009-correctness-acceptance-criteria.md`（正确性口径）、`../engine.md` §12（服务与调度）、`../../research/01-strata-engine.md`（Strata 契约来源）、`../../superpowers/specs/2026-10-12-serve-layer-design.md`（服务层设计规格）
+`ADR-008-implementation-stack-and-kernel-reuse.md`（实现栈）、`ADR-009-correctness-acceptance-criteria.md`（正确性口径）、`../engine.md` §12（服务与调度）、`../../research/01-strata-engine.md`（Strata 契约来源）。

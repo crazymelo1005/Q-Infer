@@ -38,5 +38,11 @@ cache/
 /bench_*
 /.tmp-*/
 
+# ---- dev-process artifacts ----
+# SDD implementation plans/specs live in the project memory dir, not in git; the
+# per-plan SDD workspace is scratch.
+docs/superpowers/
+.superpowers/
+
 # CTest scratch (generated in the source root when ctest runs from there)
 Testing/
