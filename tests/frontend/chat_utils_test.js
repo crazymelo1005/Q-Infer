@@ -95,6 +95,21 @@ if (typeof QinferMD !== "undefined") {
   } else console.log("ok   a plain link still renders with target=_blank");
 }
 
+// --- QinferMD: task lists ----------------------------------------------------
+if (typeof QinferMD !== "undefined") {
+  const tl = QinferMD.render("- [ ] todo\n- [x] done");
+  if (tl.indexOf('<ul class="md-tasks">') < 0 || tl.indexOf('<li class="md-task">') < 0 ||
+      tl.indexOf('<li class="md-task done">') < 0 || tl.indexOf("checked") < 0 ||
+      tl.indexOf("> todo") < 0) {
+    report("task list renders checked and unchecked items", { got: tl });
+  } else console.log("ok   task list renders checked and unchecked items");
+
+  const plainUl = QinferMD.render("- just a bullet");
+  if (plainUl.indexOf('md-tasks') >= 0 || plainUl.indexOf('<li>just a bullet</li>') < 0) {
+    report("a plain bullet is not a task", { got: plainUl });
+  } else console.log("ok   a plain bullet stays a normal list item");
+}
+
 // --- i18n zh/en key parity ---------------------------------------------------
 const s2 = src.indexOf("const I18N = {");
 const e2 = src.indexOf("function tr(", s2);

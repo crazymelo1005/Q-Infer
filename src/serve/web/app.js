@@ -138,6 +138,23 @@ var QinferMD = {
         inBlockquote = false;
       }
       
+      // Task list item: - [ ] / - [x] (checked before the plain ul, which would
+      // otherwise swallow the "[ ]" into the text).
+      var taskMatch = line.match(/^[\*\-]\s+\[([ xX])\]\s+(.*)$/);
+      if (taskMatch) {
+        if (!inList || listType !== 'ul') {
+          if (inList) result.push(listType === 'ul' ? '</ul>' : '</ol>');
+          result.push('<ul class="md-tasks">');
+          inList = true;
+          listType = 'ul';
+        }
+        var done = taskMatch[1].toLowerCase() === 'x';
+        result.push('<li class="md-task' + (done ? ' done' : '') + '">' +
+          '<input type="checkbox" disabled' + (done ? ' checked' : '') + '> ' +
+          this.processInline(taskMatch[2], inlineCodes) + '</li>');
+        continue;
+      }
+
       // Unordered list
       var ulMatch = line.match(/^[\*\-]\s+(.+)$/);
       if (ulMatch) {
@@ -2502,6 +2519,12 @@ function initChat() {
     // Escape to stop generation
     if (e.key === "Escape" && streaming && abortCtrl) {
       stopChat();
+    }
+    // Cmd/Ctrl+K focuses the composer.
+    if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+      e.preventDefault();
+      var ci = $("chat-input");
+      if (ci) ci.focus();
     }
   });
   // Tool panel
