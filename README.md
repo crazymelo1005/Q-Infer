@@ -53,6 +53,8 @@ API / 调度层        OpenAI 兼容接口 · 批调度 · 前缀缓存 · 指�
 
 其中 G-04 不通过：记忆表行在去重后无顺序性、亦无近邻复用，故表行预取子系统已砍，退守按需读加有界行缓存（[ADR-007](docs/design/adr/ADR-007-ngram-table-on-demand-read.md)）。G-07 判定未命中专家路径为算力瓶颈，核显分担的前提满足。
 
+运行时现状（环境2，真权重 sc117 IQ2_XS，2026-10-15 实测）：默认后端是参考引擎（[ADR-018](docs/design/adr/ADR-018-default-backend-strata.md)），`qinfer-server --backend strata --engine-exe build-engine/strata` 起进程边界，双卡 `--gpu 0,1 --layer-split auto` + `--mtp`/`--spec 4`/`--pipeline-windows 2`/`--pool-workers 15` 实测 **decode 100 至 136 tok/s、冷提示 prefill 约 700 tok/s**（3305-token 题）。核显（iGPU）经 `--igpu off|dense|pool` 显式开关，默认关：同题实测 iGPU 稠密投影为负优化（703→546；加 `STRATA_IGPU_MIN_FLOPS` 尺寸门限后 598），需先批量化改造，见 [ADR-019](docs/design/adr/ADR-019-igpu-not-for-experts.md) 与 [NOTICE](NOTICE)。`--trim-stage-weights` 实测 prefill 810 tok/s（+8.6~15%），建议默认带上。prefill 距 3K 目标的差距集中在 sm_120 上 q2_0（2560 行）无 MMQ tile 与 CPU 专家池吞吐。
+
 下一步：序 2 的验收标准是「单请求正确跑通」。主机侧大半已闭环——门控残差、步循环、KV 窗口与换入换出、PLE、内存池配平（`docs/design/engine.md §17 序 2`）；尚缺设备侧那半（批式前向与 KV 的设备实现）与 MTP 真草稿头。服务层（序 7）的 M1 切片已随本仓库落地：OpenAI 与 Anthropic 兼容的 HTTP 推理域、遥测与三页前端 + 请求检查页（`docs/design/engine.md §12.1`）；/metrics 的 conversation_cache 已由服务层 token 前缀缓存填实（精确匹配 LRU，`--conversation-cache N`，命中计入 totals.reused），Prometheus text 端口也已落地（同一 `/metrics` 按 Accept/`?format=prometheus` 内容协商，vLLM 家族名 + `qinfer:` 前缀家族）。此外还有未实现的专家档（部署那份的 IQ1_M 3 层、另一档的 IQ3_S / IQ3_XXS 等）、共享专家与专家缓存。门禁方面 G-14 仍未判定。代码版本标签 `v<主>.<次>.<修订>` 按 `CONTRIBUTING §6.2` 的约定留到「单请求跑通」之后，故尚无代码版本标签，也没有 Release（现有 15 个标签都是设计里程碑与实测快照）。
 
 门禁指必须先测量的假设，测量不通过即砍掉对应子系统并记录负结果，不得保留。清单与测量方法见 [design/gates.md](docs/design/gates.md)。
@@ -85,8 +87,11 @@ API / 调度层        OpenAI 兼容接口 · 批调度 · 前缀缓存 · 指�
 ├── CONTRIBUTING.md
 ├── LICENSE
 ├── CMakeLists.txt                     构建入口（C++20）
-├── src/                               引擎实现
-├── tests/                             引擎实现的回归测试（ctest）
+├── src/                               引擎实现（服务/调度/内核）
+├── strata/                            纳入本仓库的 Strata 引擎源码；由 tools/build_engine.sh 编成 build-engine/strata
+├── third_party/httplib/               唯一第三方单头依赖（cpp-httplib v0.18.6）
+├── tools/                             构建脚本（build_engine.sh、build_vision.sh）
+├── tests/                             回归测试（ctest）：单元源 + integration/serve/ + frontend/ + data/（夹具/oracle）
 ├── scripts/docs_checks.py             规范自检（CI 与本地共用）
 ├── measure/                           测量工具与原始结果
 ├── .github/workflows/                 docs-check.yml（文档自检）· build.yml（构建与测试）
@@ -158,6 +163,8 @@ The premise is that the weights never fit in VRAM, so the engine is built around
 - Decision records: [`docs/design/adr/`](docs/design/adr/)
 - Research ledger and references: [`docs/research/`](docs/research/)
 
-The host-side engine skeleton is implemented under `src/` and is built and tested in CI (65 ctest suites), including the quantized-kernel set, the expert path (format dispatch, gated FFN, router, one MoE layer), the n-gram table-row path, the step loop with KV windowing, and the serve layer (OpenAI/Anthropic HTTP endpoints, telemetry, request records, and the web frontend); the table-row and expert paths have been run against the real model shards and cross-checked against independent implementations. The GPU side (batched forward and device-side KV swap) is not yet in place, so there is no code-version tag or Release yet.
+The host-side engine skeleton is implemented under `src/` and is built and tested in CI, including the quantized-kernel set, the expert path (format dispatch, gated FFN, router, one MoE layer), the n-gram table-row path, the step loop with KV windowing, and the serve layer (OpenAI/Anthropic HTTP endpoints, telemetry, request records, and the web frontend); the table-row and expert paths have been run against the real model shards and cross-checked against independent implementations.
+
+The default runtime backend is the reference engine (vendored source under `strata/`, built by `tools/build_engine.sh`), driven over a process boundary. On the dual-card test box it measures ~100-136 tok/s decode and ~700 tok/s cold prefill (3305-token prompt). The Intel iGPU is behind an explicit `--igpu off|dense|pool` switch and defaults off: the dense-projection path measured as a regression (703 -> 546 tok/s) and needs a batched redesign; `--trim-stage-weights` measured +8.6-15% prefill and is the recommended default. Closing the gap to the 3K prefill target is bounded by the missing q2_0 MMQ tile on sm_120 and CPU expert-pool throughput. There is still no code-version tag or Release.
 
 License: MIT — see [LICENSE](LICENSE).
