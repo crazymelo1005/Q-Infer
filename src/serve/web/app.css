@@ -102,9 +102,6 @@ main{flex:1;min-height:0;display:flex}
 .tool-card__args{font:400 var(--st-fs-xs) var(--st-font-mono);color:var(--st-ink-muted);background:var(--st-code-bg);color:var(--st-code-ink);padding:var(--st-s-2);border-radius:var(--st-r-sm);margin:0;max-height:120px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
 .tool-card__result{margin-top:var(--st-s-2);border-top:1px solid var(--st-line);padding-top:var(--st-s-2)}
 .tool-card__output{font:400 var(--st-fs-xs) var(--st-font-mono);color:var(--st-ink-soft);background:var(--st-surface-2);padding:var(--st-s-2);border-radius:var(--st-r-sm);margin:0;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
-.tool-render-frame{width:100%;border:1px solid var(--st-line);border-radius:var(--st-r-sm);background:var(--st-surface)}
-.tool-card__result--html{margin-top:var(--st-s-2)}
-.tool-card__result--mermaid .tool-mermaid{font:400 var(--st-fs-xs) var(--st-font-mono);background:var(--st-surface-2);padding:var(--st-s-3);border-radius:var(--st-r-sm);margin:0;white-space:pre-wrap}
 .msg-images{display:flex;flex-wrap:wrap;gap:var(--st-s-2)}
 .msg-images img{max-width:220px;max-height:180px;border-radius:var(--st-r-md);border:1px solid var(--st-line);display:block}
 .cursor::after{content:"";display:inline-block;width:8px;height:1.1em;margin-left:2px;vertical-align:-3px;border-radius:2px;background:var(--st-accent);animation:blink 1s steps(2) infinite}

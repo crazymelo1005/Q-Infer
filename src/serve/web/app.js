@@ -537,10 +537,6 @@ const I18N = {
     "tool.output": "输出",
     "tool.expand": "展开",
     "tool.collapse": "收起",
-    "tool.renderHtml": "渲染页面",
-    "tool.renderMermaid": "渲染图表",
-    "tool.webFetch": "获取网页",
-    "tool.jsExec": "执行代码",
     "tool.enabled": "工具已启用",
     "tool.disabled": "工具已禁用",
     "tool.settings": "工具设置",
@@ -811,10 +807,6 @@ const I18N = {
     "tool.output": "Output",
     "tool.expand": "Expand",
     "tool.collapse": "Collapse",
-    "tool.renderHtml": "Render page",
-    "tool.renderMermaid": "Render diagram",
-    "tool.webFetch": "Fetch page",
-    "tool.jsExec": "Run code",
     "tool.enabled": "Tool enabled",
     "tool.disabled": "Tool disabled",
     "tool.settings": "Tool settings",
@@ -981,116 +973,10 @@ var QinferTools = {
   },
 };
 
-// ---- Built-in tool: render_html ----
-// Renders HTML content in a sandboxed iframe within the chat
-QinferTools.register("render_html", {
-  name: "render_html",
-  description: "Render an HTML page or widget in a sandboxed iframe. Use this to create rich visual content like dashboards, charts, tables, interactive widgets, or any HTML/CSS/JS content. The HTML runs in a sandboxed iframe with no network access.",
-  parameters: {
-    type: "object",
-    properties: {
-      title: { type: "string", description: "Short title for the rendered content" },
-      html: { type: "string", description: "Complete HTML document or fragment to render. Include all CSS inline or in <style> tags." },
-      height: { type: "number", description: "Approximate height in pixels (default: 400)" },
-    },
-    required: ["html"],
-  },
-}, function(args) {
-  // Return a special marker that the UI will render as an iframe
-  return JSON.stringify({
-    __tool_render: "html",
-    title: args.title || "HTML",
-    html: args.html,
-    height: args.height || 400,
-  });
-});
-
-// ---- Built-in tool: render_mermaid ----
-// Renders a Mermaid diagram
-QinferTools.register("render_mermaid", {
-  name: "render_mermaid",
-  description: "Render a diagram using Mermaid syntax. Supports flowchart, sequence, class, state, ER, gantt, pie, gitgraph, and other Mermaid diagram types. Use this for visualizing processes, architectures, timelines, relationships, etc.",
-  parameters: {
-    type: "object",
-    properties: {
-      title: { type: "string", description: "Short title for the diagram" },
-      diagram: { type: "string", description: "Mermaid diagram definition (e.g. 'graph TD\\nA-->B\\nB-->C')" },
-    },
-    required: ["diagram"],
-  },
-}, function(args) {
-  return JSON.stringify({
-    __tool_render: "mermaid",
-    title: args.title || "Diagram",
-    diagram: args.diagram,
-  });
-});
-
-// ---- Built-in tool: web_fetch ----
-// Fetches content from a URL
-QinferTools.register("web_fetch", {
-  name: "web_fetch",
-  description: "Fetch content from a URL. Returns the text content of the page (HTML is converted to text). Useful for reading documentation, articles, or any web resource.",
-  parameters: {
-    type: "object",
-    properties: {
-      url: { type: "string", description: "The URL to fetch (must be https)" },
-      max_length: { type: "number", description: "Maximum characters to return (default: 8000)" },
-    },
-    required: ["url"],
-  },
-}, async function(args) {
-  try {
-    var url = args.url;
-    if (!url.startsWith("https://")) return JSON.stringify({ error: "Only HTTPS URLs are allowed" });
-    var res = await fetch(url, { headers: { "Accept": "text/html,text/plain,application/json" } });
-    if (!res.ok) return JSON.stringify({ error: "HTTP " + res.status });
-    var ct = res.headers.get("content-type") || "";
-    var text = await res.text();
-    // Simple HTML to text conversion
-    if (ct.indexOf("html") >= 0) {
-      var doc = new DOMParser().parseFromString(text, "text/html");
-      // Remove script/style
-      doc.querySelectorAll("script,style,noscript").forEach(function(el) { el.remove(); });
-      text = doc.body ? doc.body.textContent : doc.documentElement.textContent;
-      text = text.replace(/\s+/g, " ").trim();
-    }
-    var maxLen = args.max_length || 8000;
-    if (text.length > maxLen) text = text.slice(0, maxLen) + "\n…(truncated)";
-    return JSON.stringify({ url: url, content: text, length: text.length });
-  } catch (e) {
-    return JSON.stringify({ error: e.message });
-  }
-});
-
-// ---- Built-in tool: js_exec ----
-// Executes JavaScript in a sandboxed context
-QinferTools.register("js_exec", {
-  name: "js_exec",
-  description: "Execute JavaScript code in a sandboxed environment. The code runs with access to Math, JSON, Date, and basic utilities. Use for calculations, data transformations, or generating structured output. Returns the value of the last expression or console.log output.",
-  parameters: {
-    type: "object",
-    properties: {
-      code: { type: "string", description: "JavaScript code to execute" },
-    },
-    required: ["code"],
-  },
-}, function(args) {
-  try {
-    var logs = [];
-    var fakeConsole = { log: function() { logs.push(Array.from(arguments).map(function(a) { return typeof a === "object" ? JSON.stringify(a) : String(a); }).join(" ")); } };
-    // Execute in a limited scope
-    var fn = new Function("console", "return (function() { " + args.code + " })()");
-    var result = fn(fakeConsole);
-    var output = logs.length ? logs.join("\n") : "";
-    if (result !== undefined) {
-      output += (output ? "\n" : "") + (typeof result === "object" ? JSON.stringify(result, null, 2) : String(result));
-    }
-    return JSON.stringify({ result: output || "(no output)" });
-  } catch (e) {
-    return JSON.stringify({ error: e.message });
-  }
-});
+// No built-in tools ship with the client: the QinferTools registry is the generic
+// tool_calls protocol (register/list/execute + tool cards). HTML/mermaid rendering,
+// web fetch, and JS execution are agent concerns, not chat, and were removed
+// (2026-10-15); register tools from devtools or future agent integrations.
 
 /* ---- API key (localStorage, shared across tabs; same approach as Strata) ---- */
 function apiKey() { return localStorage.getItem("qinfer.api_key") || ""; }
@@ -1777,41 +1663,10 @@ function updateToolCallResult(callId, result, isError) {
     status.textContent = isError ? tr("tool.error") : tr("tool.result");
     status.className = "tool-card__status" + (isError ? " tool-card__status--error" : " tool-card__status--ok");
   }
-  // Check if result is a special render instruction
+  // Tool results are always shown as text; the old HTML-iframe and mermaid
+  // render branches were agent features and were removed (2026-10-15).
   var resultDiv = document.createElement("div");
   resultDiv.className = "tool-card__result";
-  try {
-    var parsed = JSON.parse(result);
-    if (parsed.__tool_render === "html") {
-      resultDiv.className += " tool-card__result--html";
-      var iframe = document.createElement("iframe");
-      iframe.className = "tool-render-frame";
-      iframe.sandbox = "allow-scripts"; // Sandboxed: no network, no same-origin
-      iframe.style.height = (parsed.height || 400) + "px";
-      card.parentElement.appendChild(resultDiv);
-      resultDiv.appendChild(iframe);
-      // Write HTML to iframe
-      var doc = iframe.contentDocument || iframe.contentWindow.document;
-      doc.open();
-      doc.write(parsed.html);
-      doc.close();
-      // Auto-resize iframe
-      setTimeout(function() {
-        try { iframe.style.height = doc.body.scrollHeight + 20 + "px"; } catch(e) {}
-      }, 500);
-      return;
-    } else if (parsed.__tool_render === "mermaid") {
-      resultDiv.className += " tool-card__result--mermaid";
-      // Render mermaid as a pre block (full mermaid.js integration would need the library)
-      var pre = document.createElement("pre");
-      pre.className = "tool-mermaid";
-      pre.textContent = parsed.diagram;
-      resultDiv.appendChild(pre);
-      card.parentElement.appendChild(resultDiv);
-      return;
-    }
-  } catch(e) {}
-  // Default: show as text
   var pre = document.createElement("pre");
   pre.className = "tool-card__output";
   pre.textContent = result.length > 2000 ? result.slice(0, 2000) + "\n…(truncated)" : result;
