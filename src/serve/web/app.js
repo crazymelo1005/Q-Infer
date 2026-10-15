@@ -209,6 +209,12 @@ var QinferMD = {
     text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
     text = text.replace(/_(.+?)_/g, '<em>$1</em>');
     
+    // Images: ![alt](url). Only https is turned into an <img> (the HTML is already
+    // escaped, so the URL cannot break out of the attribute); anything else stays
+    // literal text. Must run before the link rule, which would match the [alt](url).
+    text = text.replace(/!\[([^\]]*)\]\((https:\/\/[^)\s]+)\)/g,
+      '<img class="md-img" src="$2" alt="$1" loading="lazy">');
+
     // Links: [text](url)
     text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
     

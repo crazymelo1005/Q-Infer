@@ -77,6 +77,24 @@ if (typeof QinferMD === "undefined") {
   else console.log("ok   table cell keeps inline formatting");
 }
 
+// --- QinferMD: images and links ---------------------------------------------
+if (typeof QinferMD !== "undefined") {
+  const i1 = QinferMD.render("![cat](https://example.com/c.png)");
+  if (i1.indexOf('<img class="md-img"') < 0 || i1.indexOf('src="https://example.com/c.png"') < 0 ||
+      i1.indexOf('alt="cat"') < 0) {
+    report("https image becomes an img", { got: i1 });
+  } else console.log("ok   https image becomes an img");
+
+  const i2 = QinferMD.render("![cat](http://example.com/c.png)");
+  if (i2.indexOf("<img") >= 0) report("non-https image stays text", { got: i2 });
+  else console.log("ok   a non-https image stays literal text");
+
+  const l1 = QinferMD.render("[docs](https://example.com/x)");
+  if (l1.indexOf('<a href="https://example.com/x"') < 0 || l1.indexOf("target=\"_blank\"") < 0) {
+    report("plain link still renders", { got: l1 });
+  } else console.log("ok   a plain link still renders with target=_blank");
+}
+
 // --- i18n zh/en key parity ---------------------------------------------------
 const s2 = src.indexOf("const I18N = {");
 const e2 = src.indexOf("function tr(", s2);
