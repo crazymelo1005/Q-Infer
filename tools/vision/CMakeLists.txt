@@ -54,6 +54,13 @@ else()
 endif()
 set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
 set(GGML_CUDA ${STRATA_VISION_CUDA} CACHE BOOL "" FORCE)
+# STRATA_VISION_VULKAN: run the encoder on the Intel iGPU through ggml-vulkan. The point of this
+# arm is that the iGPU is UMA -- it holds the encoder's weights in system memory and costs the
+# engine ZERO VRAM, which is exactly why STRATA_VISION_CUDA stays OFF (0.4-0.7 GB, upstream). The
+# encoder is dense, batched and BF16, so it does not hit the "no integer dot product" wall that
+# made the iGPU lose on the engine's quantized experts (ADR-019/020). Default OFF: measure first.
+option(STRATA_VISION_VULKAN "run the vision encoder on the iGPU (builds ggml-vulkan)" OFF)
+set(GGML_VULKAN ${STRATA_VISION_VULKAN} CACHE BOOL "" FORCE)
 
 add_subdirectory(${LLAMA_DIR} llama EXCLUDE_FROM_ALL)
 

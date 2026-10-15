@@ -21,6 +21,10 @@
 #                        $HOME/projects/ref_repos/llama.cpp
 #   STRATA_VISION_CUDA   ON builds ggml-cuda so the encoder can run on the GPU, default OFF (the
 #                        engine wants the VRAM; upstream measures 0.4-0.7 GB of it for the encoder)
+#   STRATA_VISION_VULKAN ON builds ggml-vulkan so the encoder can run on the Intel iGPU instead.
+#                        UMA: it costs the engine zero VRAM. Default OFF; measure before defaulting.
+#   STRATA_VISION_BUILD_DIR  build tree to use, default $REPO/build-vision (set it to keep the
+#                        CPU arm's tree while A/B-ing the Vulkan arm)
 #   STRATA_PORTABLE      ON builds the AVX2 baseline, default ON (see tools/vision/CMakeLists.txt)
 #   JOBS                 parallel build jobs, default 8 (24-core box; leave headroom)
 set -euo pipefail
@@ -28,7 +32,7 @@ set -euo pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 PIN=3cf03257f219afbe7334045ff7c6a06ac68c627d
 LLAMA_SRC="${LLAMA_SRC:-$HOME/projects/ref_repos/llama.cpp}"
-BUILD="$REPO/build-vision"
+BUILD="${STRATA_VISION_BUILD_DIR:-$REPO/build-vision}"
 TREE="$BUILD/llama.cpp"
 MARKER="$TREE/.pinned-commit"
 
@@ -64,6 +68,7 @@ cmake -G Ninja -S "$REPO/tools/vision" -B "$BUILD" \
   -DCMAKE_BUILD_TYPE=Release \
   -DLLAMA_DIR="$TREE" \
   -DSTRATA_VISION_CUDA="${STRATA_VISION_CUDA:-OFF}" \
+  -DSTRATA_VISION_VULKAN="${STRATA_VISION_VULKAN:-OFF}" \
   -DSTRATA_PORTABLE="${STRATA_PORTABLE:-ON}"
 
 cmake --build "$BUILD" --target qinfer-vision -j "${JOBS:-8}"
