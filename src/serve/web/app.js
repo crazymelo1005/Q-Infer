@@ -188,6 +188,7 @@ const I18N = {
     "chat.error": "错误",
     "chat.generating": "生成中…",
     "chat.prefilling": "正在处理提示词…",
+    "chat.thinking": "思考中…",
     "chat.stopped": "已停止",
     "chat.stoppedSuffix": "（已停止）",
     "chat.failedPrefix": "请求失败：",
@@ -425,6 +426,7 @@ const I18N = {
     "chat.error": "Error",
     "chat.generating": "Generating…",
     "chat.prefilling": "Processing prompt…",
+    "chat.thinking": "Thinking…",
     "chat.stopped": "Stopped",
     "chat.stoppedSuffix": " (stopped)",
     "chat.failedPrefix": "Request failed: ",
@@ -1106,6 +1108,29 @@ function addMsg(role, text, attachList) {
   // User messages: plain text. Assistant/error: will be rendered as Markdown when complete.
   body.textContent = text;
   el.appendChild(label);
+  // Add thinking section for assistant messages (initially hidden)
+  if (role === "assistant") {
+    var thinkingSection = document.createElement("div");
+    thinkingSection.className = "thinking-section";
+    thinkingSection.style.display = "none";
+    var thinkingHeader = document.createElement("div");
+    thinkingHeader.className = "thinking-header";
+    thinkingHeader.innerHTML = '<svg class="st-icon st-icon--sm thinking-icon"><use href="/web/sprite.svg#i-thinking"/></svg><span>' + tr("chat.thinking") + '</span><svg class="st-icon st-icon--sm thinking-chevron"><use href="/web/sprite.svg#i-chevron"/></svg>';
+    thinkingHeader.style.cursor = "pointer";
+    var thinkingBody = document.createElement("div");
+    thinkingBody.className = "thinking-body";
+    thinkingSection.appendChild(thinkingHeader);
+    thinkingSection.appendChild(thinkingBody);
+    el.appendChild(thinkingSection);
+    el._thinkingSection = thinkingSection;
+    el._thinkingBody = thinkingBody;
+    // Toggle thinking section on header click
+    thinkingHeader.addEventListener("click", function() {
+      var isHidden = thinkingBody.style.display === "none" || !thinkingBody.style.display;
+      thinkingBody.style.display = isHidden ? "block" : "none";
+      thinkingHeader.classList.toggle("expanded", isHidden);
+    });
+  }
   // Show attached images as thumbnails above the text
   if (attachList && attachList.length) {
     var imgs = document.createElement("div");
@@ -1137,6 +1162,15 @@ function addMsg(role, text, attachList) {
   return body;
 }
 
+// Strip special tokens from answer text (safety net)
+function filterThinkingContent(text) {
+  if (!text) return text;
+  // Remove <think>/</think> tags if any leaked through
+  text = text.replace(/<\/?think>/g, "");
+  // Remove special tokens like <think>, </think>, etc.
+  text = text.replace(/<\|[^|>]+\|>/g, "");
+  return text;
+}
 // Render Markdown in an assistant message body (called after streaming completes)
 function renderMsgMarkdown(bodyEl) {
   if (!bodyEl || !bodyEl.textContent) return;
@@ -1422,45 +1456,93 @@ async function doChatRound() {
       if (res.status === 401) showBanner(tr("err.keyInvalid"), "err");
       return { error: msg };
     }
+    // Track thinking state
+    var isThinking = false;
+    var thinkBuf = "";
+    var thinkingBody = out.parentElement._thinkingBody;
+    var thinkingSec = out.parentElement._thinkingSection;
+
     await readSSE(res, function (ev) {
       if (ev.error) {
         waitRow.remove();
         out.textContent = ev.error.message || tr("chat.failed");
         out.parentElement.className = "bubble error";
-      } else if (ev.choices && ev.choices[0]) {
-        var d = ev.choices[0].delta || {};
-        // Check finish_reason
-        if (ev.choices[0].finish_reason) {
-          finishReason = ev.choices[0].finish_reason;
-        }
-        // Text content
-        if (d.content !== undefined && d.content !== null) {
-          if (waitRow.parentElement) waitRow.remove();
-          out.textContent += d.content;
-          setPill("generating", tr("chat.generating"));
-        }
-        // Tool calls (streaming: accumulated by index)
-        if (d.tool_calls) {
-          if (waitRow.parentElement) waitRow.remove();
-          d.tool_calls.forEach(function (tc) {
-            var idx = tc.index;
-            if (!toolCallAccum[idx]) {
-              toolCallAccum[idx] = {
-                id: tc.id || ("call_" + idx),
-                type: "function",
-                function: { name: "", arguments: "" },
-              };
-            }
-            if (tc.id) toolCallAccum[idx].id = tc.id;
-            if (tc.function) {
-              if (tc.function.name) toolCallAccum[idx].function.name = tc.function.name;
-              if (tc.function.arguments) toolCallAccum[idx].function.arguments += tc.function.arguments;
-            }
-          });
-          setPill("generating", tr("tool.calling"));
-        }
-        $("msg-list").scrollTop = $("msg-list").scrollHeight;
+        return;
       }
+      if (!(ev.choices && ev.choices[0])) return;
+      var d = ev.choices[0].delta || {};
+      if (ev.choices[0].finish_reason) finishReason = ev.choices[0].finish_reason;
+
+      // --- Text content: route <think>/</think> ---
+      if (d.content !== undefined && d.content !== null) {
+        if (waitRow.parentElement) waitRow.remove();
+        var content = d.content;
+
+        // Accumulate raw content and parse tags
+        thinkBuf += content;
+
+        // Process all complete tag pairs in thinkBuf
+        while (true) {
+          if (!isThinking) {
+            // Look for <think>
+            var otIdx = thinkBuf.indexOf("<think>");
+            if (otIdx < 0) {
+              // No opening tag — check if tail might be a partial tag
+              var safe = thinkBuf.length - (7 - 1);
+              if (safe > 0) {
+                out.textContent += thinkBuf.substring(0, safe);
+                thinkBuf = thinkBuf.substring(safe);
+              }
+              break;
+            }
+            // Flush answer text before the tag
+            out.textContent += thinkBuf.substring(0, otIdx);
+            thinkBuf = thinkBuf.substring(otIdx + 7);
+            isThinking = true;
+            if (thinkingSec) thinkingSec.style.display = "";
+          } else {
+            // Look for </think>
+            var ctIdx = thinkBuf.indexOf("</think>");
+            if (ctIdx < 0) {
+              // No closing tag — check tail for partial
+              var safe = thinkBuf.length - (8 - 1);
+              if (safe > 0) {
+                if (thinkingBody) thinkingBody.textContent += thinkBuf.substring(0, safe);
+                thinkBuf = thinkBuf.substring(safe);
+              }
+              break;
+            }
+            // Flush thinking text before closing tag
+            if (ctIdx > 0 && thinkingBody) {
+              thinkingBody.textContent += thinkBuf.substring(0, ctIdx);
+            }
+            thinkBuf = thinkBuf.substring(ctIdx + 8);
+            isThinking = false;
+          }
+        }
+      }
+
+      // Tool calls (streaming: accumulated by index)
+      if (d.tool_calls) {
+        if (waitRow.parentElement) waitRow.remove();
+        d.tool_calls.forEach(function (tc) {
+          var idx = tc.index;
+          if (!toolCallAccum[idx]) {
+            toolCallAccum[idx] = {
+              id: tc.id || ("call_" + idx),
+              type: "function",
+              function: { name: "", arguments: "" },
+            };
+          }
+          if (tc.id) toolCallAccum[idx].id = tc.id;
+          if (tc.function) {
+            if (tc.function.name) toolCallAccum[idx].function.name += tc.function.name;
+            if (tc.function.arguments) toolCallAccum[idx].function.arguments += tc.function.arguments;
+          }
+        });
+        setPill("generating", tr("tool.calling"));
+      }
+      $("msg-list").scrollTop = $("msg-list").scrollHeight;
     });
     if (waitRow.parentElement) waitRow.remove();
   } catch (e) {
@@ -1478,10 +1560,13 @@ async function doChatRound() {
   var toolCalls = [];
   for (var idx in toolCallAccum) toolCalls.push(toolCallAccum[idx]);
   if (toolCalls.length) {
-    // Remove the empty assistant bubble and replace with tool call cards
     out.parentElement.remove();
     addToolCallMsg(toolCalls);
     return { toolCalls: toolCalls };
+  }
+  // Finalize: flush any remaining thinking content
+  if (thinkingSec && thinkBuf) {
+    if (thinkingBody) thinkingBody.textContent += thinkBuf;
   }
   // Render Markdown for completed assistant messages
   if (out.textContent) renderMsgMarkdown(out);

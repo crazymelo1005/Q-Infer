@@ -109,3 +109,57 @@
   --ok:var(--st-accent); --warn:var(--st-warn); --err:var(--st-danger);
   --code-bg:var(--st-code-bg);
 }
+
+/* Thinking section styles */
+.thinking-section {
+  margin: var(--st-s-3) 0;
+  border: 1px solid var(--st-line-soft);
+  border-radius: var(--st-r-sm);
+  background: var(--st-surface-2);
+  overflow: hidden;
+}
+
+.thinking-header {
+  display: flex;
+  align-items: center;
+  gap: var(--st-s-2);
+  padding: var(--st-s-2) var(--st-s-3);
+  font-size: var(--st-fs-sm);
+  font-weight: var(--st-fw-medium);
+  color: var(--st-ink-muted);
+  user-select: none;
+  cursor: pointer;
+  transition: background var(--st-dur) var(--st-ease);
+}
+
+.thinking-header:hover {
+  background: var(--st-line-soft);
+}
+
+.thinking-icon {
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.thinking-chevron {
+  margin-left: auto;
+  opacity: 0.4;
+  transition: transform var(--st-dur) var(--st-ease);
+  flex-shrink: 0;
+}
+
+.thinking-header.expanded .thinking-chevron {
+  transform: rotate(180deg);
+}
+
+.thinking-body {
+  padding: var(--st-s-3);
+  font-size: var(--st-fs-sm);
+  color: var(--st-ink-muted);
+  line-height: var(--st-lh-body);
+  border-top: 1px solid var(--st-line-soft);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+}
