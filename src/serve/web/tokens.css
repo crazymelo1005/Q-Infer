@@ -206,3 +206,8 @@
   text-align: left;
 }
 .md-table thead th { font-weight: 600; }
+
+/* Conversation history search */
+.conv-sidebar__search { padding: 0 10px 8px; }
+.conv-search { width: 100%; height: 30px; font-size: 12px; }
+.conv-item.hidden { display: none; }

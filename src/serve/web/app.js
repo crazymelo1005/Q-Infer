@@ -245,6 +245,8 @@ const I18N = {
     "chat.ctxAuto": "自动",
     "chat.scrollBottom": "回到底部",
     "conv.closeSidebar": "收起侧栏",
+    "conv.searchPh": "搜索对话",
+    "conv.noMatch": "无匹配对话",
     "chat.error": "错误",
     "chat.generating": "生成中…",
     "chat.prefilling": "正在处理提示词…",
@@ -506,6 +508,8 @@ const I18N = {
     "chat.ctxAuto": "Auto",
     "chat.scrollBottom": "Scroll to bottom",
     "conv.closeSidebar": "Close sidebar",
+    "conv.searchPh": "Search conversations",
+    "conv.noMatch": "No matching conversations",
     "chat.error": "Error",
     "chat.generating": "Generating…",
     "chat.prefilling": "Processing prompt…",
@@ -2441,6 +2445,34 @@ function initChat() {
   });
   // Tool panel
   initToolPanel();
+  // Conversation history search: filter the rendered list by title.
+  var convSearch = $("conv-search");
+  if (convSearch) {
+    convSearch.addEventListener("input", function () {
+      var q = convSearch.value.trim().toLowerCase();
+      var list = $("conv-list");
+      if (!list) return;
+      var shown = 0;
+      list.querySelectorAll(".conv-item").forEach(function (it) {
+        var titleEl = it.querySelector(".conv-item__title");
+        var t = (titleEl ? titleEl.textContent : "").toLowerCase();
+        var hit = !q || t.indexOf(q) >= 0;
+        it.classList.toggle("hidden", !hit);
+        if (hit) shown++;
+      });
+      var note = list.querySelector(".conv-no-match");
+      if (q && shown === 0 && list.querySelector(".conv-item")) {
+        if (!note) {
+          note = document.createElement("p");
+          note.className = "muted small conv-no-match";
+          note.textContent = tr("conv.noMatch");
+          list.appendChild(note);
+        }
+      } else if (note) {
+        note.remove();
+      }
+    });
+  }
   // Message action handlers (event delegation)
   $("msg-list").addEventListener("click", function(e) {
     var btn = e.target.closest(".bubble-action");
