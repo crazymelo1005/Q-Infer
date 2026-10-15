@@ -392,3 +392,10 @@ main{flex:1;min-height:0;display:flex}
   .monitor{gap:var(--st-s-1);padding:var(--st-s-1) var(--st-s-2)}
   .state-card__row{font-size:var(--st-fs-xs)}
 }
+
+/* Fenced-code syntax highlighting (QinferMD.highlight); colors from tokens.css. */
+.md-code-block .tok-kw{color:var(--st-tok-kw)}
+.md-code-block .tok-str{color:var(--st-tok-str)}
+.md-code-block .tok-cmt{color:var(--st-tok-cmt);font-style:italic}
+.md-code-block .tok-num{color:var(--st-tok-num)}
+.md-code-block .tok-fn{color:var(--st-tok-fn)}

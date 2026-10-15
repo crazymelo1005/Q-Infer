@@ -227,3 +227,9 @@
 .feedback-card { margin: 10px; }
 .feedback-list { max-height: 160px; overflow-y: auto; font-size: 12px; }
 .feedback-item { padding: 4px 0; border-bottom: 1px solid var(--st-border, rgba(127,127,127,.2)); }
+
+/* Fenced-code syntax-highlight tokens (see QinferMD.highlight). The code panel is dark
+   in both themes (--st-code-bg is #1b1f23 / #0a0c0e), so one One-Dark palette serves both. */
+:root{
+  --st-tok-kw:#c678dd; --st-tok-str:#98c379; --st-tok-cmt:#7f848e; --st-tok-num:#d19a66; --st-tok-fn:#61afef;
+}

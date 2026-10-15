@@ -19,6 +19,47 @@ var QinferMD = {
     return text.replace(/[&<>"']/g, function(m) { return map[m]; });
   },
 
+  // Reverse of escapeHtml. render() escapes the whole document before it pulls the
+  // fences out, so a fence's payload comes back escaped; this restores the raw source
+  // the highlighter and the copy button both want. One pass, so "&amp;lt;" -> "&lt;".
+  unescapeHtml: function(text) {
+    var map = { '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#039;': "'", '&amp;': '&' };
+    return text.replace(/&(lt|gt|quot|#039|amp);/g, function(x) { return map[x]; });
+  },
+
+  // Fenced-code syntax highlighting: dependency-free and deliberately small. One
+  // tokenizer pass over the RAW source wraps line/block comments, string literals,
+  // numbers, keywords and call-like identifiers; every token and every gap is escaped
+  // through escapeHtml, so nothing unescaped can reach the DOM (the payload is
+  // untrusted model output).
+  _kw: /\b(?:abstract|and|as|assert|async|await|begin|break|case|catch|class|const|continue|def|default|del|do|elif|else|end|enum|except|export|extends|false|final|finally|fn|for|from|func|function|global|goto|if|impl|import|in|instanceof|interface|lambda|let|local|match|module|mut|namespace|new|nil|none|null|of|or|package|pass|private|protected|public|raise|require|rescue|return|self|static|struct|super|switch|template|then|this|throw|true|try|type|typename|typeof|undefined|unless|until|use|using|var|virtual|void|when|where|while|with|yield)\b/,
+  _num: /\b(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\b/,
+  _hashLang: /^(?:py|python|rb|ruby|sh|bash|zsh|fish|yaml|yml|toml|ini|conf|cfg|dockerfile|make|pl|perl|r|jl|nim)$/i,
+  _dashLang: /^(?:sql|lua|hs|haskell|elm|ada)$/i,
+  highlight: function(code, lang) {
+    if (code == null) return "";
+    code = String(code);
+    if (!code) return "";
+    var l = (lang || "").toLowerCase();
+    var line = this._hashLang.test(l) ? "#[^\\n]*" : (this._dashLang.test(l) ? "--[^\\n]*" : "\\/\\/[^\\n]*");
+    var re = new RegExp("(" + line + ")"
+      + "|(\\/\\*[\\s\\S]*?\\*\\/)"
+      + "|(\"(?:\\\\.|[^\"\\\\\\n])*\"|'(?:\\\\.|[^'\\\\\\n])*'|`(?:\\\\.|[^`\\\\])*`)"
+      + "|(" + this._num.source + ")"
+      + "|(" + this._kw.source + ")"
+      + "|([A-Za-z_$][\\w$]*)(?=\\s*\\()", "gi");
+    var out = "", last = 0, m;
+    while ((m = re.exec(code)) !== null) {
+      if (m.index > last) out += this.escapeHtml(code.slice(last, m.index));
+      var cls = (m[1] || m[2]) ? "tok-cmt" : m[3] ? "tok-str" : m[4] ? "tok-num" : m[5] ? "tok-kw" : "tok-fn";
+      out += '<span class="' + cls + '">' + this.escapeHtml(m[0]) + '</span>';
+      last = m.index + m[0].length;
+      if (m[0].length === 0) re.lastIndex++;
+    }
+    out += this.escapeHtml(code.slice(last));
+    return out;
+  },
+
   // A table row carries at least one pipe and is not the |---|---| separator.
   isTableRow: function(line) {
     var t = (line || '').trim();
@@ -65,7 +106,7 @@ var QinferMD = {
     var codeBlocks = [];
     text = text.replace(/```(\w*)\n([\s\S]*?)```/g, function(match, lang, code) {
       var idx = codeBlocks.length;
-      codeBlocks.push({ lang: lang, code: code });
+      codeBlocks.push({ lang: lang, code: QinferMD.unescapeHtml(code) });
       return '\x00CODEBLOCK' + idx + '\x00';
     });
     
@@ -94,7 +135,7 @@ var QinferMD = {
         if (inBlockquote) { result.push('</blockquote>'); inBlockquote = false; }
         var cb = codeBlocks[parseInt(codeMatch[1])];
         var langClass = cb.lang ? ' class="language-' + cb.lang + '"' : '';
-        result.push('<pre class="md-code-block"><code' + langClass + '>' + cb.code + '</code><button class="md-copy-btn" data-code="' + encodeURIComponent(cb.code) + '">Copy</button></pre>');
+        result.push('<pre class="md-code-block"><code' + langClass + '>' + this.highlight(cb.code, cb.lang) + '</code><button class="md-copy-btn" data-code="' + encodeURIComponent(cb.code) + '">Copy</button></pre>');
         continue;
       }
       
@@ -205,7 +246,7 @@ var QinferMD = {
     text = text.replace(/\x00CODEBLOCK(\d+)\x00/g, function(match, idx) {
       var cb = codeBlocks[parseInt(idx)];
       var langClass = cb.lang ? ' class="language-' + cb.lang + '"' : '';
-      return '<pre class="md-code-block"><code' + langClass + '>' + cb.code + '</code><button class="md-copy-btn" aria-label="' + tr("chat.codeCopy") + '" data-code="' + encodeURIComponent(cb.code) + '">' + tr("chat.codeCopy") + '</button></pre>';
+      return '<pre class="md-code-block"><code' + langClass + '>' + QinferMD.highlight(cb.code, cb.lang) + '</code><button class="md-copy-btn" aria-label="' + tr("chat.codeCopy") + '" data-code="' + encodeURIComponent(cb.code) + '">' + tr("chat.codeCopy") + '</button></pre>';
     });
     
     return text;

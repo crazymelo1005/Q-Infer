@@ -110,6 +110,32 @@ if (typeof QinferMD !== "undefined") {
   } else console.log("ok   a plain bullet stays a normal list item");
 }
 
+// --- QinferMD: fenced-code syntax highlighting ------------------------------
+// The highlighter runs on RAW code and escapes as it wraps, so a payload inside a
+// code fence can never come back as live HTML.
+const hlJs = QinferMD.highlight('const total = 42;', 'js');
+if (hlJs.indexOf('tok-kw') < 0) report("highlight marks a keyword", { got: hlJs });
+else if (hlJs.indexOf('tok-num') < 0) report("highlight marks a number", { got: hlJs });
+else console.log("ok   highlight marks keywords and numbers");
+
+const hlEsc = QinferMD.highlight('var s = "<img src=x onerror=1>";', 'js');
+if (hlEsc.indexOf('<img') >= 0 || hlEsc.indexOf('&lt;img') < 0) report("highlight escapes payloads", { got: hlEsc });
+else console.log("ok   highlight escapes HTML payloads");
+
+const hlCmt = QinferMD.highlight('x = 1  # note', 'py');
+if (hlCmt.indexOf('tok-cmt') < 0) report("python # is a comment", { got: hlCmt });
+else console.log("ok   python # line comment highlighted");
+
+const hlPlain = QinferMD.highlight('plain <text> & more', '');
+if (hlPlain.indexOf('&lt;text&gt;') < 0 || hlPlain.indexOf('&amp;') < 0) report("plain code still escaped", { got: hlPlain });
+else console.log("ok   plain code is escaped verbatim");
+
+// The copy button must still carry the RAW code, and the block must be highlighted.
+const mdBlock = QinferMD.render('```js\nconst a = 1;\n```');
+if (mdBlock.indexOf('tok-kw') < 0) report("rendered fenced block is highlighted", { got: mdBlock });
+else if (mdBlock.indexOf('data-code="' + encodeURIComponent('const a = 1;\n') + '"') < 0) report("copy payload is raw", { got: mdBlock });
+else console.log("ok   rendered fenced block highlights and keeps raw copy payload");
+
 // --- i18n zh/en key parity ---------------------------------------------------
 const s2 = src.indexOf("const I18N = {");
 const e2 = src.indexOf("function tr(", s2);
