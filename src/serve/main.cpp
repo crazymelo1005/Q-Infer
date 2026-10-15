@@ -167,11 +167,13 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     if (a.count("--vision-binary")) c.vision_binary = a["--vision-binary"];
     if (a.count("--media-root")) c.media_root = a["--media-root"];
     // --igpu off|dense|pool: the vendored engine reads its iGPU switches from the
-    // environment, and the engine child inherits ours. Default off: measured on the
-    // sc117 IQ2_XS pairing (2xRTX 5060 Ti), 'dense' cost 22% of prefill throughput
-    // (546 vs 703 tok/s on a 3.3K prompt) because the dense tensors are small next to
-    // the expert work, and 'pool' is not yet usable (0.36 tok/s). Kept as an explicit
-    // opt-in so the accelerator can be re-evaluated without a rebuild.
+    // environment, and the engine child inherits ours. Default dense: with the four-format
+    // Vulkan dense shaders and the engine's STRATA_IGPU_MIN_FLOPS size gate (so only large
+    // dense projections move), iGPU dense is a small net win on the sc117 IQ2_XS pairing
+    // (2xRTX 5060 Ti, 2026-10-15): a 300-token prompt went 178.8 -> 187.5 tok/s prefill
+    // (+4.9%) and 14.7 -> 15.1 tok/s decode (+2.6%); a 3.3K prompt is a wash (339 -> 342).
+    // 'dense' no-ops when no Vulkan device is present. 'pool' stays off (0.36 tok/s,
+    // ADR-020); --igpu off / --igpu pool opt out.
     if (a.count("--igpu")) {
         const std::string v = a["--igpu"];
         if (v != "off" && v != "dense" && v != "pool") {
@@ -180,6 +182,9 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
         }
         ::setenv("STRATA_IGPU_DENSE", v == "dense" ? "1" : "0", 1);
         ::setenv("STRATA_IGPU_POOL", v == "pool" ? "1" : "0", 1);
+    } else {
+        if (::getenv("STRATA_IGPU_DENSE") == nullptr) ::setenv("STRATA_IGPU_DENSE", "1", 1);
+        if (::getenv("STRATA_IGPU_POOL") == nullptr) ::setenv("STRATA_IGPU_POOL", "0", 1);
     }
     // Fused expert prefill path (engine env, inherited by the child): measured on the
     // sc117 IQ2_XS pairing at +16% cold prefill (820 -> 952 tok/s on a 3.3K prompt,
