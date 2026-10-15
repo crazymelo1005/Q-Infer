@@ -29,6 +29,7 @@ def main() -> int:
     ap.add_argument("--mmproj", default=str(DEFAULT_MMPROJ))
     ap.add_argument("--model", default=str(DEFAULT_MODEL))
     ap.add_argument("--threads", type=int, default=8)
+    ap.add_argument("--gpu", action="store_true", help="pass --gpu (ggml-vulkan: device 0 = the iGPU here)")
     ap.add_argument("--max-tokens", type=int, default=256)
     ap.add_argument("--env", default=os.environ.get("QINFER_ENV_PROFILE", "环境2"))
     args = ap.parse_args()
@@ -46,14 +47,14 @@ def main() -> int:
         os.remove(out)
 
     info = vision_common.encode(args.bin, args.mmproj, args.model, probe, out,
-                               threads=args.threads, max_tokens=args.max_tokens)
+                               threads=args.threads, max_tokens=args.max_tokens, gpu=args.gpu)
     vision_common.check_sve1(out, info)
     if info["n_tokens"] < 4:
         return print(f"FAIL: only {info['n_tokens']} image tokens from a 512x512 picture") or 1
 
     record = {"gate": "vision-smoke", "date": datetime.date.today().isoformat(),
               "env": args.env, "binary": args.bin, "mmproj": args.mmproj, "probe": probe,
-              "threads": args.threads, "max_tokens": args.max_tokens, **info}
+              "threads": args.threads, "max_tokens": args.max_tokens, "gpu": args.gpu, **info}
     results = REPO / "measure" / "results"
     results.mkdir(parents=True, exist_ok=True)
     dst = results / f"{record['date'].replace('-', '')}-vision-smoke-{args.env}.json"

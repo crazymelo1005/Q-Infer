@@ -85,6 +85,8 @@ def main() -> int:
     ap.add_argument("--max-tokens", type=int, default=256)
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--env", default=os.environ.get("QINFER_ENV_PROFILE", "环境2"))
+    ap.add_argument("--gpu", action="store_true",
+                    help="run the PORT arm with --gpu (upstream reference stays on the CPU)")
     args = ap.parse_args()
 
     for path, what in [(args.bin, "qinfer-vision (run tools/build_vision.sh)"),
@@ -107,8 +109,9 @@ def main() -> int:
         out = str(work / f"oracle-{name}.sve1")
         if os.path.exists(out):
             os.remove(out)
+        use_gpu = args.gpu and name.startswith("port")
         info = vision_common.encode(binary, args.mmproj, args.model, probe, out,
-                                   threads=args.threads, max_tokens=args.max_tokens)
+                                   threads=args.threads, max_tokens=args.max_tokens, gpu=use_gpu)
         vision_common.check_sve1(out, info)
         runs.append({"role": name, "binary": binary, "file": out, "sha256": sha256(out), **info})
         print(f"{name}: {info['n_tokens']} tokens {info['nx']}x{info['ny']} n_embd={info['n_embd']} "

@@ -35,14 +35,19 @@ def read_ready(proc) -> int:
 
 
 def encode(binary: str, mmproj: str, model: str, image: str, out: str,
-           threads: int = 8, max_tokens: int = 256, timeout: int = 600) -> dict:
+           threads: int = 8, max_tokens: int = 256, timeout: int = 600, gpu: bool = False) -> dict:
     """Spawn the encoder, send one ENC line, return {'n_embd','n_tokens','nx','ny','ms'} plus the file size.
 
     The encoder is resident but this helper keeps it to one request so failures name the picture and
-    the binary instead of an interactive session.
+    the binary instead of an interactive session. `gpu=True` adds --gpu: with the ggml-vulkan build
+    that offloads the encoder to Vulkan device 0, which on this box is the Intel iGPU (see
+    tools/build_vision.sh's STRATA_VISION_VULKAN).
     """
-    proc = subprocess.Popen([binary, "--mmproj", mmproj, "--model", model,
-                             "--threads", str(threads), "--max-tokens", str(max_tokens)],
+    argv = [binary, "--mmproj", mmproj, "--model", model,
+            "--threads", str(threads), "--max-tokens", str(max_tokens)]
+    if gpu:
+        argv.append("--gpu")
+    proc = subprocess.Popen(argv,
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=sys.stderr, text=True, bufsize=1)
     try:
