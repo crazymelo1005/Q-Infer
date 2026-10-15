@@ -805,5 +805,28 @@ else
   ok "35 reasoning_effort accepts 'high' (aliases xhigh)"
 fi
 
+# 36/37. /api/feedback: a valid rating is stored and served back; an unknown one is 400.
+code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
+  -X POST "http://$HOST:$PORT/api/feedback" \
+  -d '{"rating":"up","chat_id":"c1","excerpt":"hi"}')
+if [ "$code" = "200" ]; then
+  curl -s -H "$H" "http://$HOST:$PORT/api/feedback" > "$R"
+  if [ "$(jget "$R" "d['data'][0]['rating']")" = "up" ] && [ "$(jget "$R" "d['data'][0]['chat_id']")" = "c1" ]; then
+    ok "36 /api/feedback stores a rating and serves it back"
+  else
+    bad "36 /api/feedback list: $(head -c 200 "$R")"
+  fi
+else
+  bad "36 /api/feedback post: HTTP $code $(head -c 200 "$R")"
+fi
+
+code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
+  -X POST "http://$HOST:$PORT/api/feedback" -d '{"rating":"sideways"}')
+if [ "$code" = "400" ] && [ "$(jget "$R" "d['error']['param']")" = "rating" ]; then
+  ok "37 /api/feedback rejects an unknown rating (400, param=rating)"
+else
+  bad "37 /api/feedback invalid rating: HTTP $code $(head -c 200 "$R")"
+fi
+
 echo "serve integration: passed $PASS, failed $FAIL"
 [ "$FAIL" = 0 ]

@@ -2617,6 +2617,18 @@ function initChat() {
         bubble.dataset.msgId = msgId;
         feedback[msgId] = action === "thumbup" ? "up" : "down";
         localStorage.setItem("qinfer.feedback", JSON.stringify(feedback));
+        // Also send it to the server (fire-and-forget: the local copy is the fallback).
+        try {
+          api("/api/feedback", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              rating: action === "thumbup" ? "up" : "down",
+              chat_id: (typeof QinferConv !== "undefined" ? QinferConv.currentId : "") || "",
+              excerpt: (text || "").slice(0, 200),
+            }),
+          }).catch(function () {});
+        } catch (e) { /* never break the UI on a feedback post */ }
       } else {
         // Remove feedback
         var msgId = bubble.dataset.msgId;

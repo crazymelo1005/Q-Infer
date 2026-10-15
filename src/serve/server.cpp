@@ -53,6 +53,9 @@ bool stop_param(const Json& body, std::vector<std::string>& out) {
 }
 
 // ---- Error body (the two domain shapes of spec §5) ----
+// Retention of the in-memory /api/feedback list (newest first).
+namespace { constexpr std::size_t kFeedbackCap = 200; }
+
 Json openai_err(const std::string& message, const std::string& type, const char* param) {
     Json inner = Json::objv();
     inner.set("message", Json::strv(message));
@@ -1831,6 +1834,49 @@ void Serve::register_routes() {
         out.set("persistent", Json::boolv(false));
         out.set("loaded", Json::boolv(true));   // loaded at engine startup (no hot loading in v0)
         out.set("auto_load", Json::boolv(false));
+        send_json(res, 200, out);
+    });
+    // User feedback (thumbs) from the chat UI. A bounded in-memory list, newest first,
+    // served back for the monitor; the chat keeps its own localStorage copy too.
+    svr.Post("/api/feedback", [this](const httplib::Request& req, httplib::Response& res) {
+        Json body;
+        std::string jerr;
+        if (!json_parse(req.body, body, jerr) || !body.is_obj()) {
+            send_json(res, 400, openai_err("Request body is not a valid JSON object: " + jerr, "invalid_request_error", nullptr));
+            return;
+        }
+        const Json* rv = body.find("rating");
+        if (rv == nullptr || !rv->is_str() || (rv->str != "up" && rv->str != "down")) {
+            send_json(res, 400, openai_err("rating must be \"up\" or \"down\"", "invalid_request_error", "rating"));
+            return;
+        }
+        Json rec = Json::objv();
+        rec.set("rating", Json::strv(rv->str));
+        const Json* cid = body.find("chat_id");
+        if (cid != nullptr && cid->is_str()) rec.set("chat_id", Json::strv(cid->str));
+        const Json* ex = body.find("excerpt");
+        if (ex != nullptr && ex->is_str()) {
+            rec.set("excerpt", Json::strv(ex->str.size() > 500 ? ex->str.substr(0, 500) : ex->str));
+        }
+        rec.set("at", Json::numv(static_cast<double>(std::time(nullptr))));
+        {
+            std::lock_guard<std::mutex> lk(feedback_mu_);
+            feedback_.push_front(std::move(rec));
+            while (feedback_.size() > kFeedbackCap) feedback_.pop_back();
+        }
+        Json ok = Json::objv();
+        ok.set("ok", Json::boolv(true));
+        send_json(res, 200, ok);
+    });
+    svr.Get("/api/feedback", [this](const httplib::Request&, httplib::Response& res) {
+        Json arr = Json::arrv();
+        {
+            std::lock_guard<std::mutex> lk(feedback_mu_);
+            for (const Json& r : feedback_) arr.push(r);
+        }
+        Json out = Json::objv();
+        out.set("data", std::move(arr));
+        out.set("retention", Json::numv(static_cast<double>(kFeedbackCap)));
         send_json(res, 200, out);
     });
     // Static pages (the files landed by T15/T16; 404 is fine at this point — T9 only verifies the API

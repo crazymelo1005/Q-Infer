@@ -16,6 +16,7 @@
 
 #include <atomic>
 #include <ctime>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -23,6 +24,7 @@
 #include <vector>
 
 #include "serve/facade.hpp"
+#include "serve/json.hpp"
 #include "serve/prompt_cache.hpp"
 #include "serve/prometheus.hpp"
 #include "serve/records.hpp"
@@ -144,6 +146,10 @@ private:
     // Vision encoder (M5b): null when --mmproj is not configured. Shared pointer so the
     // HTTP threads can access it without locking (VisionProcess has its own internal mutex).
     std::shared_ptr<engine::VisionProcess> vision_;
+    // User feedback (thumbs) from the chat UI: a small bounded in-memory list, newest
+    // first, served back on GET /api/feedback. Bounded so a chatty client cannot grow it.
+    std::mutex feedback_mu_;
+    std::deque<Json> feedback_;   // cap kFeedbackCap (see server.cpp)
     // /metrics totals (updated in the same critical section as last_ —
     // record_request is the only writer from HTTP threads; /metrics holds last_mu_
     // when reading, so no race).
