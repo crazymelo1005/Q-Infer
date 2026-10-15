@@ -1482,10 +1482,10 @@ async function doChatRound() {
       return { error: msg };
     }
     // Track thinking state
-    var isThinking = false;
     var thinkBuf = "";
     var thinkingBody = out.parentElement._thinkingBody;
     var thinkingSec = out.parentElement._thinkingSection;
+    var hasThinkTag = false;  // Track if we've seen any think tags
 
     await readSSE(res, function (ev) {
       if (ev.error) {
@@ -1503,66 +1503,40 @@ async function doChatRound() {
         if (waitRow.parentElement) waitRow.remove();
         var content = d.content;
 
-        // Accumulate raw content and parse tags
+        // Accumulate raw content
         thinkBuf += content;
 
-        // Process all complete tag pairs in thinkBuf
-        while (true) {
-          if (!isThinking) {
-            // Look for <think> opening tag
-            var otIdx = thinkBuf.indexOf("<think>");
-            if (otIdx < 0) {
-              // No opening tag — check if we have </think> without <think>
-              // (Strata backend may strip opening tag)
-              var ctIdx = thinkBuf.indexOf("</think>");
-              if (ctIdx >= 0) {
-                // Everything before </think> is thinking content
-                if (ctIdx > 0 && thinkingBody) {
-                  thinkingBody.textContent += thinkBuf.substring(0, ctIdx);
-                }
-                thinkBuf = thinkBuf.substring(ctIdx + 8);
-                if (thinkingSec) thinkingSec.style.display = "";
-                // Store thinking text for saveCurrent()
-                if (thinkingBody && thinkingBody.textContent) {
-                  out.parentElement._thinkingText = thinkingBody.textContent;
-                }
-                continue;
-              }
-              // No tags at all — check if tail might be a partial tag
-              var safe = thinkBuf.length - 7;
-              if (safe > 0) {
-                out.textContent += thinkBuf.substring(0, safe);
-                thinkBuf = thinkBuf.substring(safe);
-              }
-              break;
-            }
-            // Flush answer text before the tag
-            out.textContent += thinkBuf.substring(0, otIdx);
-            thinkBuf = thinkBuf.substring(otIdx + 7);
-            isThinking = true;
-            if (thinkingSec) thinkingSec.style.display = "";
-          } else {
-            // Look for </think>
-            var ctIdx = thinkBuf.indexOf("</think>");
-            if (ctIdx < 0) {
-              // No closing tag — check tail for partial
-              var safe = thinkBuf.length - 7;
-              if (safe > 0) {
-                if (thinkingBody) thinkingBody.textContent += thinkBuf.substring(0, safe);
-                thinkBuf = thinkBuf.substring(safe);
-              }
-              break;
-            }
-            // Flush thinking text before closing tag
-            if (ctIdx > 0 && thinkingBody) {
+        // Check for </think> tag (Strata backend may strip <think>)
+        var ctIdx = thinkBuf.indexOf("</think>");
+        if (ctIdx >= 0) {
+          hasThinkTag = true;
+          // Everything before </think> is thinking content
+          if (ctIdx > 0 && thinkingBody) {
+            // If we already put content in the main bubble, move it to thinking
+            if (out.textContent && !thinkingBody.textContent) {
+              thinkingBody.textContent = out.textContent + thinkBuf.substring(0, ctIdx);
+              out.textContent = "";
+            } else {
               thinkingBody.textContent += thinkBuf.substring(0, ctIdx);
             }
-            thinkBuf = thinkBuf.substring(ctIdx + 8);
-            isThinking = false;
-            // Store thinking text for saveCurrent()
-            if (thinkingBody && thinkingBody.textContent) {
-              out.parentElement._thinkingText = thinkingBody.textContent;
-            }
+          }
+          thinkBuf = thinkBuf.substring(ctIdx + 8);
+          if (thinkingSec) thinkingSec.style.display = "";
+          // Store thinking text for saveCurrent()
+          if (thinkingBody && thinkingBody.textContent) {
+            out.parentElement._thinkingText = thinkingBody.textContent;
+          }
+        } else if (hasThinkTag) {
+          // We've seen </think> already, so this is answer content
+          out.textContent += thinkBuf;
+          thinkBuf = "";
+        } else {
+          // No tags yet — buffer until we see </think> or enough content
+          // Use safe zone to avoid partial tag issues
+          var safe = thinkBuf.length - 7;
+          if (safe > 0) {
+            out.textContent += thinkBuf.substring(0, safe);
+            thinkBuf = thinkBuf.substring(safe);
           }
         }
       }
