@@ -333,13 +333,14 @@ void test_store_round_trip_bytes() {
     kv.head_dim = kHd;
     kv.n_pages = kSlots;
     kv.reset();
-    kv.table.assign(kSlots, -1);
+    // 窗口的表按【逻辑页数】开，不是槽位数（见 attach_kv_window 的契约：logical_blocks 是逻辑页表长度）。
+    std::vector<std::int32_t> wtable(kBlocks, -1);
     KvWindow w;
     w.page_bytes = kPageBytes;
     w.quota_bytes = kSlots * kPageBytes;
     w.store = &store;
     w.pool = &kv;
-    w.table = &kv.table;
+    w.table = &wtable;
 
     for (std::uint64_t b = 0; b < kBlocks; ++b) {
         std::uint64_t phys = 0;
