@@ -176,9 +176,11 @@ main{flex:1;min-height:0;display:flex}
 .spark-wrapper .st-metric__spark{flex:1}
 .spark-axis{display:flex;flex-direction:column;justify-content:space-between;font:600 10px var(--st-font);color:var(--st-ink-muted);opacity:0.7;min-width:36px;text-align:right}
 
-/* Monitor row: fluid gauge + requests */
-.monitor-row{display:grid;grid-template-columns:minmax(180px,1fr) minmax(0,2.2fr);gap:var(--st-s-3)}
-.ctx-card{display:flex;flex-direction:column;gap:var(--st-s-2)}
+/* Context card: the gauge and the four bars it is drawn from, side by side */
+.ctx-card{display:grid;grid-template-columns:minmax(180px,240px) minmax(0,1fr);gap:var(--st-s-4) var(--st-s-6);align-items:start}
+.ctx-card__gauge{display:flex;flex-direction:column;gap:var(--st-s-2);min-width:0}
+.ctx-card__bars{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:var(--st-s-2) var(--st-s-6)}
+.ctx-bar{min-width:0}
 .ctx-gauge{position:relative;width:120px;height:120px;margin:var(--st-s-1) auto var(--st-s-2)}
 .ctx-gauge .st-gauge{width:120px;height:120px}
 .ctx-gauge .st-gauge__fill{transition:stroke-dasharray 400ms var(--st-ease)}
@@ -190,9 +192,20 @@ main{flex:1;min-height:0;display:flex}
 .table-wrap .st-table th,.table-wrap .st-table td{white-space:nowrap;padding-inline:8px}
 .req-head{display:flex;align-items:center;justify-content:space-between;gap:var(--st-s-2)}
 
+/* Requests page: KPI strip, then the cache beside the request table */
+.requests-grid{display:grid;gap:var(--st-s-3);grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);align-items:start}
+.act-card{display:flex;flex-direction:column;gap:var(--st-s-2);padding:var(--st-s-3) var(--st-s-4)}
+.act-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr));gap:var(--st-s-2)}
+.act-tile{display:flex;flex-direction:column;gap:2px;padding:var(--st-s-2) var(--st-s-3);background:var(--st-surface-2);border:1px solid var(--st-line-soft);border-radius:var(--st-r-sm);min-width:0}
+.act-tile__value{font-size:var(--st-fs-xl)}
+.req-pane-card{display:flex;flex-direction:column;gap:var(--st-s-2);padding:var(--st-s-3) var(--st-s-4) var(--st-s-3)}
+.req-pane-card .req-list-pane,.req-pane-card .req-detail-pane{background:transparent;border:none;box-shadow:none;border-radius:0}
+.req-pane-card .req-list-pane{border-right:1px solid var(--st-line-soft)}
+.req-pane-card .req-toolbar{border-bottom:none;padding:0 0 var(--st-s-2)}
+
 /* Conversation cache */
-.cc-card{display:flex;flex-direction:column;gap:var(--st-s-2);padding:var(--st-s-3) var(--st-s-4)}
-.cc-bars{display:grid;grid-template-columns:1fr 1fr;gap:var(--st-s-2) var(--st-s-6)}
+.cc-card{display:flex;flex-direction:column;gap:var(--st-s-2);padding:var(--st-s-3) var(--st-s-4);min-width:0}
+.cc-bars{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:var(--st-s-2) var(--st-s-6)}
 .cc-bars[hidden]{display:none}
 .cc-note{margin:0}
 .cc-note:empty{display:none}
@@ -215,7 +228,8 @@ main{flex:1;min-height:0;display:flex}
 .req-toolbar{display:flex;gap:var(--st-s-2);padding:var(--st-s-2) var(--st-s-3);border-bottom:1px solid var(--st-line)}
 .req-toolbar .input{flex:1;height:36px}
 .req-list{flex:1;overflow-y:auto}
-.req-row{padding:8px 12px;border-bottom:1px solid var(--st-line-soft);cursor:pointer;display:grid;grid-template-columns:92px 1fr auto;gap:var(--st-s-2);align-items:baseline;font-variant-numeric:tabular-nums}
+.req-row{padding:8px 12px;border-bottom:1px solid var(--st-line-soft);cursor:pointer;display:grid;grid-template-columns:minmax(0,104px) auto minmax(0,1fr);gap:var(--st-s-2);align-items:center;font-variant-numeric:tabular-nums}
+.req-row>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .req-row:hover{background:var(--st-surface-2)}
 .req-row.active{background:var(--st-accent-tint)}
 .req-detail-pane{flex:1;background:var(--st-surface);border:1px solid var(--st-line);border-radius:var(--st-r-lg);box-shadow:var(--st-sh-card);overflow-y:auto;padding:var(--st-s-3)}
@@ -305,7 +319,8 @@ main{flex:1;min-height:0;display:flex}
 /* ---- 平板竖屏/大手机 (768-1000px): 紧凑布局 ---- */
 @media (min-width:768px) and (max-width:999px){
   .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .monitor-row{grid-template-columns:1fr}
+  .ctx-card{grid-template-columns:1fr}
+  .requests-grid{grid-template-columns:1fr}
   .cc-bars{grid-template-columns:1fr}
   .req-layout{flex-direction:column;overflow-y:auto;max-height:none}
   .req-list-pane{width:100%;min-width:0;min-height:180px;max-height:35vh}
@@ -335,7 +350,8 @@ main{flex:1;min-height:0;display:flex}
   /* Monitor: 2列指标 */
   .monitor{padding:var(--st-s-2) var(--st-s-3);max-width:100%}
   .metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--st-s-2)}
-  .monitor-row{grid-template-columns:1fr}
+  .ctx-card{grid-template-columns:1fr}
+  .requests-grid{grid-template-columns:1fr}
   .cc-bars{grid-template-columns:1fr}
   
   /* About: 单列 */

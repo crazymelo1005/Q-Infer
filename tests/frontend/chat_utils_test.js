@@ -155,6 +155,25 @@ if (typeof I18N === "undefined" || !I18N.zh || !I18N.en) {
   if (I18N.zh["chat.assistant"] !== "Q-Infer" || I18N.en["chat.assistant"] !== "Q-Infer") {
     report("assistant name is Q-Infer", { zh: I18N.zh["chat.assistant"], en: I18N.en["chat.assistant"] });
   } else console.log("ok   assistant label is Q-Infer in both languages");
+  // trp() fills a "{n}" slot, so a key that offers the slot in one language must
+  // offer it in the other too — a dictionary without the slot silently drops the
+  // number it is supposed to carry.
+  const slotMismatch = Object.keys(I18N.zh).filter(k =>
+    I18N.zh[k].includes("{n}") !== (I18N.en[k] || "").includes("{n}"));
+  if (slotMismatch.length) report("i18n {n} slot parity", { keys: slotMismatch });
+  else console.log("ok   every {n} placeholder is present in both languages");
+  // The placeholder helper itself: value lands where the dictionary says.
+  {
+    const at = src.indexOf("function trp(");
+    if (at < 0) throw new Error("missing trp source");
+    const end = src.indexOf("\n}", at);
+    const realTr = tr;
+    try {
+      tr = (k) => "«" + (I18N.en[k] || k) + "»";
+      eq("trp fills the slot", eval(src.slice(at, end + 2) + "\ntrp")(
+        "act.perReq", "571"), "«" + I18N.en["act.perReq"].replace("{n}", "571") + "»");
+    } finally { tr = realTr; }
+  }
 }
 
 // --- sampler presets + persistence -------------------------------------------
@@ -244,12 +263,40 @@ if (sp < 0 || spEnd < sp) {
   else console.log("ok   card stays blank with no data at all");
 }
 
+// --- QinferActivity: the requests page session totals -------------------------
+// /metrics reports totals as raw counters; the card turns them into labelled rows
+// and a reuse share. Nothing here may invent a number the server did not send.
+{
+  const a = src.indexOf("var QinferActivity = {");
+  if (a < 0) throw new Error("missing QinferActivity source");
+  const aEnd = src.indexOf("\n};", a);
+  const QA = eval(src.slice(a, aEnd + 3) + "\nQinferActivity;");
+  const totals = { requests: 7, prompt_tokens: 4000, completion_tokens: 900, reused: 2500, prompt_ms: 1500, decode_ms: 3000 };
+  const labels = QA.rows(totals).map((r) => r.labelKey);
+  eq("rows name every session total", labels,
+    ["act.requests", "act.prompt", "act.completion", "act.reused", "act.busy"]);
+  eq("busy sums prefill and decode into seconds", QA.rows(totals)[4].value, 4.5);
+  eq("reuse share comes from reused over prompt", QA.reuseShare(totals), 62.5);
+  eq("reuse share is null before the first prompt", QA.reuseShare({ reused: 0, prompt_tokens: 0 }), null);
+  eq("busy is null before the first request", QA.rows({})[4].value, null);
+  eq("rows survive missing totals", QA.rows(undefined).map((r) => r.value), [null, null, null, null, null]);
+  // Each row also carries the one secondary reading that gives the number meaning.
+  const rows = QA.rows(totals);
+  eq("prompt row carries the per-request average", rows[1].avg, 4000 / 7);
+  eq("completion row carries the per-request average", rows[2].avg, 900 / 7);
+  eq("reused row carries the share of prompt", rows[3].share, 62.5);
+  eq("busy row splits prefill from decode", rows[4].parts, [1.5, 3]);
+  eq("no requests means no averages", QA.rows({prompt_tokens: 10}).slice(1, 3).map((r) => r.avg), [null, null]);
+}
+
 // --- i18n three-way lint: used keys must exist, defined keys must be used ------
-// Scans every tr("...") in app.js and every data-i18n* attribute in index.html.
-// Keys built dynamically at runtime go on the whitelist with a justification.
+// Scans every tr("...")/trp("...") in app.js and every data-i18n* attribute in
+// index.html. Keys built dynamically at runtime go on the whitelist with a
+// justification.
 const html = fs.readFileSync(path.join(__dirname, "../../src/serve/web/index.html"), "utf8");
 const used = new Set();
-for (const m of src.matchAll(/tr\("([a-zA-Z0-9_.]+)"/g)) used.add(m[1]);
+for (const m of src.matchAll(/\btr\("([a-zA-Z0-9_.]+)"/g)) used.add(m[1]);
+for (const m of src.matchAll(/\btrp\("([a-zA-Z0-9_.]+)"/g)) used.add(m[1]);
 for (const m of html.matchAll(/data-i18n(?:-ph|-title|-aria)?="([a-zA-Z0-9_.]+)"/g)) used.add(m[1]);
 // trState maps runtime states to fixed keys; the map is literal so its values
 // count as used (STATE_TR is a plain object literal in app.js).

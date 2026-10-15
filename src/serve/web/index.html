@@ -32,6 +32,8 @@
       <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-chat"/></svg><span data-i18n="tab.chat">Chat</span></button>
     <button class="st-tab tab-btn" role="tab" data-tab="monitor" type="button" aria-selected="false">
       <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-activity"/></svg><span data-i18n="tab.monitor">Monitor</span></button>
+    <button class="st-tab tab-btn" role="tab" data-tab="requests" type="button" aria-selected="false">
+      <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-list"/></svg><span data-i18n="tab.requests">Requests</span></button>
     <button class="st-tab tab-btn" role="tab" data-tab="about" type="button" aria-selected="false">
       <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-info"/></svg><span data-i18n="tab.about">About</span></button>
   </nav>
@@ -246,9 +248,9 @@
       <!-- 4-column metric grid, filled by JS -->
       <div class="metrics" id="metrics"></div>
 
-      <!-- Monitor row: context gauge + recent requests -->
-      <div class="monitor-row">
-        <div class="st-card ctx-card">
+      <!-- Context fill: the gauge plus the memory and thermal bars behind it -->
+      <div class="st-card ctx-card">
+        <div class="ctx-card__gauge">
           <span class="card-title" data-i18n="mon.ctxFill">Context fill</span>
           <div class="ctx-gauge">
             <svg class="st-gauge" viewBox="0 0 120 120" aria-hidden="true">
@@ -268,15 +270,50 @@
               <span class="muted" id="ctx-sub">&ndash;</span>
             </div>
           </div>
-          <div class="bar-row"><span data-i18n="mon.vram">VRAM</span><span class="muted" id="vram-text">&ndash;</span></div>
-          <div class="st-progress st-progress--tick"><div class="st-progress__bar" id="vram-bar" style="width:0%"></div><div class="st-progress__ticks"><span style="left:25%"></span><span style="left:50%"></span><span style="left:75%"></span></div></div>
-          <div class="bar-row"><span data-i18n="mon.sysRam">System RAM</span><span class="muted" id="ram-text">&ndash;</span></div>
-          <div class="st-progress st-progress--tick"><div class="st-progress__bar" id="ram-bar" style="width:0%"></div><div class="st-progress__ticks"><span style="left:25%"></span><span style="left:50%"></span><span style="left:75%"></span></div></div>
-          <div class="bar-row"><span data-i18n="mon.gpuTemp">GPU temperature</span><span class="muted" id="temp-text">&ndash;</span></div>
-          <div class="st-progress st-progress--tick" data-tone="warn"><div class="st-progress__bar" id="temp-bar" style="width:0%"></div><div class="st-progress__ticks"><span style="left:25%"></span><span style="left:50%"></span><span style="left:75%"></span></div></div>
-          <div class="bar-row"><span data-i18n="hw.igpuFreq">iGPU freq</span><span class="muted" id="igpu-text">&ndash;</span></div>
-          <div class="st-progress st-progress--tick" data-tone="info"><div class="st-progress__bar" id="igpu-bar" style="width:0%"></div><div class="st-progress__ticks"><span style="left:25%"></span><span style="left:50%"></span><span style="left:75%"></span></div></div>
         </div>
+        <div class="ctx-card__bars">
+          <div class="ctx-bar"><div class="bar-row"><span data-i18n="mon.vram">VRAM</span><span class="muted" id="vram-text">&ndash;</span></div>
+            <div class="st-progress st-progress--tick"><div class="st-progress__bar" id="vram-bar" style="width:0%"></div><div class="st-progress__ticks"><span style="left:25%"></span><span style="left:50%"></span><span style="left:75%"></span></div></div></div>
+          <div class="ctx-bar"><div class="bar-row"><span data-i18n="mon.sysRam">System RAM</span><span class="muted" id="ram-text">&ndash;</span></div>
+            <div class="st-progress st-progress--tick"><div class="st-progress__bar" id="ram-bar" style="width:0%"></div><div class="st-progress__ticks"><span style="left:25%"></span><span style="left:50%"></span><span style="left:75%"></span></div></div></div>
+          <div class="ctx-bar"><div class="bar-row"><span data-i18n="mon.gpuTemp">GPU temperature</span><span class="muted" id="temp-text">&ndash;</span></div>
+            <div class="st-progress st-progress--tick" data-tone="warn"><div class="st-progress__bar" id="temp-bar" style="width:0%"></div><div class="st-progress__ticks"><span style="left:25%"></span><span style="left:50%"></span><span style="left:75%"></span></div></div></div>
+          <div class="ctx-bar"><div class="bar-row"><span data-i18n="hw.igpuFreq">iGPU freq</span><span class="muted" id="igpu-text">&ndash;</span></div>
+            <div class="st-progress st-progress--tick" data-tone="info"><div class="st-progress__bar" id="igpu-bar" style="width:0%"></div><div class="st-progress__ticks"><span style="left:25%"></span><span style="left:50%"></span><span style="left:75%"></span></div></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ Requests ============================ -->
+  <section class="view panel hidden" id="panel-requests" role="tabpanel">
+    <div class="monitor">
+      <!-- Session counters as a KPI strip: the five /metrics totals -->
+      <div class="st-card act-card">
+        <div class="req-head">
+          <span class="card-title" data-i18n="mon.session">This session</span>
+        </div>
+        <div class="act-grid" id="act-facts"></div>
+      </div>
+
+      <!-- The cache that earns the reuse, next to the requests it served -->
+      <div class="requests-grid">
+        <div class="st-card cc-card" id="cc-card">
+          <div class="req-head">
+            <span class="card-title" data-i18n="mon.convCache">Conversation cache</span>
+            <span class="muted small" id="cc-sum"></span>
+          </div>
+          <div class="cc-bars" id="cc-bars" hidden>
+            <div><div class="bar-row"><span data-i18n="cc.cachedConv">Cached conversations</span><span class="muted" id="cc-slots-text">&ndash;</span></div>
+              <div class="st-progress"><div class="st-progress__bar" id="cc-slots-bar" style="width:0%"></div></div></div>
+            <div><div class="bar-row"><span data-i18n="cc.reusedPrompt">Reused prompt tokens</span><span class="muted" id="cc-mem-text">&ndash;</span></div>
+              <div class="st-progress"><div class="st-progress__bar" id="cc-mem-bar" style="width:0%"></div></div></div>
+          </div>
+          <dl class="facts" id="cc-facts"></dl>
+          <p class="muted small cc-note" id="cc-note"></p>
+        </div>
+
+        <!-- The last dozen requests, straight from /metrics -->
         <div class="st-card req-card">
           <div class="req-head">
             <span class="card-title" data-i18n="mon.recentReq">Recent requests</span>
@@ -291,37 +328,26 @@
         </div>
       </div>
 
-      <!-- Conversation cache card -->
-      <div class="st-card cc-card" id="cc-card">
+      <!-- Request inspector: the kept ring (100) with a full detail pane -->
+      <div class="st-card req-pane-card">
         <div class="req-head">
-          <span class="card-title" data-i18n="mon.convCache">Conversation cache</span>
-          <span class="muted small" id="cc-sum"></span>
+          <span class="card-title" data-i18n="mon.reqHistory">Request log</span>
         </div>
-        <div class="cc-bars" id="cc-bars" hidden>
-          <div><div class="bar-row"><span data-i18n="cc.cachedConv">Cached conversations</span><span class="muted" id="cc-slots-text">&ndash;</span></div>
-            <div class="st-progress"><div class="st-progress__bar" id="cc-slots-bar" style="width:0%"></div></div></div>
-          <div><div class="bar-row"><span data-i18n="cc.reusedPrompt">Reused prompt tokens</span><span class="muted" id="cc-mem-text">&ndash;</span></div>
-            <div class="st-progress"><div class="st-progress__bar" id="cc-mem-bar" style="width:0%"></div></div></div>
-        </div>
-        <dl class="facts" id="cc-facts"></dl>
-        <p class="muted small cc-note" id="cc-note"></p>
-      </div>
-
-      <!-- Legacy request inspector (search + detail pane) -->
-      <div class="req-layout">
-        <div class="req-list-pane">
-          <div class="req-toolbar">
-            <input id="req-search" class="input" type="search" data-i18n-ph="mon.searchPh" placeholder="Search path / model / state">
-            <select id="req-filter" class="input" data-i18n-title="mon.filterTitle">
-              <option value="" data-i18n="mon.all">All states</option>
-              <option value="queued" data-i18n="filter.queued">queued</option>
-              <option value="completed" data-i18n="filter.completed">completed</option>
-              <option value="error" data-i18n="filter.error">error</option>
-            </select>
+        <div class="req-layout">
+          <div class="req-list-pane">
+            <div class="req-toolbar">
+              <input id="req-search" class="input" type="search" data-i18n-ph="mon.searchPh" placeholder="Search path / model / state">
+              <select id="req-filter" class="input" data-i18n-title="mon.filterTitle">
+                <option value="" data-i18n="mon.all">All states</option>
+                <option value="queued" data-i18n="filter.queued">queued</option>
+                <option value="completed" data-i18n="filter.completed">completed</option>
+                <option value="error" data-i18n="filter.error">error</option>
+              </select>
+            </div>
+            <div id="req-list" class="req-list"><div class="note" data-i18n="mon.noReq">No requests yet</div></div>
           </div>
-          <div id="req-list" class="req-list"><div class="note" data-i18n="mon.noReq">No requests yet</div></div>
+          <div id="req-detail" class="req-detail-pane"><div class="note" data-i18n="mon.pickHint">Pick a request on the left to inspect it</div></div>
         </div>
-        <div id="req-detail" class="req-detail-pane"><div class="note" data-i18n="mon.pickHint">Pick a request on the left to inspect it</div></div>
       </div>
     </div>
   </section>

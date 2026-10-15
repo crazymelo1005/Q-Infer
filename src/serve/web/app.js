@@ -421,6 +421,7 @@ const I18N = {
 
     "tab.chat": "对话",
     "tab.monitor": "监控",
+    "tab.requests": "请求",
     "tab.about": "关于",
     "nav.views": "视图",
     "chat.exportTitleLong": "导出为 Markdown",
@@ -437,6 +438,17 @@ const I18N = {
     "mon.gpuTemp": "GPU 温度",
     "mon.recentReq": "最近请求",
     "mon.convCache": "对话缓存",
+    "mon.session": "本次会话",
+    "mon.reqHistory": "请求记录",
+    "act.requests": "请求数",
+    "act.prompt": "输入 token",
+    "act.completion": "输出 token",
+    "act.reused": "复用 token",
+    "act.busy": "计算耗时",
+    "act.perReq": "平均每次 {n}",
+    "act.ofPrompt": "占输入 {n}",
+    "act.prefill": "预填充",
+    "act.decode": "解码",
     "req.thTime": "时间",
     "req.thStatus": "状态",
     "req.thPrompt": "提示词",
@@ -700,6 +712,7 @@ const I18N = {
 
     "tab.chat": "Chat",
     "tab.monitor": "Monitor",
+    "tab.requests": "Requests",
     "tab.about": "About",
     "nav.views": "Views",
     "chat.exportTitleLong": "Export chat as Markdown",
@@ -716,6 +729,17 @@ const I18N = {
     "mon.gpuTemp": "GPU temperature",
     "mon.recentReq": "Recent requests",
     "mon.convCache": "Conversation cache",
+    "mon.session": "This session",
+    "mon.reqHistory": "Request log",
+    "act.requests": "Requests",
+    "act.prompt": "Prompt tokens",
+    "act.completion": "Completion tokens",
+    "act.reused": "Reused tokens",
+    "act.busy": "Compute time",
+    "act.perReq": "{n} per request",
+    "act.ofPrompt": "{n} of prompt",
+    "act.prefill": "prefill",
+    "act.decode": "decode",
     "req.thTime": "Time",
     "req.thStatus": "Status",
     "req.thPrompt": "Prompt",
@@ -855,6 +879,12 @@ function uiLang() {
 function tr(key) {
   const lang = uiLang();
   return (I18N[lang] && I18N[lang][key]) || (I18N.en[key] || key);
+}
+
+// tr() with one value slot: dictionaries carry "{n}" so each language can put
+// the number where its word order wants it.
+function trp(key, value) {
+  return tr(key).replace("{n}", value);
 }
 
 // Translate raw server state strings into the current UI language
@@ -3346,6 +3376,32 @@ var QinferSpeed = {
   },
 };
 
+// Session totals for the Requests page. /metrics carries raw counters only, so
+// every value shown here is either passed through or a ratio the card itself
+// computes (per-request average, reuse percentage, prefill+decode wall time).
+// Absent data stays null and renders as an em dash rather than a zero.
+var QinferActivity = {
+  reuseShare: function (t) {
+    var x = t || {};
+    return x.prompt_tokens ? (100 * (x.reused || 0)) / x.prompt_tokens : null;
+  },
+  rows: function (t) {
+    var x = t || {};
+    var num = function (v) { return v == null ? null : v; };
+    var reqs = x.requests || 0;
+    var perReq = function (v) { return reqs && v != null ? v / reqs : null; };
+    var busy = (x.prompt_ms || 0) + (x.decode_ms || 0);
+    return [
+      {labelKey: "act.requests", value: num(x.requests), kind: "count"},
+      {labelKey: "act.prompt", value: num(x.prompt_tokens), kind: "tokens", avg: perReq(x.prompt_tokens)},
+      {labelKey: "act.completion", value: num(x.completion_tokens), kind: "tokens", avg: perReq(x.completion_tokens)},
+      {labelKey: "act.reused", value: num(x.reused), kind: "tokens", share: this.reuseShare(x)},
+      {labelKey: "act.busy", value: busy ? busy / 1000 : null, kind: "seconds",
+       parts: busy ? [(x.prompt_ms || 0) / 1000, (x.decode_ms || 0) / 1000] : null},
+    ];
+  },
+};
+
 // Metric card definitions for the 4-column grid. `series` is the key of the
 // server-side 60-sample history block in /metrics; speed is the exception — it
 // plots per-request rates (QinferSpeed.series), not a 1 Hz sample.
@@ -3572,7 +3628,6 @@ async function refreshRequests() {
 function renderMonitorTab(m) {
   var live = m.live || {}, hw = m.hardware || {}, st = m.hardware_static || {}, eng = m.engine || {};
   var h = m.history || {};
-  var requests = m.requests || [];
 
   // State card badges
   var on = live.queued > 0 ? "queued" : live.state;
@@ -3681,6 +3736,14 @@ function renderMonitorTab(m) {
       igpuText.textContent = "\u2013";
     }
   }
+}
+
+// ---- Requests page: what this session spent and what the cache saved --------
+// Fed from the same /metrics poll as the Monitor tab: both panels live in one
+// document, so the requests page is warm the moment it is opened.
+function renderRequestsTab(m) {
+  var requests = m.requests || [];
+  renderActivity(m.totals);
 
   // Recent requests table (last 10)
   var body = $("req-body");
@@ -3703,8 +3766,32 @@ function renderMonitorTab(m) {
     }
   }
 
-  // Conversation cache
   renderConvCache(m.conversation_cache, m.totals);
+}
+
+// Session totals card: five tiles, each with the one secondary reading that
+// gives the raw counter meaning (per-request average, reuse share of the prompt,
+// prefill vs decode split). Everything comes from /metrics totals.
+function renderActivity(totals) {
+  var el = $("act-facts");
+  if (!el) return;
+  el.innerHTML = QinferActivity.rows(totals || {}).map(function (r) {
+    var value = "\u2013";
+    if (r.value != null) {
+      if (r.kind === "count") value = fmtNum(r.value);
+      else if (r.kind === "seconds") value = fmtNum(r.value, 1) + '<small>' + esc(tr("unit.seconds")) + '</small>';
+      else value = fmtNum(r.value) + '<small>' + esc(tr("unit.tokens")) + '</small>';
+    }
+    var sub = "";
+    if (r.avg != null) sub = trp("act.perReq", fmtNum(r.avg));
+    if (r.share != null) sub = trp("act.ofPrompt", fmtNum(r.share, 1) + "%");
+    if (r.parts) sub = tr("act.prefill") + " " + fmtNum(r.parts[0], 1) + tr("unit.seconds") +
+      " \u00b7 " + tr("act.decode") + " " + fmtNum(r.parts[1], 1) + tr("unit.seconds");
+    return '<div class="act-tile">' +
+      '<span class="st-metric__label">' + esc(tr(r.labelKey)) + '</span>' +
+      '<span class="st-metric__value act-tile__value">' + value + '</span>' +
+      '<span class="st-metric__sub">' + esc(sub) + '</span></div>';
+  }).join("");
 }
 
 function fmtNum(n, d) {
@@ -3728,13 +3815,14 @@ function renderConvCache(c, totals) {
     if (slotsText) slotsText.textContent = fmtNum(c.entries) + " / " + fmtNum(c.capacity);
     var slotsBar = $("cc-slots-bar");
     if (slotsBar) slotsBar.style.width = (c.capacity ? Math.min(100, (100 * (c.entries || 0)) / c.capacity) : 0) + "%";
+    var share = QinferActivity.reuseShare(t);
     var memText = $("cc-mem-text");
     if (memText) {
-      var share = t.prompt_tokens ? " (" + fmtNum((100 * (t.reused || 0)) / t.prompt_tokens) + "%)" : "";
-      memText.textContent = fmtNum(t.reused) + " / " + fmtNum(t.prompt_tokens) + " " + tr("unit.tokens") + share;
+      memText.textContent = fmtNum(t.reused) + " / " + fmtNum(t.prompt_tokens) + " " + tr("unit.tokens") +
+        (share != null ? " (" + fmtNum(share) + "%)" : "");
     }
     var memBar = $("cc-mem-bar");
-    if (memBar) memBar.style.width = (t.prompt_tokens ? Math.min(100, (100 * (t.reused || 0)) / t.prompt_tokens) : 0) + "%";
+    if (memBar) memBar.style.width = (share == null ? 0 : Math.min(100, share)) + "%";
   }
   var attempts = (c.hits || 0) + (c.misses || 0);
   var sum = $("cc-sum");
@@ -3764,6 +3852,7 @@ async function refreshMonitor() {
     var d = await res.json();
     window.lastMetrics = d;
     renderMonitorTab(d);
+    renderRequestsTab(d);
     setStatusDot(true);
     // Update the header pill from metrics
     var live = d.live || {};

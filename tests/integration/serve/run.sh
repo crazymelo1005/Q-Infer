@@ -321,11 +321,11 @@ curl -s -H "$H" "http://$HOST:$PORT/api/requests?id=deadbeef0000" > "$R"
 [ "$(jget "$R" "d['error']['message']")" ] \
   && ok "/api/requests?id= 404 error body" || bad "/api/requests missing-id error body: $(head -c 300 "$R")"
 
-# 15. Static pages: / is a three-tab shell containing the Chat panel, tokens.css carries theme tokens and the
+# 15. Static pages: / is a four-tab shell containing the Chat panel, tokens.css carries theme tokens and the
 #     dark theme, app.js carries the Chat logic.
 curl -s "http://$HOST:$PORT/" > "$R"
 grep -q 'id="panel-chat"' "$R" && grep -q '/web/tokens.css' "$R" && grep -q '/web/app.js' "$R" \
-  && ok "/ three-tab shell (panel-chat/tokens.css/app.js)" || bad "/ static shell: $(head -c 200 "$R")"
+  && ok "/ four-tab shell (panel-chat/tokens.css/app.js)" || bad "/ static shell: $(head -c 200 "$R")"
 curl -s "http://$HOST:$PORT/web/tokens.css" > "$R"
 grep -q -- '--bg' "$R" && grep -q 'data-theme="dark"' "$R" \
   && ok "/web/tokens.css (theme tokens + dark theme)" || bad "/web/tokens.css: $(head -c 200 "$R")"
@@ -333,14 +333,18 @@ curl -s "http://$HOST:$PORT/web/app.js" > "$R"
 grep -q 'pollMetrics' "$R" && grep -q 'panel-chat' "$R" \
   && ok "/web/app.js (Chat logic)" || bad "/web/app.js: $(head -c 200 "$R")"
 
-# 16. Frontend part two: index carries the Monitor/About skeleton, app.js exposes QinferRequests and sparkline.
+# 16. Frontend part two: index carries the Monitor/Requests/About skeleton, app.js exposes QinferRequests and sparkline.
 #     (The standalone /api-monitor page was removed 2026-10-15: the Monitor tab covers it.)
 curl -s "http://$HOST:$PORT/" > "$R"
 grep -q 'id="state-badges"' "$R" && grep -q 'id="req-detail"' "$R" && grep -q 'id="about-engine"' "$R" \
   && ok "/ Monitor/About skeleton (state-badges/req-detail/about-engine)" || bad "/ skeleton: $(head -c 200 "$R")"
+grep -q 'id="panel-requests"' "$R" && grep -q 'data-tab="requests"' "$R" && grep -q 'id="act-facts"' "$R" \
+  && ok "/ Requests tab skeleton (panel-requests/tab/act-facts)" || bad "/ requests skeleton: $(head -c 200 "$R")"
 curl -s "http://$HOST:$PORT/web/app.js" > "$R"
 grep -q 'QinferRequests' "$R" && grep -q 'initMonitor' "$R" && grep -q 'sparkline' "$R" \
   && ok "/web/app.js (Monitor/About/sparkline)" || bad "/web/app.js: $(head -c 200 "$R")"
+grep -q 'renderRequestsTab' "$R" && grep -q 'QinferActivity' "$R" \
+  && ok "/web/app.js (Requests tab render)" || bad "/web/app.js: missing requests render"
 
 # 16a. chat encoding-failure bookkeeping: Chinese content necessarily triggers out-of-vocabulary tokenization
 #      failure → 500, and the newest ring record is state=error, path=/v1/chat/completions (verifies the
