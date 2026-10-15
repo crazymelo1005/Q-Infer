@@ -253,6 +253,10 @@ const I18N = {
     "conv.closeSidebar": "收起侧栏",
     "conv.searchPh": "搜索对话",
     "conv.noMatch": "无匹配对话",
+    "conv.timeNow": "刚刚",
+    "conv.timeMin": "{n} 分钟前",
+    "conv.timeHour": "{n} 小时前",
+    "conv.timeDay": "{n} 天前",
     "chat.error": "错误",
     "chat.generating": "生成中…",
     "chat.prefilling": "正在处理提示词…",
@@ -516,6 +520,10 @@ const I18N = {
     "conv.closeSidebar": "Close sidebar",
     "conv.searchPh": "Search conversations",
     "conv.noMatch": "No matching conversations",
+    "conv.timeNow": "just now",
+    "conv.timeMin": "{n} min ago",
+    "conv.timeHour": "{n} h ago",
+    "conv.timeDay": "{n} d ago",
     "chat.error": "Error",
     "chat.generating": "Generating…",
     "chat.prefilling": "Processing prompt…",
@@ -1196,6 +1204,17 @@ function samplerApply(s) {
   if (!s) return;
   Object.keys(s).forEach(function (id) { if ($(id)) $(id).value = s[id]; });
   syncThinkBtn();
+}
+
+// A short relative time for the conversation list (i18n'd).
+function relTime(ts) {
+  if (!ts) return "";
+  var m = Math.floor((Date.now() - ts) / 60000);
+  if (m < 1) return tr("conv.timeNow");
+  if (m < 60) return tr("conv.timeMin").replace("{n}", m);
+  var h = Math.floor(m / 60);
+  if (h < 24) return tr("conv.timeHour").replace("{n}", h);
+  return tr("conv.timeDay").replace("{n}", Math.floor(h / 24));
 }
 
 /* ---- Chat ---- */
@@ -2489,8 +2508,8 @@ function initChat() {
       if (!list) return;
       var shown = 0;
       list.querySelectorAll(".conv-item").forEach(function (it) {
-        var titleEl = it.querySelector(".conv-item__title");
-        var t = (titleEl ? titleEl.textContent : "").toLowerCase();
+        var nameEl = it.querySelector(".conv-item__name");
+        var t = (nameEl ? nameEl.textContent : "").toLowerCase();
         var hit = !q || t.indexOf(q) >= 0;
         it.classList.toggle("hidden", !hit);
         if (hit) shown++;
@@ -2816,7 +2835,8 @@ var QinferConv = {
       var item = document.createElement("div");
       item.className = "conv-item" + (conv.id === QinferConv.currentId ? " active" : "");
       item.dataset.id = conv.id;
-      item.innerHTML = '<span class="conv-item__title">' + esc(conv.title) + '</span>' +
+      item.innerHTML = '<span class="conv-item__title"><span class="conv-item__name">' + esc(conv.title) +
+        '</span><span class="conv-item__time">' + relTime(conv.updated) + '</span></span>' +
         '<span class="conv-item__actions">' +
         '<button class="conv-item__btn" data-action="rename" title="' + esc(tr("conv.rename")) + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-edit"/></svg></button>' +
         '<button class="conv-item__btn" data-action="delete" title="' + esc(tr("conv.delete")) + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-trash"/></svg></button>' +
