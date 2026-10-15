@@ -166,6 +166,21 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     if (a.count("--mmproj")) c.mmproj_path = a["--mmproj"];
     if (a.count("--vision-binary")) c.vision_binary = a["--vision-binary"];
     if (a.count("--media-root")) c.media_root = a["--media-root"];
+    // --igpu off|dense|pool: the vendored engine reads its iGPU switches from the
+    // environment, and the engine child inherits ours. Default off: measured on the
+    // sc117 IQ2_XS pairing (2xRTX 5060 Ti), 'dense' cost 22% of prefill throughput
+    // (546 vs 703 tok/s on a 3.3K prompt) because the dense tensors are small next to
+    // the expert work, and 'pool' is not yet usable (0.36 tok/s). Kept as an explicit
+    // opt-in so the accelerator can be re-evaluated without a rebuild.
+    if (a.count("--igpu")) {
+        const std::string v = a["--igpu"];
+        if (v != "off" && v != "dense" && v != "pool") {
+            err = "--igpu needs off, dense, or pool, got \"" + v + "\"";
+            return {};
+        }
+        ::setenv("STRATA_IGPU_DENSE", v == "dense" ? "1" : "0", 1);
+        ::setenv("STRATA_IGPU_POOL", v == "pool" ? "1" : "0", 1);
+    }
     c.engine_args = std::move(engine_args);
     // For the Strata backend, parse --gpu from engine_args so telemetry can monitor only the GPUs
     // the engine actually uses (matching Strata's own monitoring convention). Without this, telemetry

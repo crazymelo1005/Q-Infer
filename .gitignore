@@ -37,3 +37,6 @@ cache/
 # ---- local scratch (benchmarks, throwaway patches) ----
 /bench_*
 /.tmp-*/
+
+# CTest scratch (generated in the source root when ctest runs from there)
+Testing/
