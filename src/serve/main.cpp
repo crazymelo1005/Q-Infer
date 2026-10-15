@@ -185,6 +185,10 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     // sc117 IQ2_XS pairing at +16% cold prefill (820 -> 952 tok/s on a 3.3K prompt,
     // and 810 -> 891 on another). On by default; set STRATA_PF_FUSED=0 to opt out.
     if (::getenv("STRATA_PF_FUSED") == nullptr) ::setenv("STRATA_PF_FUSED", "1", 1);
+    // Hand the CPU expert pool a share of the prefill (engine 'auto': it only applies
+    // to chunks under its own ~3K cap). Measured +7..13% on top of the fused path
+    // (891 -> 1003 tok/s at 3.3K). On by default; STRATA_PREFILL_CPU_SHARE=0 opts out.
+    if (::getenv("STRATA_PREFILL_CPU_SHARE") == nullptr) ::setenv("STRATA_PREFILL_CPU_SHARE", "auto", 1);
     c.engine_args = std::move(engine_args);
     // For the Strata backend, parse --gpu from engine_args so telemetry can monitor only the GPUs
     // the engine actually uses (matching Strata's own monitoring convention). Without this, telemetry
