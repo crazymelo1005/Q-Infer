@@ -143,7 +143,7 @@ var QinferMD = {
     text = text.replace(/\x00CODEBLOCK(\d+)\x00/g, function(match, idx) {
       var cb = codeBlocks[parseInt(idx)];
       var langClass = cb.lang ? ' class="language-' + cb.lang + '"' : '';
-      return '<pre class="md-code-block"><code' + langClass + '>' + cb.code + '</code><button class="md-copy-btn" data-code="' + encodeURIComponent(cb.code) + '">Copy</button></pre>';
+      return '<pre class="md-code-block"><code' + langClass + '>' + cb.code + '</code><button class="md-copy-btn" aria-label="' + tr("chat.codeCopy") + '" data-code="' + encodeURIComponent(cb.code) + '">' + tr("chat.codeCopy") + '</button></pre>';
     });
     
     return text;
@@ -185,6 +185,14 @@ const I18N = {
     "chat.stop": "停止",
     "chat.you": "你",
     "chat.assistant": "Q-Infer",
+    "chat.copy": "复制",
+    "chat.regenerate": "重新生成",
+    "chat.good": "赞",
+    "chat.bad": "踩",
+    "chat.codeCopy": "复制",
+    "chat.codeCopied": "已复制",
+    "chat.scrollBottom": "回到底部",
+    "conv.closeSidebar": "收起侧栏",
     "chat.error": "错误",
     "chat.generating": "生成中…",
     "chat.prefilling": "正在处理提示词…",
@@ -431,6 +439,14 @@ const I18N = {
     "chat.stop": "Stop",
     "chat.you": "You",
     "chat.assistant": "Q-Infer",
+    "chat.copy": "Copy",
+    "chat.regenerate": "Regenerate",
+    "chat.good": "Good",
+    "chat.bad": "Bad",
+    "chat.codeCopy": "Copy",
+    "chat.codeCopied": "Copied!",
+    "chat.scrollBottom": "Scroll to bottom",
+    "conv.closeSidebar": "Close sidebar",
     "chat.error": "Error",
     "chat.generating": "Generating…",
     "chat.prefilling": "Processing prompt…",
@@ -1177,10 +1193,10 @@ function addMsg(role, text, attachList) {
   if (role === "assistant") {
     var actions = document.createElement("div");
     actions.className = "bubble-actions";
-    actions.innerHTML = '<button class="bubble-action" data-action="copy" title="Copy"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-copy"/></svg></button>' +
-      '<button class="bubble-action" data-action="regenerate" title="Regenerate"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-refresh"/></svg></button>' +
-      '<button class="bubble-action" data-action="thumbup" title="Good"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-check"/></svg></button>' +
-      '<button class="bubble-action" data-action="thumbdown" title="Bad"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-error"/></svg></button>';
+    actions.innerHTML = '<button class="bubble-action" data-action="copy" title="' + tr("chat.copy") + '" aria-label="' + tr("chat.copy") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-copy"/></svg></button>' +
+      '<button class="bubble-action" data-action="regenerate" title="' + tr("chat.regenerate") + '" aria-label="' + tr("chat.regenerate") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-refresh"/></svg></button>' +
+      '<button class="bubble-action" data-action="thumbup" title="' + tr("chat.good") + '" aria-label="' + tr("chat.good") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-check"/></svg></button>' +
+      '<button class="bubble-action" data-action="thumbdown" title="' + tr("chat.bad") + '" aria-label="' + tr("chat.bad") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-error"/></svg></button>';
     el.appendChild(actions);
   }
   $("msg-list").appendChild(el);
@@ -1481,8 +1497,8 @@ function renderMsgMarkdown(bodyEl) {
     btn.addEventListener("click", function() {
       var code = decodeURIComponent(btn.dataset.code);
       navigator.clipboard.writeText(code).then(function() {
-        btn.textContent = "Copied!";
-        setTimeout(function() { btn.textContent = "Copy"; }, 1500);
+        btn.textContent = tr("chat.codeCopied");
+        setTimeout(function() { btn.textContent = tr("chat.codeCopy"); }, 1500);
       });
     });
   });
