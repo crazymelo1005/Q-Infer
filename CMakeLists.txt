@@ -651,3 +651,14 @@ if(QINFER_ENABLE_CUDA)
   target_link_libraries(test_expert_ffn_cuda PRIVATE qinfer_experts_cuda qinfer_dense qinfer_artifact)
   add_test(NAME expert_ffn_cuda COMMAND test_expert_ffn_cuda)
 endif()
+
+# Frontend helper tests (plain JavaScript, no build step). They slice the router
+# and chat helpers out of src/serve/web/app.js and exercise them in Node, so they
+# join the suite whenever node is available.
+find_program(QINFER_NODE_EXECUTABLE node)
+if(QINFER_NODE_EXECUTABLE)
+  add_test(NAME frontend_think_router
+           COMMAND ${QINFER_NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frontend/think_router_test.js)
+  add_test(NAME frontend_chat_utils
+           COMMAND ${QINFER_NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frontend/chat_utils_test.js)
+endif()
