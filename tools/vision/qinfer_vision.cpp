@@ -185,6 +185,15 @@ int main(int argc, char** argv) {
                      std::chrono::duration<double>(std::chrono::steady_clock::now() - warm_t0).count());
         mtmd_input_chunks_free(chunks);
         if (bm) mtmd_bitmap_free(bm);
+        // A warm-up that produced no image tokens means the encode failed: on the Vulkan arm a
+        // lost device lands here (vk::Queue::submit: ErrorDeviceLost) and every later picture
+        // would fail the same way.  Fail the handshake instead of printing READY, so the server
+        // falls back to the CPU encoder it can actually use.
+        if (warm_tokens <= 0) {
+            std::printf("ERR the GPU warm-up produced no image tokens (lost Vulkan device?); run without --gpu for the CPU encoder\n");
+            std::fflush(stdout);
+            return 1;
+        }
     }
     std::printf("READY %d\n", n_embd);
     std::fflush(stdout);

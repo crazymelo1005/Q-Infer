@@ -71,6 +71,29 @@ CPP_RULES = [
     ('"strata-vision: model files loaded in %.1f s\\n"', '"qinfer-vision: model files loaded in %.1f s\\n"', 1),
     ('"strata-vision: on the CPU, %d threads, no warm-up\\n"', '"qinfer-vision: on the CPU, %d threads, no warm-up\\n"', 1),
     ('"strata-vision: warmed up at %d image tokens in %.1f s\\n"', '"qinfer-vision: warmed up at %d image tokens in %.1f s\\n"', 1),
+    # Deviation (2026-10-15): a GPU warm-up that produced no image tokens means the encode failed
+    # (a lost Vulkan device lands here as vk::Queue::submit: ErrorDeviceLost).  Upstream still prints
+    # READY, so every later picture fails the same way with no signal at startup.  Fail the handshake
+    # instead, which lets the server fall back to the CPU encoder it can actually use.
+    (
+        "        mtmd_input_chunks_free(chunks);\n"
+        "        if (bm) mtmd_bitmap_free(bm);\n"
+        "    }\n",
+        "        mtmd_input_chunks_free(chunks);\n"
+        "        if (bm) mtmd_bitmap_free(bm);\n"
+        "        // A warm-up that produced no image tokens means the encode failed: on the Vulkan arm a\n"
+        "        // lost device lands here (vk::Queue::submit: ErrorDeviceLost) and every later picture\n"
+        "        // would fail the same way.  Fail the handshake instead of printing READY, so the server\n"
+        "        // falls back to the CPU encoder it can actually use.\n"
+        "        if (warm_tokens <= 0) {\n"
+        "            std::printf(\"ERR the GPU warm-up produced no image tokens (lost Vulkan device?); "
+        "run without --gpu for the CPU encoder\\n\");\n"
+        "            std::fflush(stdout);\n"
+        "            return 1;\n"
+        "        }\n"
+        "    }\n",
+        1,
+    ),
 ]
 
 CMAKE_HEADER_OLD = """# tools/vision - strata-vision, the image encoder for Strata's multimodal path (optional; setup.py builds it when
@@ -128,6 +151,21 @@ CMAKE_RULES = [
         "target_link_libraries(qinfer-vision PRIVATE mtmd llama)\n"
         "target_compile_features(qinfer-vision PRIVATE cxx_std_17)\n"
         "set_target_properties(qinfer-vision PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)\n",
+        1,
+    ),
+    # Deviation: the iGPU (ggml-vulkan) build option for the encoder.  Added with the vision iGPU arm
+    # (ADR-013 appendix, 2026-10-15) but never registered here, which left this guard failing on cmake;
+    # registered now so `--emit` reproduces the file instead of dropping the option.
+    (
+        'set(GGML_CUDA ${STRATA_VISION_CUDA} CACHE BOOL "" FORCE)\n',
+        'set(GGML_CUDA ${STRATA_VISION_CUDA} CACHE BOOL "" FORCE)\n'
+        "# STRATA_VISION_VULKAN: run the encoder on the Intel iGPU through ggml-vulkan. The point of this\n"
+        "# arm is that the iGPU is UMA -- it holds the encoder's weights in system memory and costs the\n"
+        "# engine ZERO VRAM, which is exactly why STRATA_VISION_CUDA stays OFF (0.4-0.7 GB, upstream). The\n"
+        "# encoder is dense, batched and BF16, so it does not hit the \"no integer dot product\" wall that\n"
+        "# made the iGPU lose on the engine's quantized experts (ADR-019/020). Default OFF: measure first.\n"
+        'option(STRATA_VISION_VULKAN "run the vision encoder on the iGPU (builds ggml-vulkan)" OFF)\n'
+        'set(GGML_VULKAN ${STRATA_VISION_VULKAN} CACHE BOOL "" FORCE)\n',
         1,
     ),
 ]

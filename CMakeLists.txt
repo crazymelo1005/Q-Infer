@@ -667,3 +667,20 @@ if(QINFER_NODE_EXECUTABLE)
   add_test(NAME frontend_chat_utils
            COMMAND ${QINFER_NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/frontend/chat_utils_test.js)
 endif()
+
+# Python gates: the docs linter and the vision port guard. Both must run with the
+# repository root as the working directory.
+#
+# The port guard had no automated home until now, and it drifted: the encoder's
+# cmake gained the STRATA_VISION_VULKAN option without a declared divergence rule,
+# so measure/vision_port_check.py had been failing unnoticed (found 2026-10-15
+# while fixing the warm-up handshake). Registered here so it cannot drift again.
+find_program(QINFER_PYTHON3_EXECUTABLE NAMES python3)
+if(QINFER_PYTHON3_EXECUTABLE)
+  add_test(NAME docs_checks
+           COMMAND ${QINFER_PYTHON3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/docs_checks.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME vision_port_check
+           COMMAND ${QINFER_PYTHON3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/measure/vision_port_check.py
+           WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endif()

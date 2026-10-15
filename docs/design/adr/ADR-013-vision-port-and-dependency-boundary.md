@@ -59,3 +59,21 @@ iGPU）上编码。实测（2×RTX 5060 Ti + ARL iGPU，sc117 mmproj 907 MB）�
 自身均不可自重复，agreement 0.05-0.39），即编码器差异低于文本管线自身噪声底。据此
 `--vision-gpu` 默认翻 on；iGPU 二进制缺失/起不来时自动回退 CPU 档（显式 `--vision-binary`
 不回退）。
+
+## 附录 2：预热校验（2026-10-15 修正）
+
+上游的预热在编码失败时仍打印 `READY`：`--gpu` 档遇到 `vk::Queue::submit: ErrorDeviceLost`
+（iGPU 设备丢失）时 `warm_tokens` 为 0，进程照常握手成功，之后每张图都以同样的方式失败——
+启动时没有任何信号。实测（本机 2026-10-15）：默认配置起服务，预热日志出现
+`device lost on Vulkan0`，图片请求返回 500 `vision encoding failed`。
+
+修正：iGPU 档预热产出 0 image token 即打印 `ERR` 并退出 1（已登记为
+`measure/vision_port_check.py` 的第 6 条 cpp 偏离规则），于是服务端既有的启动回退生效——
+非显式 `--vision-binary` 时自动改用 CPU 编码器，图片可用（代价：编码 ~1375 ms vs 192 ms）。
+
+同时修复：该守卫此前**未接入任何门禁**，而编码器 cmake 的 `STRATA_VISION_VULKAN` 选项从未
+登记为偏离规则，守卫实际长期失败而无人察觉。现在 `measure/vision_port_check.py` 与
+`scripts/docs_checks.py` 都注册进 ctest（`vision_port_check` / `docs_checks`，全套 101 项）。
+
+设备丢失本身与本项目无关（驱动/设备状态，非确定性——同一天稍后同一命令预热成功，4096
+image token / 48.6 s）；本修正只保证"坏设备不再静默毁掉图片功能"。
