@@ -143,8 +143,18 @@ void project_bf16(const float* x, const uint16_t* x_bf16, const uint16_t* weight
 bool gemv_quantized(const WeightRef& w, const Planes& p, const strata::kernels::SForm& f, const uint8_t* x80, const uint8_t* xq8k,                    float* y, int64_t n_in, int64_t n_out, const std::string& name, void* stream,                    std::string& err, const float* x_f32 = nullptr, bool x_q8_1_ready = false) {
     using namespace strata::kernels;
 
-    // iGPU dense projection path: when igpu_data is set, route to iGPU instead of CUDA GPU
-    if (w.igpu_data != nullptr && x_f32 != nullptr) {
+    // iGPU dense projection path: when igpu_data is set, route to iGPU instead of CUDA GPU.
+    // A size gate: the iGPU route costs a heap alloc + a scalar activation quantize + three
+    // PCIe uploads + a blocking Vulkan dispatch + a full-output PCIe download PER CALL, which
+    // only amortizes on large projections. Measured on the sc117 IQ2_XS pairing, prefill fell
+    // 703 -> 546 tok/s with the gate off; gating the small ones back to the GPU recovers it to
+    // 598 (still short of 703, so a batched GEMM is the real fix). Tune with STRATA_IGPU_MIN_FLOPS.
+    static const long long kIgpuMinFlops = [] {
+        const char* e = std::getenv("STRATA_IGPU_MIN_FLOPS");
+        return e != nullptr ? std::atoll(e) : 4000000LL;
+    }();
+    if (w.igpu_data != nullptr && x_f32 != nullptr &&
+        static_cast<long long>(n_in) * static_cast<long long>(n_out) >= kIgpuMinFlops) {
         auto* proj = igpu::igpu_dense_projector();
         if (proj != nullptr && proj->available()) {
             // Use Strata's Q8_1 quantization (proper fp16 conversion)
