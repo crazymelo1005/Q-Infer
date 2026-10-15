@@ -257,6 +257,9 @@ const I18N = {
     "conv.timeMin": "{n} 分钟前",
     "conv.timeHour": "{n} 小时前",
     "conv.timeDay": "{n} 天前",
+    "conv.branch": "从这里分支",
+    "conv.branched": "分支对话",
+    "conv.branchedToast": "已从该轮分支出新对话",
     "chat.error": "错误",
     "chat.generating": "生成中…",
     "chat.prefilling": "正在处理提示词…",
@@ -524,6 +527,9 @@ const I18N = {
     "conv.timeMin": "{n} min ago",
     "conv.timeHour": "{n} h ago",
     "conv.timeDay": "{n} d ago",
+    "conv.branch": "Branch from here",
+    "conv.branched": "Branched conversation",
+    "conv.branchedToast": "Branched a new conversation from this turn",
     "chat.error": "Error",
     "chat.generating": "Generating…",
     "chat.prefilling": "Processing prompt…",
@@ -1328,7 +1334,8 @@ function addMsg(role, text, attachList) {
     var uactions = document.createElement("div");
     uactions.className = "bubble-actions";
     uactions.innerHTML = '<button class="bubble-action" data-action="copy" title="' + tr("chat.copy") + '" aria-label="' + tr("chat.copy") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-copy"/></svg></button>' +
-      '<button class="bubble-action" data-action="edit" title="' + tr("chat.edit") + '" aria-label="' + tr("chat.edit") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-settings"/></svg></button>';
+      '<button class="bubble-action" data-action="edit" title="' + tr("chat.edit") + '" aria-label="' + tr("chat.edit") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-settings"/></svg></button>' +
+      '<button class="bubble-action" data-action="branch" title="' + tr("conv.branch") + '" aria-label="' + tr("conv.branch") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-new-chat"/></svg></button>';
     el.appendChild(uactions);
   }
   $("msg-list").appendChild(el);
@@ -2570,6 +2577,8 @@ function initChat() {
       editTa.value = editText;
       editTa.focus();
       showToast(tr("chat.editHint"), "info");
+    } else if (action === "branch") {
+      QinferConv.branchFrom(bubble);
     } else if (action === "thumbup" || action === "thumbdown") {
       // Toggle active state
       var wasActive = btn.classList.contains("active");
@@ -2711,6 +2720,36 @@ var QinferConv = {
     this.saveAll(convs);
     this.renderList();
     return conv;
+  },
+
+  // Branch: copy the messages up to and including a bubble into a new conversation.
+  branchFrom: function(bubble) {
+    var convs = this.loadAll();
+    var cur = convs.find(function(c) { return c.id === QinferConv.currentId; });
+    var msgs = [];
+    var all = document.querySelectorAll("#msg-list .bubble");
+    for (var i = 0; i < all.length; i++) {
+      var b = all[i];
+      if (b.classList.contains("tool-call") || b.classList.contains("tool-result")) continue;
+      var role = b.classList.contains("user") ? "user" : "assistant";
+      var bodyEl = b.querySelector(".bubble-body");
+      var text = b._rawText || (bodyEl ? bodyEl.textContent : "");
+      if (text) msgs.push({ role: role, content: text });
+      if (b === bubble) break;
+    }
+    var nid = "conv_" + Date.now();
+    convs.unshift({
+      id: nid,
+      title: tr("conv.branched"),
+      messages: msgs,
+      created: Date.now(),
+      updated: Date.now(),
+      params: cur ? cur.params : undefined,
+    });
+    this.saveAll(convs);
+    this.switchTo(nid);
+    this.renderList();
+    showToast(tr("conv.branchedToast"), "success");
   },
 
   // Switch to a conversation
