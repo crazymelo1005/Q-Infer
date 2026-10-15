@@ -192,6 +192,8 @@ const I18N = {
     "chat.codeCopy": "复制",
     "chat.codeCopied": "已复制",
     "chat.usageMeta": "上下文 {p} · 生成 {c} · 合计 {t} tokens",
+    "chat.edit": "编辑",
+    "chat.editHint": "已撤回该轮，改好后发送",
     "chat.scrollBottom": "回到底部",
     "conv.closeSidebar": "收起侧栏",
     "chat.error": "错误",
@@ -447,6 +449,8 @@ const I18N = {
     "chat.codeCopy": "Copy",
     "chat.codeCopied": "Copied!",
     "chat.usageMeta": "prompt {p} · completion {c} · total {t} tokens",
+    "chat.edit": "Edit",
+    "chat.editHint": "Turn retracted — edit and send again",
     "chat.scrollBottom": "Scroll to bottom",
     "conv.closeSidebar": "Close sidebar",
     "chat.error": "Error",
@@ -1191,7 +1195,8 @@ function addMsg(role, text, attachList) {
     el._attachments = attachList;
   }
   el.appendChild(body);
-  // Add message action bar for assistant messages
+  // Add message action bar. Assistant messages get copy/regenerate/feedback;
+  // user messages get edit (which resends from that point).
   if (role === "assistant") {
     var actions = document.createElement("div");
     actions.className = "bubble-actions";
@@ -1200,6 +1205,11 @@ function addMsg(role, text, attachList) {
       '<button class="bubble-action" data-action="thumbup" title="' + tr("chat.good") + '" aria-label="' + tr("chat.good") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-check"/></svg></button>' +
       '<button class="bubble-action" data-action="thumbdown" title="' + tr("chat.bad") + '" aria-label="' + tr("chat.bad") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-error"/></svg></button>';
     el.appendChild(actions);
+  } else if (role === "user") {
+    var uactions = document.createElement("div");
+    uactions.className = "bubble-actions";
+    uactions.innerHTML = '<button class="bubble-action" data-action="edit" title="' + tr("chat.edit") + '" aria-label="' + tr("chat.edit") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-settings"/></svg></button>';
+    el.appendChild(uactions);
   }
   $("msg-list").appendChild(el);
   $("msg-list").scrollTop = $("msg-list").scrollHeight;
@@ -2354,6 +2364,19 @@ function initChat() {
         addMsg("user", userText);
         sendChat();
       }
+    } else if (action === "edit") {
+      // Retract this user turn: drop it and everything after it, and put the
+      // text back in the composer so it can be edited and sent again.
+      if (streaming) return;
+      var editBody = bubble.querySelector(".bubble-body");
+      var editText = bubble._rawText || (editBody ? editBody.textContent : "");
+      var sib = bubble.nextElementSibling;
+      while (sib) { var nxt = sib.nextElementSibling; sib.remove(); sib = nxt; }
+      bubble.remove();
+      var editTa = $("chat-input");
+      editTa.value = editText;
+      editTa.focus();
+      showToast(tr("chat.editHint"), "info");
     } else if (action === "thumbup" || action === "thumbdown") {
       // Toggle active state
       var wasActive = btn.classList.contains("active");
