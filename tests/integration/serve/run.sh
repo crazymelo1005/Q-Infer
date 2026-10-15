@@ -751,7 +751,8 @@ rm -f /tmp/backend-default.log
 start --api-key testkey || exit 1
 
 # 30. image_url parts are rejected with a clear message when vision is not configured
-#     (the fixture has no --mmproj, so VisionProcess is not started).
+#     (the fixture directory holds only the fixture, so the 2026-10-16 default --vision auto
+#      finds no mmproj*.gguf beside it and VisionProcess is not started).
 code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
   -X POST "http://$HOST:$PORT/v1/chat/completions" \
   -d '{"messages":[{"role":"user","content":[{"type":"text","text":"What is this?"},{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw0KGgo="}}]}],"max_tokens":8,"temperature":0}')
@@ -767,7 +768,7 @@ stop
 start --api-key testkey || exit 1
 
 # 31. /props reports vision capability (false when not configured, true when --mmproj is given).
-#     Since the fixture has no vision, we check that the key exists and is false.
+#     The fixture directory has no mmproj beside it, so the default leaves vision off.
 curl -s -H "$H" "http://$HOST:$PORT/props" > "$R"
 if [ "$(jget "$R" "d['modalities']['vision']")" = "False" ]; then
   ok "31 /props modalities.vision=false when not configured"

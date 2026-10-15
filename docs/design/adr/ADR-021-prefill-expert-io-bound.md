@@ -70,3 +70,34 @@ MMQ 开与关的差异约 1%（噪声内），13K 提示甚至新旧几乎相同
 **测量方差警示（重要）**：同一份基线配置在不同重启间实测到 418、563、565、656、685、686 tok/s 的跨度（同一提示）。所以跨重启的绝对值不可直接比较；只有相邻/交替的成对读数可用（同一稳定状态下成对读数可复现到 0.2%——默认臂两次 657.0/655.7）。上表多数杠杆的效应远大于该带宽，但 iGPU 的 −13% 与噪声上限接近，需按交替 A/B 判定。
 
 结论：这台机器上该引擎/模型的 prefill 天花板受制于「mmap 页缓存模式下逐专家走 CPU 拷贝（`0 by DMA`）」这一条——而启用 DMA 所需的常驻固定内存本机给不起。**3K 目标在本机可达范围之外**，除非放宽内存（换更大内存条或独占机器）或改造引擎的专家搬运路径。
+
+## 补充三：`--resident-experts` 装得下，而且是 prefill 的最大杠杆（2026-10-16）
+
+补充一、二里有一句是错的：「`--resident-experts` 要 11.7 GiB 常驻，本机给不起」。该档并不是
+「整模 page-locked」，它是 `--mmap-experts --resident-cpu-experts --resident-pin --resident-soft`
+（`src/program/generate.cpp:2191`）：把 GPU 缓存装不下的那部分专家（本机补集 = 33.0 GiB 总专家 −
+20.2 GiB 显存缓存 ≈ 12–20 GiB）拷成 page-locked 副本并映射，尺寸由引擎按实际可用 RAM 自定
+（启动时先 `the model files' cached pages were released: 37.47 GiB free`）。所以本机跑得下：实测
+41 GB used / 19 GB available，swap 未增长（独立 scope，`MemoryMax=40G`、`MemorySwapMax=1G`）。
+当年的 245 tok/s 是 20G cgroup 上限把 pin 逼退化成文件读的结果，不是容量不足。
+
+实测（2×RTX 5060 Ti，sc117 IQ2_XS，冷提示，只切这一项）：
+
+| 提示 tokens | `--mmap-experts` | `--resident-experts` |
+|---|---|---|
+| 4,058 | 1,010 / 1,087 tok/s | 1,585.9 tok/s |
+| 20,989 | 1,786.9 tok/s | 2,368.7 tok/s |
+| 131,516 | 未测 | 3,317.7 tok/s |
+
+日志给出了机制：`file tier I/O ... for 0.0 MB of expert reads`——专家全部来自 pinned 副本，搬运走 DMA
+而不是「页缓存 fault + CPU memcpy」；同时 `--mmap-experts` 时代那个「借槽税」也消失（改档后
+`--prefill 4096` 与 `8192` 等速：1,583.1 / 1,585.5 / 1,580.3 tok/s）。另外 `--prefill auto` 在本机
+选的就是 8192 token/chunk，把口径写清楚即：prefill tok/s ≈ 一个 chunk 能装的 token 数 ÷ 每 chunk
+固定成本（改档后每 chunk 2.3–2.9 s），所以长提示才是 2.9–3.3K、4K 提示的上限约 1.6K ——
+「3K 目标在本机可达范围之外」作废，「3K 需要 32 GB/卡」也不成立（那是 4K 口径的观察）。
+
+决策（2026-10-16）：服务层在操作者未点名任何专家档位时，默认给引擎补 `--resident-experts`
+（`apply_expert_tier_default()`，`src/serve/server.hpp`；显式给出三种档位里任何一种即不补），
+并保留 `--engine-arg --mmap-experts` 作为回退。代价记录在案：pinned 的 16–20 GiB 不可回收、
+启动时释放模型页缓存（冷启动要从 SSD 重读）、重启后第一个请求会现读 3–4 GB（15000+ major fault，
+所以测量前必须热机一次）。

@@ -161,10 +161,22 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
         c.backend = v;
     }
     if (a.count("--engine-exe")) c.engine_exe = a["--engine-exe"];
-    // M5b: vision encoder (optional; when --mmproj is given, the server starts qinfer-vision
-    // and accepts image_url parts in chat requests).
-    if (a.count("--mmproj")) c.mmproj_path = a["--mmproj"];
+    // M5b: vision encoder. --mmproj enables it; since 2026-10-16 it is also enabled by default:
+    // --vision auto (the default) looks for a single mmproj*.gguf beside --model and starts the
+    // encoder on the iGPU when it finds one, so a model directory laid out the usual way needs no
+    // flag at all. --vision on demands the file, --vision off refuses it. The device is
+    // --vision-gpu's business (iGPU by default, see below).
+    VisionRequest vision_req = VisionRequest::Auto;
+    if (a.count("--vision")) {
+        const std::string v = a["--vision"];
+        if (v == "auto") vision_req = VisionRequest::Auto;
+        else if (v == "on") vision_req = VisionRequest::On;
+        else if (v == "off") vision_req = VisionRequest::Off;
+        else { err = "--vision needs auto, on, or off, got \"" + v + "\""; return {}; }
+    }
+    const std::string mmproj_given = a.count("--mmproj") ? a["--mmproj"] : std::string{};
     if (a.count("--vision-binary")) c.vision_binary = a["--vision-binary"];
+    if (!resolve_vision(vision_req, c.model_path, mmproj_given, c.mmproj_path, err)) return {};
     // --vision-gpu on|off: pass --gpu to the vision child (ggml-vulkan build -> the Intel iGPU).
     // Default ON since 2026-10-15 (quality A/B at ADR-009's distribution level passed); pass
     // off to select the CPU encoder explicitly.
@@ -201,6 +213,9 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     // (891 -> 1003 tok/s at 3.3K). On by default; STRATA_PREFILL_CPU_SHARE=0 opts out.
     if (::getenv("STRATA_PREFILL_CPU_SHARE") == nullptr) ::setenv("STRATA_PREFILL_CPU_SHARE", "auto", 1);
     c.engine_args = std::move(engine_args);
+    // The expert tier the engine runs with, when the operator named none (2026-10-16). See
+    // server.hpp's apply_expert_tier_default for the measurement behind the default.
+    apply_expert_tier_default(c.backend, c.engine_args);
     // For the Strata backend, parse --gpu from engine_args so telemetry can monitor only the GPUs
     // the engine actually uses (matching Strata's own monitoring convention). Without this, telemetry
     // would show all visible GPUs regardless of what the engine subprocess is using.
@@ -273,14 +288,18 @@ int main(int argc, char** argv) {
                              "[--cache-slots N] [--cache-byte-budget N] [--ple-table P] "
                              "[--ple-budget-bytes N] [--kv-slots N] [--kv-resident N] "
                              "[--conversation-cache N] [--backend inhouse|strata|native] "
-                             "[--engine-exe P] [--engine-arg A]...\n"
+                             "[--engine-exe P] [--engine-arg A]... "
+                             "[--vision auto|on|off] [--mmproj P] [--vision-gpu on|off]\n"
                              "        --threads N is the HTTP thread pool; --compute-threads N is the "
                              "inference thread pool (default: half the physical cores, capped at 8; "
                              "1 or negative = single-threaded); --lang selects the startup-log language "
                              "(en default, zh optional); --gpu selects CUDA devices (auto = all, "
                              "0,1 = explicit; requires a CUDA-enabled build); --backend defaults to "
                              "strata and then needs --engine-exe (pass --backend inhouse to run the "
-                             "in-house engine, or --backend native for the self-written native engine)\n");
+                             "in-house engine, or --backend native for the self-written native engine); "
+                             "--vision auto (default) runs the image encoder when --mmproj is given or an "
+                             "mmproj*.gguf sits beside --model, on the Intel iGPU unless --vision-gpu off; "
+                             "an expert tier the operator did not name defaults to --resident-experts\n");
         return 2;
     }
     // --reject-after: integration-test-only knob for deterministic 503s (reject every

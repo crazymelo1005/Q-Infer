@@ -17,6 +17,7 @@
 #include <atomic>
 #include <ctime>
 #include <deque>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -101,6 +102,70 @@ struct ServeConfig {
 // encoder runs on the iGPU, the plain build otherwise. An explicit --vision-binary wins.
 inline const char* default_vision_binary(bool gpu) {
     return gpu ? "build-vision-vk/bin/qinfer-vision" : "build-vision/bin/qinfer-vision";
+}
+
+// ---- the two defaults added 2026-10-16 (both are overridable, and both are what the
+// ---- deployment on this box was measured with; see docs ADR-021's correction).
+
+// Whether the operator already named an expert tier in --engine-arg. --resident-experts is the
+// engine's own spelling for "mmap + pin the complement"; naming any of the three keeps it.
+inline bool has_expert_tier(const std::vector<std::string>& engine_args) {
+    for (const std::string& s : engine_args)
+        if (s == "--mmap-experts" || s == "--resident-experts" || s == "--resident-cpu-experts") return true;
+    return false;
+}
+
+// Expert tier default: the engine's resident RAM mode. It is --mmap-experts plus
+// --resident-cpu-experts --resident-pin --resident-soft: the experts the GPU cache cannot hold
+// (16-20 GiB on the sc117 IQ2_XS pairing) are copied into a page-locked buffer, so a miss is a
+// DMA instead of a page-cache fault plus a CPU memcpy. Measured on 2x RTX 5060 Ti + sc117
+// IQ2_XS, cold prompts: prefill 1,010-1,087 -> 1,585.9 tok/s at 4K (+46..57%), 1,786.9 ->
+// 2,368.7 at 21K (+33%), and 3,317.7 tok/s at 131K with 0.0 MB of expert reads. The engine
+// sizes the pinned complement from the RAM it can actually get, so this is self-limiting;
+// --engine-arg --mmap-experts restores the old tier.
+inline void apply_expert_tier_default(const std::string& backend, std::vector<std::string>& engine_args) {
+    if (backend == "strata" && !has_expert_tier(engine_args)) engine_args.push_back("--resident-experts");
+}
+
+// What --vision asked for. Auto (the default) enables the encoder whenever an mmproj can be
+// found, On demands one, Off refuses one.
+enum class VisionRequest { Auto, On, Off };
+
+// The mmproj beside the model: a single mmproj*.gguf in --model's directory (lexicographically
+// first when a directory holds several), empty when there is none or the directory is unreadable.
+inline std::string find_mmproj_beside(const std::string& model_path) {
+    std::error_code ec;
+    const std::filesystem::path p(model_path);
+    const std::filesystem::path dir = p.has_parent_path() ? p.parent_path() : std::filesystem::path(".");
+    std::string best;
+    for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        if (!it->is_regular_file(ec)) continue;
+        const std::string name = it->path().filename().string();
+        if (name.size() <= 11 || name.compare(0, 6, "mmproj") != 0) continue;
+        if (name.compare(name.size() - 5, 5, ".gguf") != 0) continue;
+        const std::string full = it->path().string();
+        if (best.empty() || full < best) best = full;
+    }
+    return best;
+}
+
+// Resolve the vision encoder's mmproj for a request: an explicit --mmproj wins, Auto/On look
+// beside the model, Off returns empty. Returns false with err set when On cannot find one, or
+// when Off was asked for together with an explicit --mmproj (a contradiction, not a preference).
+inline bool resolve_vision(VisionRequest req, const std::string& model_path, const std::string& explicit_mmproj,
+                           std::string& out_mmproj, std::string& err) {
+    if (req == VisionRequest::Off) {
+        if (!explicit_mmproj.empty()) { err = "--vision off conflicts with --mmproj"; return false; }
+        out_mmproj.clear();
+        return true;
+    }
+    if (!explicit_mmproj.empty()) { out_mmproj = explicit_mmproj; return true; }
+    out_mmproj = find_mmproj_beside(model_path);
+    if (out_mmproj.empty() && req == VisionRequest::On) {
+        err = "--vision on: no --mmproj given and no mmproj*.gguf beside " + model_path;
+        return false;
+    }
+    return true;
 }
 
 class Serve {

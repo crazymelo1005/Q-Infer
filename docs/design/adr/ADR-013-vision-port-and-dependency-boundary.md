@@ -77,3 +77,17 @@ iGPU）上编码。实测（2×RTX 5060 Ti + ARL iGPU，sc117 mmproj 907 MB）�
 
 设备丢失本身与本项目无关（驱动/设备状态，非确定性——同一天稍后同一命令预热成功，4096
 image token / 48.6 s）；本修正只保证"坏设备不再静默毁掉图片功能"。
+
+## 补充：编码器默认开启，设备默认核显（2026-10-16）
+
+此前 `--mmproj` 是启用编码器的唯一途径，缺省等于关闭。现在缺省是 `--vision auto`：不给 `--mmproj` 时，
+服务在 `--model` 同目录里找唯一的 `mmproj*.gguf`（本机模型目录正是这个布局），找到即启用；
+`--vision on` 要求必须有（没有则报错退出），`--vision off` 永不启用（与显式 `--mmproj` 同时给出
+按矛盾处理、报错而不是静默择一）。设备侧不变：`--vision-gpu` 缺省 on，即 ggml-vulkan 档
+`build-vision-vk/bin/qinfer-vision`（Intel 核显；2026-10-15 起默认，依据是本 ADR 前面记的质量口径：
+编码器差异在管线噪声底内、7.0x 编码加速、零 RTX VRAM），iGPU 档启动失败仍回退 CPU 档。
+
+实现落点是头文件内联的 `find_mmproj_beside()` / `resolve_vision()`（`src/serve/server.hpp`，
+与 `default_vision_binary()` 同址，因而可单测），由 `parse_flags` 调用；
+`tests/unit/test_serve_config.cpp` 覆盖 auto/on/off 三条路径、目录发现、多候选的确定性选择与
+"目录不存在也不炸"。集成测试 30–33 仍依赖「夹具目录里没有 mmproj」，注释已同步说明。
