@@ -1540,13 +1540,6 @@ async function doChatRound() {
           }
         }
       }
-          // No tags yet — buffer until we see </think> or enough content
-          // Use safe zone to avoid partial tag issues
-          var safe = thinkBuf.length - 7;
-          if (safe > 0) {
-            out.textContent += thinkBuf.substring(0, safe);
-            thinkBuf = thinkBuf.substring(safe);
-          }
         }
       }
 
