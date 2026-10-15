@@ -93,3 +93,7 @@
 | `tests/` | `unit` 级源文件 + `integration/serve/` + `frontend/` + `data/`（夹具/oracle） |
 
 > 历史 ADR（如 ADR-016/019/020）中出现的 `third_party/strata/` 为当时的路径记录，未逐条改写；当前权威路径以本节为准。
+
+## 4. 设计层入口
+
+`docs/design/` 的规格与 ADR 逐份索引见 [design/README.md](design/README.md)（规格文档 + 19 份 ADR 一览）。
