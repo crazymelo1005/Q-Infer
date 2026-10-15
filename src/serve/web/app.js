@@ -1580,8 +1580,8 @@ function stopChat() {
 function newChat() {
   if (streaming) return;
   // Create a new conversation via the conversation system
-  QinferConv.create();
-  QinferConv.switchTo(QinferConv.currentId);
+  var conv = QinferConv.create();
+  QinferConv.switchTo(conv.id);
   setPill("idle", tr("chat.newChat"));
   showToast(tr("chat.newChat"), "info");
 }
@@ -2161,14 +2161,13 @@ var QinferConv = {
     return convs.find(function(c) { return c.id === QinferConv.currentId; }) || null;
   },
 
-  // Create a new conversation
+  // Create a new conversation (does NOT switch to it — caller must call switchTo)
   create: function() {
     var convs = this.loadAll();
     var id = "conv_" + Date.now();
     var conv = { id: id, title: tr("conv.untitled"), messages: [], created: Date.now(), updated: Date.now() };
     convs.unshift(conv);
     this.saveAll(convs);
-    this.currentId = id;
     this.renderList();
     return conv;
   },
@@ -2308,8 +2307,8 @@ var QinferConv = {
     }
     if (btnNew) {
       btnNew.addEventListener("click", function() {
-        QinferConv.create();
-        QinferConv.switchTo(QinferConv.currentId);
+        var conv = QinferConv.create();
+        QinferConv.switchTo(conv.id);
       });
     }
     // Load or create initial conversation
