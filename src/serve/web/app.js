@@ -1498,7 +1498,7 @@ async function doChatRound() {
       var d = ev.choices[0].delta || {};
       if (ev.choices[0].finish_reason) finishReason = ev.choices[0].finish_reason;
 
-      // --- Text content: route <think>/</think> ---
+      // --- Text content: route  tags ---
       if (d.content !== undefined && d.content !== null) {
         if (waitRow.parentElement) waitRow.remove();
         var content = d.content;
@@ -1506,19 +1506,13 @@ async function doChatRound() {
         // Accumulate raw content
         thinkBuf += content;
 
-        // Check for </think> tag (Strata backend may strip <think>)
-        var ctIdx = thinkBuf.indexOf("</think>");
+        // Check for  tag (Strata backend may strip )
+        var ctIdx = thinkBuf.indexOf("");
         if (ctIdx >= 0) {
           hasThinkTag = true;
-          // Everything before </think> is thinking content
+          // Everything before  is thinking content
           if (ctIdx > 0 && thinkingBody) {
-            // If we already put content in the main bubble, move it to thinking
-            if (out.textContent && !thinkingBody.textContent) {
-              thinkingBody.textContent = out.textContent + thinkBuf.substring(0, ctIdx);
-              out.textContent = "";
-            } else {
-              thinkingBody.textContent += thinkBuf.substring(0, ctIdx);
-            }
+            thinkingBody.textContent += thinkBuf.substring(0, ctIdx);
           }
           thinkBuf = thinkBuf.substring(ctIdx + 8);
           if (thinkingSec) thinkingSec.style.display = "";
@@ -1526,11 +1520,26 @@ async function doChatRound() {
           if (thinkingBody && thinkingBody.textContent) {
             out.parentElement._thinkingText = thinkingBody.textContent;
           }
+          // Flush any remaining buffer as answer content
+          if (thinkBuf) {
+            out.textContent += thinkBuf;
+            thinkBuf = "";
+          }
         } else if (hasThinkTag) {
-          // We've seen </think> already, so this is answer content
+          // We've seen  already, so this is answer content
           out.textContent += thinkBuf;
           thinkBuf = "";
         } else {
+          // No tags yet — buffer everything until we see 
+          // Use safe zone to avoid partial tag issues
+          var safe = thinkBuf.length - 7;
+          if (safe > 0) {
+            // Don't put into main bubble yet — keep buffering
+            // We'll route it correctly once we see 
+            thinkBuf = thinkBuf.substring(safe);
+          }
+        }
+      }
           // No tags yet — buffer until we see </think> or enough content
           // Use safe zone to avoid partial tag issues
           var safe = thinkBuf.length - 7;
@@ -1583,9 +1592,15 @@ async function doChatRound() {
     addToolCallMsg(toolCalls);
     return { toolCalls: toolCalls };
   }
-  // Finalize: flush any remaining thinking content
-  if (thinkingSec && thinkBuf) {
-    if (thinkingBody) thinkingBody.textContent += thinkBuf;
+  // Finalize: flush any remaining buffered content
+  if (thinkBuf) {
+    if (hasThinkTag) {
+      // We saw , so remaining buffer is answer content
+      out.textContent += thinkBuf;
+    } else {
+      // No  tag found, treat entire buffer as answer content
+      out.textContent += thinkBuf;
+    }
   }
   // Store thinking text for saveCurrent()
   if (thinkingBody && thinkingBody.textContent) {
