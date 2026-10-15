@@ -37,3 +37,16 @@ MMQ 开与关的差异约 1%（噪声内），13K 提示甚至新旧几乎相同
 - 若日后要追 3K，应从「专家常驻/缓存几何」与「异步批量搬运」入手，而不是 kernel 算术强度。
 - 附带证据：单卡同配置 prefill 仅约 360 tok/s，对双卡约 1K，说明双卡（`--layer-split auto` + 更大 `--expert-cache`）主要靠降低 miss 率取胜，进一步支撑 I/O 受限的判断。
 - `build-engine-q2mmq/` 为本次实验的临时构建目录（已被 `.gitignore` 的 `build-*/` 覆盖），验证完即删，不进仓库。
+
+## 补充：核显稠密投影在真双卡配置下拖慢 prefill
+
+同一轮里还给 `--igpu` 做了默认值决策，先错后改，这里留档。判据是同一台机器、同一服务、真双卡配置（`--layer-split auto --prefill 8192 --mtp --spec 4 --pipeline-windows 2 --pool-workers 15 --trim-stage-weights`，262144 上下文），只切 `--igpu off|dense`，同一条 2319-token 提示：
+
+| iGPU | prompt 读入 | prefill | decode |
+|---|---|---|---|
+| off | 3384 ms | 685.2 tok/s | 77.8 tok/s |
+| dense | 4677 ms | 495.8 tok/s | 82.3 tok/s |
+
+即 dense 拖慢 prefill 约 28%（核显上的稠密计算与 GPU 串行，且专家路径越快这部分占比越低）。此前在单卡、小专家缓存下单测得到 dense 小幅正收益（300-token 提示 178.8→187.5 tok/s），那是 dense 占比被放大后的假象，不能外推到部署配置。结论：`--igpu` 默认维持 off，显式 opt-in。这条同时说明 ADR-019 的判断（核显不适合这条推理路径）在小批形状之外的批形状上依然成立。
+
+另一处副产品：引擎在部署配置下自报 VRAM 只剩 444 MiB（低于其 512 MiB 阈值），并给出建议——给 engine-arg 加 `--vram-reserve-mib 768`，或降 `--max-context`/`--batch`；不处理时驱动可能把显存页到系统内存，decode 会掉到个位数。已记入运行手册。

@@ -167,13 +167,14 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     if (a.count("--vision-binary")) c.vision_binary = a["--vision-binary"];
     if (a.count("--media-root")) c.media_root = a["--media-root"];
     // --igpu off|dense|pool: the vendored engine reads its iGPU switches from the
-    // environment, and the engine child inherits ours. Default dense: with the four-format
-    // Vulkan dense shaders and the engine's STRATA_IGPU_MIN_FLOPS size gate (so only large
-    // dense projections move), iGPU dense is a small net win on the sc117 IQ2_XS pairing
-    // (2xRTX 5060 Ti, 2026-10-15): a 300-token prompt went 178.8 -> 187.5 tok/s prefill
-    // (+4.9%) and 14.7 -> 15.1 tok/s decode (+2.6%); a 3.3K prompt is a wash (339 -> 342).
-    // 'dense' no-ops when no Vulkan device is present. 'pool' stays off (0.36 tok/s,
-    // ADR-020); --igpu off / --igpu pool opt out.
+    // environment, and the engine child inherits ours. Default off. iGPU dense looked like
+    // a small win in a single-GPU, small-expert-cache A/B (300-token prompt 178.8 -> 187.5
+    // tok/s), but at the real dual-card config it costs ~28% of prefill: a 2319-token
+    // prompt read in 3384 ms (685.2 tok/s) with it off vs 4677 ms (495.8 tok/s) with it on
+    // (2026-10-15, sc117 IQ2_XS, 2xRTX 5060 Ti, --layer-split auto). The dense work on the
+    // iGPU serializes against the GPUs, and the dense share only shrinks as the expert
+    // path gets faster. Kept an explicit opt-in so the accelerator can be re-evaluated
+    // without a rebuild; --igpu dense re-enables it.
     if (a.count("--igpu")) {
         const std::string v = a["--igpu"];
         if (v != "off" && v != "dense" && v != "pool") {
@@ -182,9 +183,6 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
         }
         ::setenv("STRATA_IGPU_DENSE", v == "dense" ? "1" : "0", 1);
         ::setenv("STRATA_IGPU_POOL", v == "pool" ? "1" : "0", 1);
-    } else {
-        if (::getenv("STRATA_IGPU_DENSE") == nullptr) ::setenv("STRATA_IGPU_DENSE", "1", 1);
-        if (::getenv("STRATA_IGPU_POOL") == nullptr) ::setenv("STRATA_IGPU_POOL", "0", 1);
     }
     // Fused expert prefill path (engine env, inherited by the child): measured on the
     // sc117 IQ2_XS pairing at +16% cold prefill (820 -> 952 tok/s on a 3.3K prompt,
