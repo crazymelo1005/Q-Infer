@@ -157,5 +157,28 @@ if (typeof I18N === "undefined" || !I18N.zh || !I18N.en) {
   } else console.log("ok   assistant label is Q-Infer in both languages");
 }
 
+// --- i18n three-way lint: used keys must exist, defined keys must be used ------
+// Scans every tr("...") in app.js and every data-i18n* attribute in index.html.
+// Keys built dynamically at runtime go on the whitelist with a justification.
+const html = fs.readFileSync(path.join(__dirname, "../../src/serve/web/index.html"), "utf8");
+const used = new Set();
+for (const m of src.matchAll(/tr\("([a-zA-Z0-9_.]+)"/g)) used.add(m[1]);
+for (const m of html.matchAll(/data-i18n(?:-ph|-title|-aria)?="([a-zA-Z0-9_.]+)"/g)) used.add(m[1]);
+// trState maps runtime states to fixed keys; the map is literal so its values
+// count as used (STATE_TR is a plain object literal in app.js).
+const st = src.indexOf("const STATE_TR");
+if (st >= 0) {
+  const stEnd = src.indexOf("};", st);
+  for (const m of src.slice(st, stEnd).matchAll(/"([a-zA-Z0-9_.]+)"/g)) used.add(m[1]);
+}
+const defined = new Set(Object.keys(I18N.zh));
+const I18N_WHITELIST = []; // runtime-constructed keys only; keep empty
+const missing = [...used].filter(k => !defined.has(k)).sort();
+const dead = [...defined].filter(k => !used.has(k) && !I18N_WHITELIST.includes(k)).sort();
+if (missing.length) report("i18n used-but-undefined keys", { missing: missing });
+else console.log("ok   every used i18n key is defined (" + used.size + " used)");
+if (dead.length) report("i18n dead dictionary keys", { dead: dead });
+else console.log("ok   no dead i18n keys");
+
 if (failed) { console.log(failed + " failures"); process.exit(1); }
 console.log("chat utils: all cases pass");

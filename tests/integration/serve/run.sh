@@ -333,20 +333,14 @@ curl -s "http://$HOST:$PORT/web/app.js" > "$R"
 grep -q 'pollMetrics' "$R" && grep -q 'panel-chat' "$R" \
   && ok "/web/app.js (Chat logic)" || bad "/web/app.js: $(head -c 200 "$R")"
 
-# 16. Frontend part two: index carries the Monitor/About skeleton, app.js exposes QinferRequests and sparkline,
-#     /api-monitor is shelled and monitor.js is reachable (reuses loadDetail).
+# 16. Frontend part two: index carries the Monitor/About skeleton, app.js exposes QinferRequests and sparkline.
+#     (The standalone /api-monitor page was removed 2026-10-15: the Monitor tab covers it.)
 curl -s "http://$HOST:$PORT/" > "$R"
 grep -q 'id="state-badges"' "$R" && grep -q 'id="req-detail"' "$R" && grep -q 'id="about-engine"' "$R" \
   && ok "/ Monitor/About skeleton (state-badges/req-detail/about-engine)" || bad "/ skeleton: $(head -c 200 "$R")"
 curl -s "http://$HOST:$PORT/web/app.js" > "$R"
 grep -q 'QinferRequests' "$R" && grep -q 'initMonitor' "$R" && grep -q 'sparkline' "$R" \
   && ok "/web/app.js (Monitor/About/sparkline)" || bad "/web/app.js: $(head -c 200 "$R")"
-curl -s "http://$HOST:$PORT/api-monitor" > "$R"
-grep -q 'id="req-list"' "$R" && grep -q 'monitor.js' "$R" \
-  && ok "/api-monitor shell (req-list/monitor.js)" || bad "/api-monitor: $(head -c 200 "$R")"
-curl -s "http://$HOST:$PORT/web/monitor.js" > "$R"
-grep -q 'QinferRequests.loadDetail' "$R" \
-  && ok "/web/monitor.js (monitor page reuses the render layer)" || bad "/web/monitor.js: $(head -c 200 "$R")"
 
 # 16a. chat encoding-failure bookkeeping: Chinese content necessarily triggers out-of-vocabulary tokenization
 #      failure → 500, and the newest ring record is state=error, path=/v1/chat/completions (verifies the

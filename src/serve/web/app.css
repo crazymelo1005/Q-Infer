@@ -396,3 +396,9 @@ main{flex:1;min-height:0;display:flex}
 .md-code-block .tok-cmt{color:var(--st-tok-cmt);font-style:italic}
 .md-code-block .tok-num{color:var(--st-tok-num)}
 .md-code-block .tok-fn{color:var(--st-tok-fn)}
+/* ---- st-* confirm modal + sidebar inline rename ---- */
+.st-modal{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;background:var(--st-scrim,rgba(15,23,42,.45));padding:var(--st-s-4)}
+.st-modal__card{background:var(--st-surface);border:1px solid var(--st-line);border-radius:var(--st-r-md);box-shadow:var(--st-shadow-lg,0 12px 32px rgba(15,23,42,.24));padding:var(--st-s-5);max-width:360px;width:100%}
+.st-modal__msg{margin:0 0 var(--st-s-4);color:var(--st-ink);font-size:var(--st-fs-sm);line-height:1.5}
+.st-modal__btns{display:flex;justify-content:flex-end;gap:var(--st-s-2)}
+.conv-item__edit{width:100%;min-width:0;height:26px;padding:var(--st-s-1) var(--st-s-2);font-size:var(--st-fs-xs)}

@@ -320,10 +320,7 @@ const I18N = {
     "conv.branch": "从这里分支",
     "conv.branched": "分支对话",
     "conv.branchedToast": "已从该轮分支出新对话",
-    "mon.feedback": "回复反馈",
-    "mon.noFeedback": "暂无反馈",
     "chat.error": "错误",
-    "chat.generating": "生成中…",
     "chat.prefilling": "正在处理提示词…",
     "chat.thinking": "思考中…",
     "chat.thinkingToggle": "思考模式",
@@ -336,17 +333,13 @@ const I18N = {
     "chat.repPen": "重复惩罚",
     "chat.stopped": "已停止",
     "chat.stoppedSuffix": "（已停止）",
+    "chat.failed": "请求失败",
     "chat.failedPrefix": "请求失败：",
     "chat.idle": "空闲",
     "chat.newChat": "新会话已开始",
     "chat.exported": "已导出 qinfer-chat.md",
     "chat.noExport": "没有可导出的对话",
-    "chat.exportTitle": "导出为 Markdown",
     "mon.state": "模型状态",
-    "mon.retained": "已保留请求",
-    "mon.retainedSub": "条请求记录",
-    "mon.wall": "最近耗时",
-    "mon.decode": "上次解码速度",
     "mon.searchPh": "搜索路径 / 模型 / 状态",
     "mon.filterTitle": "状态过滤",
     "mon.all": "全部状态",
@@ -371,25 +364,12 @@ const I18N = {
     "req.detailFail": "请求详情不可用：HTTP ",
     "req.loadFail": "加载失败：",
     "about.hide": "隐藏",
-    "about.svcBody": "推理端点为 <span class=\"mono\" id=\"about-ports\"></span>。OpenAI 域走 <span class=\"mono\">/v1/chat/completions</span>（含 SSE 流式）、<span class=\"mono\">/v1/completions</span>、<span class=\"mono\">/v1/models</span>；Anthropic 域走 <span class=\"mono\">/v1/messages</span> 与 <span class=\"mono\">/v1/messages/count_tokens</span>；监控走 <span class=\"mono\">/metrics</span> 与 <span class=\"mono\">/api/requests</span>。",
     "theme.title": "浅色 / 深色",
     "theme.dark": "深色主题",
     "theme.light": "浅色主题",
-    "hw.gpuUtil": "GPU 利用率",
-    "hw.gpuMem": "GPU 显存",
-    "hw.gpuTemp": "GPU 温度",
-    "hw.gpuPower": "GPU 功率",
-    "hw.pcieRx": "PCIe RX",
     "hw.cpu": "CPU",
     "hw.ram": "内存",
-    "hw.diskRead": "磁盘读取",
-    "hw.tokS": "tok/s",
-    "hw.prefill": "prefill tok/s",
     "hw.igpuFreq": "核显频率",
-    "state.loaded": "已加载",
-    "state.unloaded": "未加载",
-    "mon.lastDecode": "上次解码速度",
-    "mon.noDone": "尚无完成请求",
     "err.keyInvalid": "API key 无效或未设置",
     "err.aboutLoad": "About 信息加载失败：",
     "req.yes": "是",
@@ -401,7 +381,6 @@ const I18N = {
     "about.tempDefault": "temperature 默认",
     "about.topPDefault": "top_p 默认",
     "about.seedDefault": "seed 默认",
-    "state.inFlight": " · 进行中 ",
     "state.unreachable": "不可达",
     "state.noResponse": "服务无响应",
 
@@ -409,7 +388,6 @@ const I18N = {
     "tab.monitor": "监控",
     "tab.about": "关于",
     "nav.views": "视图",
-    "chat.newChatTitle": "新会话",
     "chat.exportTitleLong": "导出为 Markdown",
     "chat.send": "发送",
     "state.idle": "空闲",
@@ -475,27 +453,11 @@ const I18N = {
     "conv.reusedOf": "复用",
     "conv.ofPrompt": "提示词 token 数",
     "conv.pctAll": "占全部提示词",
-    "conv.of": "/",
     "conv.tokens": "token",
-    "conv.ofAll": "占全部提示词",
     "toast.copied": "已复制",
     "toast.imgOver": "超过 20 MB",
     "toast.fileOver": "超过 512 KB",
     "toast.notText": "不是文本文件",
-    "metric.speed": "速度",
-    "metric.gpuLoad": "GPU 负载",
-    "metric.vram": "显存",
-    "metric.temp": "GPU 温度",
-    "metric.power": "功率",
-    "metric.pcie": "PCIe",
-    "metric.cpu": "CPU",
-    "metric.disk": "磁盘读取",
-    "metric.igpu": "核显频率",
-
-    "apiMon.title": "请求检查",
-    "apiMon.keyLabel": "API 密钥",
-    "apiMon.keyPh": "可选",
-    "apiMon.back": "返回主面板",
 
     "chat.temperature": "温度",
     "chat.topP": "top_p",
@@ -521,6 +483,8 @@ const I18N = {
     "req.field.outputTokens": "输出 token",
     "aria.remove": "移除",
     "aria.copy": "复制",
+    "misc.cancel": "取消",
+    "misc.confirm": "确认",
     "misc.pastedImage": "粘贴的图片",
     "misc.gpu": "GPU",
     "misc.evicted": "已驱逐",
@@ -533,10 +497,6 @@ const I18N = {
     "tool.executing": "执行中…",
     "tool.result": "工具结果",
     "tool.error": "工具执行失败",
-    "tool.args": "参数",
-    "tool.output": "输出",
-    "tool.expand": "展开",
-    "tool.collapse": "收起",
     "tool.enabled": "工具已启用",
     "tool.disabled": "工具已禁用",
     "tool.settings": "工具设置",
@@ -590,10 +550,7 @@ const I18N = {
     "conv.branch": "Branch from here",
     "conv.branched": "Branched conversation",
     "conv.branchedToast": "Branched a new conversation from this turn",
-    "mon.feedback": "Reply feedback",
-    "mon.noFeedback": "No feedback yet",
     "chat.error": "Error",
-    "chat.generating": "Generating…",
     "chat.prefilling": "Processing prompt…",
     "chat.thinking": "Thinking…",
     "chat.thinkingToggle": "Thinking mode",
@@ -606,17 +563,13 @@ const I18N = {
     "chat.repPen": "repeat_penalty",
     "chat.stopped": "Stopped",
     "chat.stoppedSuffix": " (stopped)",
+    "chat.failed": "Request failed",
     "chat.failedPrefix": "Request failed: ",
     "chat.idle": "Idle",
     "chat.newChat": "New chat started",
     "chat.exported": "Exported qinfer-chat.md",
     "chat.noExport": "Nothing to export",
-    "chat.exportTitle": "Export as Markdown",
     "mon.state": "Model state",
-    "mon.retained": "Retained requests",
-    "mon.retainedSub": "request records",
-    "mon.wall": "Last duration",
-    "mon.decode": "Last decode speed",
     "mon.searchPh": "Search path / model / state",
     "mon.filterTitle": "Filter by state",
     "mon.all": "All states",
@@ -641,25 +594,12 @@ const I18N = {
     "req.detailFail": "Request details unavailable: HTTP ",
     "req.loadFail": "Load failed: ",
     "about.hide": "Hide",
-    "about.svcBody": "Endpoints: <span class=\"mono\" id=\"about-ports\"></span>. OpenAI domain at <span class=\"mono\">/v1/chat/completions</span> (incl. SSE streaming), <span class=\"mono\">/v1/completions</span>, <span class=\"mono\">/v1/models</span>; Anthropic domain at <span class=\"mono\">/v1/messages</span> and <span class=\"mono\">/v1/messages/count_tokens</span>; monitoring at <span class=\"mono\">/metrics</span> and <span class=\"mono\">/api/requests</span>.",
     "theme.title": "Light / dark theme",
     "theme.dark": "Dark theme",
     "theme.light": "Light theme",
-    "hw.gpuUtil": "GPU load",
-    "hw.gpuMem": "VRAM",
-    "hw.gpuTemp": "GPU temp",
-    "hw.gpuPower": "GPU power",
-    "hw.pcieRx": "PCIe RX",
     "hw.cpu": "CPU",
     "hw.ram": "RAM",
-    "hw.diskRead": "Disk read",
-    "hw.tokS": "tok/s",
-    "hw.prefill": "prefill tok/s",
     "hw.igpuFreq": "iGPU freq",
-    "state.loaded": "Loaded",
-    "state.unloaded": "Not loaded",
-    "mon.lastDecode": "Last decode speed",
-    "mon.noDone": "No completed requests yet",
     "err.keyInvalid": "API key invalid or not set",
     "err.aboutLoad": "Failed to load About info: ",
     "req.yes": "Yes",
@@ -671,7 +611,6 @@ const I18N = {
     "about.tempDefault": "temperature default",
     "about.topPDefault": "top_p default",
     "about.seedDefault": "seed default",
-    "state.inFlight": " · in flight ",
     "state.unreachable": "Unreachable",
     "state.noResponse": "Service not responding",
 
@@ -679,7 +618,6 @@ const I18N = {
     "tab.monitor": "Monitor",
     "tab.about": "About",
     "nav.views": "Views",
-    "chat.newChatTitle": "New chat",
     "chat.exportTitleLong": "Export chat as Markdown",
     "chat.send": "Send",
     "state.idle": "Idle",
@@ -745,27 +683,11 @@ const I18N = {
     "conv.reusedOf": "reused of",
     "conv.ofPrompt": "prompt tokens",
     "conv.pctAll": "of all prompt tokens",
-    "conv.of": "of",
     "conv.tokens": "tokens",
-    "conv.ofAll": "of all prompt tokens",
     "toast.copied": "Copied",
     "toast.imgOver": "is over 20 MB",
     "toast.fileOver": "is over 512 KB",
     "toast.notText": "is not a text file",
-    "metric.speed": "Speed",
-    "metric.gpuLoad": "GPU load",
-    "metric.vram": "VRAM",
-    "metric.temp": "GPU temp",
-    "metric.power": "Power",
-    "metric.pcie": "PCIe",
-    "metric.cpu": "CPU",
-    "metric.disk": "Disk read",
-    "metric.igpu": "iGPU freq",
-
-    "apiMon.title": "Request monitor",
-    "apiMon.keyLabel": "API key",
-    "apiMon.keyPh": "optional",
-    "apiMon.back": "Back to main panel",
 
     "chat.temperature": "Temperature",
     "chat.topP": "top_p",
@@ -791,6 +713,8 @@ const I18N = {
     "req.field.outputTokens": "Output tokens",
     "aria.remove": "Remove",
     "aria.copy": "Copy",
+    "misc.cancel": "Cancel",
+    "misc.confirm": "Confirm",
     "misc.pastedImage": "pasted image",
     "misc.gpu": "GPU",
     "misc.evicted": "evicted",
@@ -803,10 +727,6 @@ const I18N = {
     "tool.executing": "Executing…",
     "tool.result": "Tool result",
     "tool.error": "Tool execution failed",
-    "tool.args": "Arguments",
-    "tool.output": "Output",
-    "tool.expand": "Expand",
-    "tool.collapse": "Collapse",
     "tool.enabled": "Tool enabled",
     "tool.disabled": "Tool disabled",
     "tool.settings": "Tool settings",
@@ -1009,6 +929,54 @@ function showBanner(msg, kind) {
   b.classList.remove("hidden");
   window.clearTimeout(showBanner._t);
   showBanner._t = window.setTimeout(function () { b.classList.add("hidden"); }, 6000);
+}
+
+/* ---- st-* confirm dialog (replaces native confirm(); prompt-style edits use
+   inline inputs instead). Resolves true/false; Esc/overlay click = cancel. ---- */
+function showConfirm(message, confirmLabel) {
+  return new Promise(function (resolve) {
+    var prev = document.querySelector(".st-modal");
+    if (prev) prev.remove();
+    var overlay = document.createElement("div");
+    overlay.className = "st-modal";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    var card = document.createElement("div");
+    card.className = "st-modal__card";
+    var msg = document.createElement("p");
+    msg.className = "st-modal__msg";
+    msg.textContent = message;
+    var btns = document.createElement("div");
+    btns.className = "st-modal__btns";
+    var bCancel = document.createElement("button");
+    bCancel.type = "button";
+    bCancel.className = "st-btn st-btn--secondary";
+    bCancel.textContent = tr("misc.cancel");
+    var bOk = document.createElement("button");
+    bOk.type = "button";
+    bOk.className = "st-btn st-btn--primary";
+    bOk.textContent = confirmLabel || tr("misc.confirm");
+    btns.appendChild(bCancel);
+    btns.appendChild(bOk);
+    card.appendChild(msg);
+    card.appendChild(btns);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    function close(v) {
+      document.removeEventListener("keydown", onKey);
+      overlay.remove();
+      resolve(v);
+    }
+    function onKey(e) {
+      if (e.key === "Escape") close(false);
+      if (e.key === "Enter") close(true);
+    }
+    bCancel.addEventListener("click", function () { close(false); });
+    bOk.addEventListener("click", function () { close(true); });
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) close(false); });
+    document.addEventListener("keydown", onKey);
+    bOk.focus();
+  });
 }
 
 /* ---- Status dot ---- */
@@ -2122,7 +2090,7 @@ function initCommon() {
   }
 }
 
-/* ---- Request-record rendering layer (Monitor tab and /api-monitor share it) ---- */
+/* ---- Request-record rendering layer (Monitor tab) ---- */
 window.QinferRequests = {
   badge: function (state) {
     const cls = state === "completed" ? "ok" : state === "error" ? "err" : state === "queued" ? "busy" : "";
@@ -2797,30 +2765,57 @@ var QinferConv = {
 
   // Delete a conversation
   delete: function(id) {
-    if (!confirm(tr("conv.confirmDelete"))) return;
-    var convs = this.loadAll();
-    convs = convs.filter(function(c) { return c.id !== id; });
-    this.saveAll(convs);
-    if (this.currentId === id) {
-      this.currentId = null;
-      $("msg-list").innerHTML = "";
-      var empty = $("chat-empty");
-      if (empty) empty.style.display = "";
-    }
-    this.renderList();
+    // st-* confirm dialog (native confirm() clashes with the design system and
+    // is disabled in some embedded WebViews).
+    showConfirm(tr("conv.confirmDelete"), tr("conv.delete")).then(function (yes) {
+      if (!yes) return;
+      var convs = QinferConv.loadAll();
+      convs = convs.filter(function(c) { return c.id !== id; });
+      QinferConv.saveAll(convs);
+      if (QinferConv.currentId === id) {
+        QinferConv.currentId = null;
+        $("msg-list").innerHTML = "";
+        var empty = $("chat-empty");
+        if (empty) empty.style.display = "";
+      }
+      QinferConv.renderList();
+    });
   },
 
-  // Rename a conversation
+  // Rename a conversation: inline edit in the sidebar (replaces native prompt()).
   rename: function(id) {
+    var item = document.querySelector('.conv-item[data-id="' + id + '"]');
+    if (!item) return;
+    var nameEl = item.querySelector(".conv-item__name");
+    if (!nameEl || item.querySelector(".conv-item__edit")) return;
     var convs = this.loadAll();
     var conv = convs.find(function(c) { return c.id === id; });
     if (!conv) return;
-    var newTitle = prompt(tr("conv.rename"), conv.title);
-    if (newTitle !== null && newTitle.trim()) {
-      conv.title = newTitle.trim();
-      this.saveAll(convs);
-      this.renderList();
+    var input = document.createElement("input");
+    input.type = "text";
+    input.className = "input conv-item__edit";
+    input.value = conv.title;
+    input.setAttribute("aria-label", tr("conv.rename"));
+    nameEl.style.display = "none";
+    nameEl.parentNode.insertBefore(input, nameEl);
+    input.focus();
+    input.select();
+    function commit() {
+      var v = input.value.trim();
+      input.remove();
+      nameEl.style.display = "";
+      if (v && v !== conv.title) {
+        conv.title = v;
+        QinferConv.saveAll(convs);
+      }
+      QinferConv.renderList();
     }
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); commit(); }
+      if (e.key === "Escape") { input.remove(); nameEl.style.display = ""; }
+    });
+    input.addEventListener("blur", commit);
+    input.addEventListener("click", function (e) { e.stopPropagation(); });
   },
 
   // Render the conversation list
@@ -3368,7 +3363,7 @@ function initMonitor() {
 
 document.addEventListener("DOMContentLoaded", function () {
   initCommon();
-  if (!$("panel-chat") || window.__apiMonitorPage) return; // api-monitor page: shared helpers only
+  if (!$("panel-chat")) return;
   initChat();
   initMonitor();
   loadModel();

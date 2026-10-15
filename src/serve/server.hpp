@@ -135,7 +135,7 @@ private:
     std::vector<std::thread> workers_;
     std::atomic<std::uint64_t> req_id_{0};
     std::unique_ptr<httplib::Server> svr_;
-    std::string web_index_, web_monitor_;   // static pages loaded at startup
+    std::string web_index_;   // static page loaded at startup
     // Timing of the most recently completed request (shared by /v1/status last_timings and /metrics live).
     struct LastTimings {
         bool have = false;

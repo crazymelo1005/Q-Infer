@@ -285,7 +285,6 @@ Serve::Serve(ServeConfig cfg, std::shared_ptr<Backend> eng)
       started_(std::time(nullptr)) {
     const std::filesystem::path base = std::filesystem::path(__FILE__).parent_path() / "web";
     web_index_ = read_file((base / "index.html").string());
-    web_monitor_ = read_file((base / "monitor.html").string());
     // T13: telemetry starts in the constructor (launch is the per-request entry point; placed there,
     // tel_ would be null when there are no requests and the first frame of T14's /metrics would have
     // no data); sampling spans the process lifetime, destruction joins via tel_'s dtor.
@@ -1475,14 +1474,14 @@ TelemetryExtra Serve::telemetry_extra() const {
 
 void Serve::register_routes() {
     httplib::Server& svr = *svr_;
-    // Auth (spec §3): /web, /api-monitor, / and /health are reachable, and the pages carry the key
+    // Auth (spec §3): /web, / and /health are reachable, and the pages carry the key
     // themselves; /v1/*, /api/* and /metrics with a missing or wrong key → 401 (the error shape of
     // the corresponding domain).
     svr.set_pre_routing_handler([this](const httplib::Request& req, httplib::Response& res) {
         if (cfg_.api_key.empty()) return httplib::Server::HandlerResponse::Unhandled;
         const std::string want = "Bearer " + cfg_.api_key;
         if (req.get_header_value("Authorization") == want) return httplib::Server::HandlerResponse::Unhandled;
-        if (req.path == "/" || req.path.rfind("/web/", 0) == 0 || req.path == "/api-monitor" ||
+        if (req.path == "/" || req.path.rfind("/web/", 0) == 0 ||
             req.path == "/health" || req.path.rfind("/fonts/", 0) == 0) {
             return httplib::Server::HandlerResponse::Unhandled;
         }
@@ -1923,10 +1922,6 @@ void Serve::register_routes() {
     svr.Get("/", [this](const httplib::Request&, httplib::Response& res) {
         res.set_header("Cache-Control", "no-cache");
         res.set_content(web_index_, "text/html; charset=utf-8");
-    });
-    svr.Get("/api-monitor", [this](const httplib::Request&, httplib::Response& res) {
-        res.set_header("Cache-Control", "no-cache");
-        res.set_content(web_monitor_, "text/html; charset=utf-8");
     });
     // /web/* is served here rather than through set_base_dir so every asset
     // carries Cache-Control: no-cache: the vendored static handler left the

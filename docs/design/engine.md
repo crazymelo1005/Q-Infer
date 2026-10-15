@@ -302,15 +302,15 @@ IQ2_XS 这一档的块反量化与「与 Q8_K 的定点点积」已实现：`src
 
 实现栈见 `adr/ADR-012-http-transport-and-serving-stack.md`，契约对拍对象是 Strata v0.1.43（`../research/01-strata-engine.md`）。本节记实现事实，改动先改它再改代码的约定照旧。
 
-- 传输：cpp-httplib v0.18.6 单头整份入库（不定义 OpenSSL / ZLIB 宏），线程池 2 × 槽位 + 2；协议解析、SSE、轮询自写。静态页由同一进程在 `/web` 与 `/api-monitor` 提供。
+- 传输：cpp-httplib v0.18.6 单头整份入库（不定义 OpenSSL / ZLIB 宏），线程池 2 × 槽位 + 2；协议解析、SSE、轮询自写。静态页由同一进程在 `/web` 提供（独立的 `/api-monitor` 检查页已并入 Monitor 标签，2026-10-15 移除）。
 - 协议域：OpenAI（`/v1/chat/completions` 流式与非流式、`/v1/completions`、`/v1/models`）与 Anthropic（`/v1/messages`、`/v1/messages/count_tokens`）同一份调度器与门面；两域同请求在默认参数下产出相同 token 序列。非法参数按两域各自的错误形状 400/401/503。
 - 生成循环挂在 `src/serve/facade` 的门面上：请求即全新会话（scratch、KV 窗口、PLE 历史都随调用装配，请求之间无共享状态）；采样器用标准库 `mt19937_64`（温度 0 即贪心、seed -1 随机 = 与需求一致的默认）。SSE 用 httplib chunked provider，连接断开即取消生成并释放槽位。
 - 调度：有界队列 + 槽位租约，满则 503；`--reject-after` 仅供集成测试制造确定 503。
 - 遥测：NVML `dlopen`（Windows `nvml.dll`）、AMD kfd 拓扑 + hwmon、CPU/RAM 走 `/proc` 差值法、磁盘读解析 `/proc/diskstats`；无任何可读源时字段为 `null`。10 个系列各 60 点历史，`/metrics` 顶层键对齐 Strata。
-- 请求记录环：保留 100 条、大字段 256 KiB 截断，`/api/requests` 列表剥大字段、`?id=` 给全量；`/metrics` 的 requests 取最近 12 条。前端四页（三 tab 单页 + `/api-monitor` 检查页）读这些端点，轮询 1 秒（/metrics）与 2 秒（/v1/status、/api/requests）。
+- 请求记录环：保留 100 条、大字段 256 KiB 截断，`/api/requests` 列表剥大字段、`?id=` 给全量；`/metrics` 的 requests 取最近 12 条。前端（三 tab 单页）读这些端点，轮询 1 秒（/metrics）与 2 秒（/v1/status、/api/requests）。
 - 会话前缀缓存（spec §6 的 conversation_cache 落地）：整串精确匹配的 token 前缀 LRU（`serve/prompt_cache`，`--conversation-cache N` 默认 64、0 即关）。请求 prompt 命中缓存即免 BPE、命中 token 数计入 `totals.reused`；`/metrics` 的 `conversation_cache` 实读 enabled/capacity/hits/misses/entries/tokens。查询在 engine_mu_ 锁外、命中免进锁；未命中才进锁 encode 并回填，generate 照旧在锁内串行。BPE 合并可跨字节边界故不做前缀拆分，只整串精确命中；索引器 KV 侧的前缀复用不在本缓存语义内。
 - Prometheus text 端口（M2 监控首刀，契约对照 `ref_repos/strata` 的 `serve/prometheus.py`）：`/metrics` 按内容协商输出——Accept 含 `text/plain`/`openmetrics` 或 `?format=prometheus` → `text/plain; version=0.0.4`，否则保持 JSON（前端与无头 curl 缺省 `*/*` 不破）。指标名取 vLLM 家族（`num_requests_running/waiting`、`kv_cache_usage_perc`、`prompt/generation_tokens_total`、`request_success_total`、`prefix_cache_queries/hits_total`、`ttft/itl/e2e` 三直方图 22 桶、`num_preemptions_total` 恒 0）+ `qinfer:` 前缀家族（`live_state`、`live_*`、`totals_*_seconds_total`、`conversation_cache_*`、`engine_max_context`、`gpu_*`、`ram_*`）；模型名标签转义。渲染只读 `/metrics` 已构建的同一份 Json（单一事实源），null/缺键字段不出样本。`totals.requests`（完成时刻 +1）与直方图数据源都是 record_request 的同一落点。
-- 鉴权：可选 `--api-key`；`/web`、`/api-monitor`、`/`、`/health` 可达，页面自带 key 走 `Authorization: Bearer`。
+- 鉴权：可选 `--api-key`；`/web`、`/`、`/health` 可达，页面自带 key 走 `Authorization: Bearer`。
 
 ## 13. 核显与 NPU
 
