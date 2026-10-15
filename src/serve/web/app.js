@@ -1509,11 +1509,27 @@ async function doChatRound() {
         // Process all complete tag pairs in thinkBuf
         while (true) {
           if (!isThinking) {
-            // Look for <think>
+            // Look for <think> opening tag
             var otIdx = thinkBuf.indexOf("<think>");
             if (otIdx < 0) {
-              // No opening tag — check if tail might be a partial tag
-              var safe = thinkBuf.length - (7 - 1);
+              // No opening tag — check if we have </think> without <think>
+              // (Strata backend may strip opening tag)
+              var ctIdx = thinkBuf.indexOf("</think>");
+              if (ctIdx >= 0) {
+                // Everything before </think> is thinking content
+                if (ctIdx > 0 && thinkingBody) {
+                  thinkingBody.textContent += thinkBuf.substring(0, ctIdx);
+                }
+                thinkBuf = thinkBuf.substring(ctIdx + 8);
+                if (thinkingSec) thinkingSec.style.display = "";
+                // Store thinking text for saveCurrent()
+                if (thinkingBody && thinkingBody.textContent) {
+                  out.parentElement._thinkingText = thinkingBody.textContent;
+                }
+                continue;
+              }
+              // No tags at all — check if tail might be a partial tag
+              var safe = thinkBuf.length - 7;
               if (safe > 0) {
                 out.textContent += thinkBuf.substring(0, safe);
                 thinkBuf = thinkBuf.substring(safe);
@@ -1530,7 +1546,7 @@ async function doChatRound() {
             var ctIdx = thinkBuf.indexOf("</think>");
             if (ctIdx < 0) {
               // No closing tag — check tail for partial
-              var safe = thinkBuf.length - (8 - 1);
+              var safe = thinkBuf.length - 7;
               if (safe > 0) {
                 if (thinkingBody) thinkingBody.textContent += thinkBuf.substring(0, safe);
                 thinkBuf = thinkBuf.substring(safe);
@@ -1543,6 +1559,10 @@ async function doChatRound() {
             }
             thinkBuf = thinkBuf.substring(ctIdx + 8);
             isThinking = false;
+            // Store thinking text for saveCurrent()
+            if (thinkingBody && thinkingBody.textContent) {
+              out.parentElement._thinkingText = thinkingBody.textContent;
+            }
           }
         }
       }
