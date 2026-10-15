@@ -43,6 +43,7 @@
 | [`design/adr/ADR-019-igpu-not-for-experts.md`](design/adr/ADR-019-igpu-not-for-experts.md) | 核显不参与未命中专家计算（P3a 证伪点读数：设备慢于 CPU 池） | 接受（关闭 ADR-005 第二节） |
 | [`design/adr/ADR-020-strata-igpu-pool.md`](design/adr/ADR-020-strata-igpu-pool.md) | Strata iGPU 专家池：缝外独立池承接未命中专家，批 >4 走 Vulkan，opt-in | 接受 |
 | [`design/adr/ADR-021-prefill-expert-io-bound.md`](design/adr/ADR-021-prefill-expert-io-bound.md) | prefill 是专家 I/O 受限；补齐 Q2_0 的 MMQ tile 实测仅 ~1% 差异，不是杠杆 | 接受 |
+| [`design/adr/ADR-022-igpu-cannot-take-cpu-decode-share.md`](design/adr/ADR-022-igpu-cannot-take-cpu-decode-share.md) | 核显不接手解码路径的 CPU 份额：一轮搬 500 MB 换 9.9 ms 算术，带宽受限 | 接受 |
 | [`design/adr/ADR-013-vision-port-and-dependency-boundary.md`](design/adr/ADR-013-vision-port-and-dependency-boundary.md) | 视觉编码器取材：移植 Strata tools/vision、llama.cpp 构建期物化、只 spawn 不链接 | 接受 |
 | [glossary.md](glossary.md) | 术语的唯一口径 | 完成 |
 | [hardware.md](hardware.md) | 两套测试环境的硬件规格 | 完成 |
