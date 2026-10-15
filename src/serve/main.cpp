@@ -181,6 +181,10 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
         ::setenv("STRATA_IGPU_DENSE", v == "dense" ? "1" : "0", 1);
         ::setenv("STRATA_IGPU_POOL", v == "pool" ? "1" : "0", 1);
     }
+    // Fused expert prefill path (engine env, inherited by the child): measured on the
+    // sc117 IQ2_XS pairing at +16% cold prefill (820 -> 952 tok/s on a 3.3K prompt,
+    // and 810 -> 891 on another). On by default; set STRATA_PF_FUSED=0 to opt out.
+    if (::getenv("STRATA_PF_FUSED") == nullptr) ::setenv("STRATA_PF_FUSED", "1", 1);
     c.engine_args = std::move(engine_args);
     // For the Strata backend, parse --gpu from engine_args so telemetry can monitor only the GPUs
     // the engine actually uses (matching Strata's own monitoring convention). Without this, telemetry
