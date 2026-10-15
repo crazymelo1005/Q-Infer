@@ -402,3 +402,9 @@ main{flex:1;min-height:0;display:flex}
 .st-modal__msg{margin:0 0 var(--st-s-4);color:var(--st-ink);font-size:var(--st-fs-sm);line-height:1.5}
 .st-modal__btns{display:flex;justify-content:flex-end;gap:var(--st-s-2)}
 .conv-item__edit{width:100%;min-width:0;height:26px;padding:var(--st-s-1) var(--st-s-2);font-size:var(--st-fs-xs)}
+
+/* ---- Conversation grouping + sidebar footer (P1) ---- */
+.conv-group-label{font:600 var(--st-fs-2xs,11px)/1.4 var(--st-font,inherit);letter-spacing:.04em;text-transform:uppercase;color:var(--st-ink-muted);padding:var(--st-s-2) var(--st-s-2) var(--st-s-1)}
+.conv-group-label.hidden{display:none}
+.conv-sidebar__foot{display:flex;gap:var(--st-s-2);padding:var(--st-s-2);border-top:1px solid var(--st-line)}
+.conv-foot-btn{flex:1;justify-content:center;font-size:var(--st-fs-xs)}

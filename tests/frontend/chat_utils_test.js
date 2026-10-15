@@ -171,6 +171,9 @@ if (st >= 0) {
   const stEnd = src.indexOf("};", st);
   for (const m of src.slice(st, stEnd).matchAll(/"([a-zA-Z0-9_.]+)"/g)) used.add(m[1]);
 }
+// MON_METRICS-style tables consume keys through a labelKey property (tr(m.labelKey));
+// every labelKey value in a table literal counts as used.
+for (const m of src.matchAll(/labelKey:\s*"([a-zA-Z0-9_.]+)"/g)) used.add(m[1]);
 const defined = new Set(Object.keys(I18N.zh));
 const I18N_WHITELIST = []; // runtime-constructed keys only; keep empty
 const missing = [...used].filter(k => !defined.has(k)).sort();

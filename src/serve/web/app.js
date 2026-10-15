@@ -339,6 +339,15 @@ const I18N = {
     "chat.newChat": "新会话已开始",
     "chat.exported": "已导出 qinfer-chat.md",
     "chat.noExport": "没有可导出的对话",
+    "metric.speed": "速度",
+    "metric.gpuLoad": "GPU 负载",
+    "metric.vram": "显存",
+    "metric.temp": "GPU 温度",
+    "metric.power": "功率",
+    "metric.pcie": "PCIe",
+    "metric.cpu": "CPU",
+    "metric.disk": "磁盘读取",
+    "metric.igpu": "核显频率",
     "mon.state": "模型状态",
     "mon.searchPh": "搜索路径 / 模型 / 状态",
     "mon.filterTitle": "状态过滤",
@@ -511,6 +520,18 @@ const I18N = {
     "conv.delete": "删除",
     "conv.rename": "重命名",
     "conv.confirmDelete": "确定删除此对话？",
+    "conv.pin": "置顶",
+    "conv.unpin": "取消置顶",
+    "conv.groupPinned": "置顶",
+    "conv.groupToday": "今天",
+    "conv.groupYesterday": "昨天",
+    "conv.groupWeek": "近 7 天",
+    "conv.groupEarlier": "更早",
+    "conv.exportAll": "导出全部对话",
+    "conv.importAll": "导入对话",
+    "conv.exportedToast": "已导出 {n} 个对话",
+    "conv.importedToast": "已导入 {n} 个对话",
+    "conv.importBadFormat": "导入失败：文件格式不正确",
   },
   en: {
     "brand.tag": "Local inference",
@@ -569,6 +590,15 @@ const I18N = {
     "chat.newChat": "New chat started",
     "chat.exported": "Exported qinfer-chat.md",
     "chat.noExport": "Nothing to export",
+    "metric.speed": "Speed",
+    "metric.gpuLoad": "GPU load",
+    "metric.vram": "VRAM",
+    "metric.temp": "GPU temp",
+    "metric.power": "Power",
+    "metric.pcie": "PCIe",
+    "metric.cpu": "CPU",
+    "metric.disk": "Disk read",
+    "metric.igpu": "iGPU freq",
     "mon.state": "Model state",
     "mon.searchPh": "Search path / model / state",
     "mon.filterTitle": "Filter by state",
@@ -741,6 +771,18 @@ const I18N = {
     "conv.delete": "Delete",
     "conv.rename": "Rename",
     "conv.confirmDelete": "Delete this conversation?",
+    "conv.pin": "Pin",
+    "conv.unpin": "Unpin",
+    "conv.groupPinned": "Pinned",
+    "conv.groupToday": "Today",
+    "conv.groupYesterday": "Yesterday",
+    "conv.groupWeek": "Last 7 days",
+    "conv.groupEarlier": "Earlier",
+    "conv.exportAll": "Export all conversations",
+    "conv.importAll": "Import conversations",
+    "conv.exportedToast": "Exported {n} conversations",
+    "conv.importedToast": "Imported {n} conversations",
+    "conv.importBadFormat": "Import failed: not a Q-Infer export file",
   },
 };
 
@@ -2439,6 +2481,16 @@ function initChat() {
         if (hit) shown++;
       });
       var note = list.querySelector(".conv-no-match");
+      // Hide group labels whose every item is filtered out.
+      var labels = list.querySelectorAll(".conv-group-label");
+      labels.forEach(function (lbl) {
+        var any = false, el = lbl.nextElementSibling;
+        while (el && !el.classList.contains("conv-group-label")) {
+          if (el.classList.contains("conv-item") && !el.classList.contains("hidden")) { any = true; break; }
+          el = el.nextElementSibling;
+        }
+        lbl.classList.toggle("hidden", !any);
+      });
       if (q && shown === 0 && list.querySelector(".conv-item")) {
         if (!note) {
           note = document.createElement("p");
@@ -2818,7 +2870,84 @@ var QinferConv = {
     input.addEventListener("click", function (e) { e.stopPropagation(); });
   },
 
-  // Render the conversation list
+  // Pin/unpin a conversation (pinned ones sort first, above date groups).
+  togglePin: function(id) {
+    var convs = this.loadAll();
+    var conv = convs.find(function(c) { return c.id === id; });
+    if (!conv) return;
+    conv.pinned = !conv.pinned;
+    this.saveAll(convs);
+    this.renderList();
+  },
+
+  // Export every conversation as one JSON file (schema: qinfer.convExport.v1).
+  exportAll: function() {
+    var convs = this.loadAll();
+    if (!convs.length) return;
+    var payload = { format: "qinfer.convExport.v1", exported: new Date().toISOString(), conversations: convs };
+    var blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "qinfer-conversations-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+    showToast(tr("conv.exportedToast").replace("{n}", convs.length));
+  },
+
+  // Import conversations from a qinfer.convExport.v1 file. Existing ids get a
+  // fresh id (conflicts are merged under a new name, never overwritten).
+  importAll: function(file) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      var data;
+      try { data = JSON.parse(reader.result); } catch (e) { data = null; }
+      if (!data || data.format !== "qinfer.convExport.v1" || !Array.isArray(data.conversations)) {
+        showToast(tr("conv.importBadFormat"));
+        return;
+      }
+      var convs = QinferConv.loadAll();
+      var existing = {};
+      convs.forEach(function (c) { existing[c.id] = true; });
+      var n = 0;
+      data.conversations.forEach(function (c) {
+        if (!c || !Array.isArray(c.messages)) return;
+        var id = c.id && !existing[c.id] ? c.id : "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        existing[id] = true;
+        convs.push({
+          id: id,
+          title: String(c.title || tr("conv.untitled")).slice(0, 80),
+          messages: c.messages,
+          params: c.params || undefined,
+          pinned: !!c.pinned,
+          created: c.created || Date.now(),
+          updated: c.updated || Date.now(),
+        });
+        n++;
+      });
+      if (!n) { showToast(tr("conv.importBadFormat")); return; }
+      QinferConv.saveAll(convs);
+      QinferConv.renderList();
+      showToast(tr("conv.importedToast").replace("{n}", n));
+    };
+    reader.readAsText(file);
+  },
+
+  // Date bucket for the sidebar grouping: 0 today, 1 yesterday, 2 last 7 days,
+  // 3 earlier. Local calendar days (a 23:59 conversation still counts as today).
+  _bucket: function(ts) {
+    var d = new Date(ts), now = new Date();
+    var day = function (x) { return new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(); };
+    var diff = (day(now) - day(d)) / 86400000;
+    if (diff <= 0) return 0;
+    if (diff === 1) return 1;
+    if (diff < 7) return 2;
+    return 3;
+  },
+
+  // Render the conversation list, grouped: Pinned, then Today / Yesterday /
+  // Last 7 days / Earlier (newest first inside each group).
   renderList: function() {
     var list = $("conv-list");
     if (!list) return;
@@ -2827,30 +2956,50 @@ var QinferConv = {
       list.innerHTML = '<p class="muted small">' + esc(tr("conv.empty")) + '</p>';
       return;
     }
+    convs.sort(function (a, b) { return (b.updated || 0) - (a.updated || 0); });
+    var groups = [
+      { labelKey: "conv.groupPinned", items: convs.filter(function (c) { return c.pinned; }) },
+      { labelKey: "conv.groupToday", items: convs.filter(function (c) { return !c.pinned && QinferConv._bucket(c.updated) === 0; }) },
+      { labelKey: "conv.groupYesterday", items: convs.filter(function (c) { return !c.pinned && QinferConv._bucket(c.updated) === 1; }) },
+      { labelKey: "conv.groupWeek", items: convs.filter(function (c) { return !c.pinned && QinferConv._bucket(c.updated) === 2; }) },
+      { labelKey: "conv.groupEarlier", items: convs.filter(function (c) { return !c.pinned && QinferConv._bucket(c.updated) === 3; }) },
+    ];
     list.innerHTML = "";
-    convs.forEach(function(conv) {
-      var item = document.createElement("div");
-      item.className = "conv-item" + (conv.id === QinferConv.currentId ? " active" : "");
-      item.dataset.id = conv.id;
-      item.innerHTML = '<span class="conv-item__title"><span class="conv-item__name">' + esc(conv.title) +
-        '</span><span class="conv-item__time">' + relTime(conv.updated) + '</span></span>' +
-        '<span class="conv-item__actions">' +
-        '<button class="conv-item__btn" data-action="rename" title="' + esc(tr("conv.rename")) + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-edit"/></svg></button>' +
-        '<button class="conv-item__btn" data-action="delete" title="' + esc(tr("conv.delete")) + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-trash"/></svg></button>' +
-        '</span>';
-      item.addEventListener("click", function(e) {
-        if (e.target.closest(".conv-item__btn")) return;
-        QinferConv.switchTo(conv.id);
+    groups.forEach(function (g) {
+      if (!g.items.length) return;
+      var head = document.createElement("div");
+      head.className = "conv-group-label";
+      head.textContent = tr(g.labelKey);
+      list.appendChild(head);
+      g.items.forEach(function(conv) {
+        var item = document.createElement("div");
+        item.className = "conv-item" + (conv.id === QinferConv.currentId ? " active" : "");
+        item.dataset.id = conv.id;
+        item.innerHTML = '<span class="conv-item__title"><span class="conv-item__name">' + esc(conv.title) +
+          '</span><span class="conv-item__time">' + relTime(conv.updated) + '</span></span>' +
+          '<span class="conv-item__actions">' +
+          '<button class="conv-item__btn" data-action="pin" title="' + esc(conv.pinned ? tr("conv.unpin") : tr("conv.pin")) + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-pin"/></svg></button>' +
+          '<button class="conv-item__btn" data-action="rename" title="' + esc(tr("conv.rename")) + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-edit"/></svg></button>' +
+          '<button class="conv-item__btn" data-action="delete" title="' + esc(tr("conv.delete")) + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-trash"/></svg></button>' +
+          '</span>';
+        item.addEventListener("click", function(e) {
+          if (e.target.closest(".conv-item__btn")) return;
+          QinferConv.switchTo(conv.id);
+        });
+        item.querySelector('[data-action="pin"]').addEventListener("click", function(e) {
+          e.stopPropagation();
+          QinferConv.togglePin(conv.id);
+        });
+        item.querySelector('[data-action="rename"]').addEventListener("click", function(e) {
+          e.stopPropagation();
+          QinferConv.rename(conv.id);
+        });
+        item.querySelector('[data-action="delete"]').addEventListener("click", function(e) {
+          e.stopPropagation();
+          QinferConv.delete(conv.id);
+        });
+        list.appendChild(item);
       });
-      item.querySelector('[data-action="rename"]').addEventListener("click", function(e) {
-        e.stopPropagation();
-        QinferConv.rename(conv.id);
-      });
-      item.querySelector('[data-action="delete"]').addEventListener("click", function(e) {
-        e.stopPropagation();
-        QinferConv.delete(conv.id);
-      });
-      list.appendChild(item);
     });
   },
 
@@ -2874,6 +3023,17 @@ var QinferConv = {
       btnNew.addEventListener("click", function() {
         var conv = QinferConv.create();
         QinferConv.switchTo(conv.id);
+      });
+    }
+    // Sidebar footer: export all conversations as JSON, import back in.
+    var btnExport = $("btn-export-conv");
+    if (btnExport) btnExport.addEventListener("click", function () { QinferConv.exportAll(); });
+    var btnImport = $("btn-import-conv");
+    var importFile = $("conv-import-file");
+    if (btnImport && importFile) {
+      btnImport.addEventListener("click", function () { importFile.value = ""; importFile.click(); });
+      importFile.addEventListener("change", function () {
+        if (importFile.files && importFile.files[0]) QinferConv.importAll(importFile.files[0]);
       });
     }
     // Load or create initial conversation

@@ -66,6 +66,15 @@
         <div class="conv-sidebar__list" id="conv-list">
           <p class="muted small" data-i18n="conv.empty">No conversations yet</p>
         </div>
+        <div class="conv-sidebar__foot">
+          <button class="st-btn st-btn--secondary conv-foot-btn" id="btn-import-conv" type="button" data-i18n-title="conv.importAll">
+            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-upload"/></svg><span data-i18n="conv.importAll">Import</span>
+          </button>
+          <button class="st-btn st-btn--secondary conv-foot-btn" id="btn-export-conv" type="button" data-i18n-title="conv.exportAll">
+            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-download"/></svg><span data-i18n="conv.exportAll">Export</span>
+          </button>
+          <input type="file" id="conv-import-file" accept="application/json,.json" hidden>
+        </div>
       </aside>
       <!-- Chat main area -->
       <div class="chat-main">
