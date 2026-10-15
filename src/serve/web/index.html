@@ -123,6 +123,26 @@
               <label for="s-max-tokens" data-i18n="chat.maxTokens">Max tokens</label>
               <input id="s-max-tokens" class="input" type="number" min="1" max="32768" step="1" value="2048">
             </div>
+            <div class="field">
+              <label for="s-think" data-i18n="chat.thinkMode">Thinking mode</label>
+              <select id="s-think" class="input">
+                <option value="off" data-i18n="chat.thinkOff">Off</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="xhigh" selected>xHigh</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="s-ctx" data-i18n="chat.contextLen">Context length</label>
+              <select id="s-ctx" class="input">
+                <option value="0" data-i18n="chat.ctxAuto">Auto</option>
+                <option value="4096">4K</option>
+                <option value="8192">8K</option>
+                <option value="16384">16K</option>
+                <option value="32768">32K</option>
+                <option value="65536">64K</option>
+              </select>
+            </div>
           </div>
         </details>
         <form class="st-composer" id="composer">

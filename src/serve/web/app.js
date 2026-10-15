@@ -194,6 +194,10 @@ const I18N = {
     "chat.usageMeta": "上下文 {p} · 生成 {c} · 合计 {t} tokens",
     "chat.edit": "编辑",
     "chat.editHint": "已撤回该轮，改好后发送",
+    "chat.thinkMode": "思考模式",
+    "chat.thinkOff": "关",
+    "chat.contextLen": "上下文长度",
+    "chat.ctxAuto": "自动",
     "chat.scrollBottom": "回到底部",
     "conv.closeSidebar": "收起侧栏",
     "chat.error": "错误",
@@ -451,6 +455,10 @@ const I18N = {
     "chat.usageMeta": "prompt {p} · completion {c} · total {t} tokens",
     "chat.edit": "Edit",
     "chat.editHint": "Turn retracted — edit and send again",
+    "chat.thinkMode": "Thinking mode",
+    "chat.thinkOff": "Off",
+    "chat.contextLen": "Context length",
+    "chat.ctxAuto": "Auto",
     "chat.scrollBottom": "Scroll to bottom",
     "conv.closeSidebar": "Close sidebar",
     "chat.error": "Error",
@@ -1091,6 +1099,8 @@ function saveSampler() {
     seed: parseInt($("s-seed").value, 10),
     max_tokens: parseInt($("s-max-tokens").value, 10),
   };
+  if ($("s-think")) s.think = $("s-think").value;
+  if ($("s-ctx")) s.ctx = $("s-ctx").value;
   sessionStorage.setItem("qinfer_sampler", JSON.stringify(s));
 }
 function loadSampler() {
@@ -1107,6 +1117,8 @@ function loadSampler() {
     if (s.repeat_penalty !== undefined) $("s-rep-pen").value = s.repeat_penalty;
     if (s.seed !== undefined) $("s-seed").value = s.seed;
     if (s.max_tokens !== undefined) $("s-max-tokens").value = s.max_tokens;
+    if (s.think !== undefined && $("s-think")) $("s-think").value = s.think;
+    if (s.ctx !== undefined && $("s-ctx")) $("s-ctx").value = s.ctx;
     return !!$("s-temp");
   } catch (e) { return false; }
 }
@@ -1626,6 +1638,33 @@ function updateToolCallResult(callId, result, isError) {
   resultDiv.appendChild(pre);
 }
 
+// Approximate a message's size in characters (text parts only; images ignored).
+function msgChars(m) {
+  if (!m) return 0;
+  if (typeof m.content === "string") return m.content.length;
+  if (Array.isArray(m.content)) {
+    var n = 0;
+    m.content.forEach(function (p) { if (p && typeof p.text === "string") n += p.text.length; });
+    return n;
+  }
+  return 0;
+}
+// Keep the newest messages within a budget (~4 chars/token). A leading system
+// message is always kept. budgetTokens <= 0 means no truncation.
+function truncateMessages(messages, budgetTokens) {
+  if (!budgetTokens || budgetTokens <= 0 || !messages || messages.length === 0) return messages;
+  var budgetChars = budgetTokens * 4;
+  var head = null, rest = messages;
+  if (messages[0] && messages[0].role === "system") { head = messages[0]; rest = messages.slice(1); }
+  var kept = [], used = head ? msgChars(head) : 0;
+  for (var i = rest.length - 1; i >= 0; i--) {
+    var c = msgChars(rest[i]);
+    if (used + c > budgetChars && kept.length) break;
+    kept.unshift(rest[i]);
+    used += c;
+  }
+  return head ? [head].concat(kept) : kept;
+}
 function collectMessages() {
   const messages = [];
   document.querySelectorAll("#msg-list .bubble").forEach(function (b) {
@@ -1767,8 +1806,14 @@ async function doChatRound() {
     frequency_penalty: parseFloat($("s-freq-pen").value),
     repeat_penalty: parseFloat($("s-rep-pen").value),
     seed: parseInt($("s-seed").value, 10),
-    enable_thinking: $("btn-thinking").classList.contains("active"),
   };
+  // Thinking mode + reasoning effort come from the Generation selector (the
+  // composer toggle is a shortcut that writes this selector).
+  var thinkMode = $("s-think") ? $("s-think").value : "xhigh";
+  body.enable_thinking = thinkMode !== "off";
+  if (thinkMode !== "off") body.reasoning_effort = thinkMode;
+  // Context tiers: truncate the history to the chosen budget (0 = auto/none).
+  body.messages = truncateMessages(body.messages, parseInt($("s-ctx") ? $("s-ctx").value : "0", 10));
   if (tools.length) body.tools = tools;
   var out = addMsg("assistant", "");
   var waitRow = document.createElement("div");
@@ -2302,17 +2347,34 @@ function initAttachmentHandlers() {
 
 /* ---- Chat setup ---- */
 function initChat() {
-  ["s-temp", "s-top-p", "s-top-k", "s-min-p", "s-pres-pen", "s-freq-pen", "s-rep-pen", "s-seed", "s-max-tokens"].forEach(function (id) {
-    $(id).addEventListener("change", saveSampler);
+  ["s-temp", "s-top-p", "s-top-k", "s-min-p", "s-pres-pen", "s-freq-pen", "s-rep-pen", "s-seed", "s-max-tokens", "s-ctx"].forEach(function (id) {
+    if ($(id)) $(id).addEventListener("change", saveSampler);
   });
-  // Thinking toggle
+  // Thinking mode: the composer toggle is a shortcut for the Generation selector
+  // (Off <-> last non-off level).
   var thinkBtn = $("btn-thinking");
-  if (thinkBtn) {
-    thinkBtn.addEventListener("click", function() {
-      thinkBtn.classList.toggle("active");
-      showToast(thinkBtn.classList.contains("active") ? tr("chat.thinkingOn") : tr("chat.thinkingOff"));
+  var lastThink = "xhigh";
+  function syncThinkBtn() {
+    var sel = $("s-think");
+    if (thinkBtn && sel) thinkBtn.classList.toggle("active", sel.value !== "off");
+  }
+  if ($("s-think")) {
+    $("s-think").addEventListener("change", function () {
+      if ($("s-think").value !== "off") lastThink = $("s-think").value;
+      syncThinkBtn(); saveSampler();
     });
   }
+  if (thinkBtn) {
+    thinkBtn.addEventListener("click", function() {
+      var sel = $("s-think");
+      if (!sel) return;
+      if (sel.value === "off") { sel.value = lastThink; } else { lastThink = sel.value; sel.value = "off"; }
+      syncThinkBtn();
+      saveSampler();
+      showToast(sel.value === "off" ? tr("chat.thinkingOff") : tr("chat.thinkingOn"));
+    });
+  }
+  syncThinkBtn();
   initAttachmentHandlers();
   $("btn-send").addEventListener("click", sendChat);
   $("btn-stop").addEventListener("click", stopChat);

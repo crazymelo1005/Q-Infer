@@ -67,6 +67,7 @@ struct GenOptions {
     std::vector<std::string> stop;   // 生成的字节流出现这些子串即终止（截到命中处）
     std::string session_id;          // 会话标识（Phase 2）：非空时保持会话状态跨请求；空=每次全新会话
     bool enable_thinking = true;     // thinking mode toggle (chat template variable)
+    std::string reasoning_effort;    // low|medium|xhigh (chat template variable); empty = template default
 };
 
 struct GenResult {

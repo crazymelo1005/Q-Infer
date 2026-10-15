@@ -558,6 +558,19 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
     // Thinking mode toggle
     const Json* etv = body.find("enable_thinking");
     if (etv != nullptr && etv->is_bool()) opts.enable_thinking = etv->b;
+    // Reasoning effort: a chat-template variable (low|medium|xhigh). 'high' is an
+    // accepted alias for xhigh, matching the template.
+    const Json* rev = body.find("reasoning_effort");
+    if (rev != nullptr && rev->is_str()) {
+        std::string eff = rev->str;
+        if (eff == "high") eff = "xhigh";
+        if (eff != "low" && eff != "medium" && eff != "xhigh") {
+            send_json(res, 400, openai_err("reasoning_effort must be low, medium, or xhigh",
+                                           "invalid_request_error", "reasoning_effort"));
+            return;
+        }
+        opts.reasoning_effort = eff;
+    }
     // Phase 2: session_id for multi-turn conversation persistence
     const Json* sid = body.find("session_id");
     if (sid != nullptr && sid->is_str()) opts.session_id = sid->str;
@@ -569,9 +582,11 @@ void Serve::handle_chat(const httplib::Request& req, httplib::Response& res, boo
     std::string prompt;
     std::string rerr;
     Json tj = tools_array(tools);
-    // Build template vars: inject enable_thinking so the chat template can toggle thinking mode
+    // Build template vars: inject enable_thinking and reasoning_effort so the chat
+    // template can toggle thinking mode and pick its effort level.
     Json vars = Json::objv();
     vars.set("enable_thinking", Json::boolv(opts.enable_thinking));
+    if (!opts.reasoning_effort.empty()) vars.set("reasoning_effort", Json::strv(opts.reasoning_effort));
     if (!render_chat(eng_->chat_template(), conv, /*add_generation_prompt=*/true, prompt, rerr,
                      tools.empty() ? nullptr : &tj, &vars)) {
         // The templater is a trimmed subset (fallback per spec §11): no silent mis-rendering, an
