@@ -28,12 +28,16 @@ int main() {
     CHECK(s.history.count("tok_s") == 1 && s.history.at("tok_s").size() == 2);
     CHECK(std::abs(*s.history.at("tok_s").back() - 12.5) < 1e-9);
 
-    // 2. 10 系列键齐（spec §6 的 series 清单），值可为 nullopt。
+    // 2. 12 系列键齐（spec §6 的 series 清单），值可为 nullopt。
     for (const char* key : {"gpu_util", "gpu_mem_used", "gpu_temp", "gpu_power",
                             "gpu_pcie_rx_mb", "cpu", "ram_used", "disk_read_mb",
-                            "tok_s", "prefill_tok_s_mean"}) {
+                            "tok_s", "tok_s_mean", "prefill_tok_s_mean"}) {
         CHECK(s.history.count(key) == 1);
     }
+    // tok_s_mean 是会话均值（累计生成 token ÷ 累计解码耗时），前端监控页的解码均值折线
+    // 与 prefill 同源读它；它必须真进历史，否则那条线永远是空的。
+    CHECK(s.history.at("tok_s_mean").size() == 2);
+    CHECK(std::abs(*s.history.at("tok_s_mean").back() - 40.0) < 1e-9);
 
     // 3. 历史封顶 60 点。
     Telemetry tel2([]{ return TelemetryExtra{1.0, 2.0, 3.0}; });

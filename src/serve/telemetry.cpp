@@ -625,12 +625,13 @@ void Telemetry::collect_cpu_ram_disk(std::map<std::string, std::optional<double>
 #endif
 }
 
-// 10 系列键表（spec §6）：每样一次各推一值（读不到推 nullopt），封顶 60；浮点四舍五入两位
-// （Strata: round(v, 2)）。
+// 12 系列键表（spec §6）：每样一次各推一值（读不到推 nullopt），封顶 60；浮点四舍五入两位
+// （Strata: round(v, 2)）。tok_s 是"上一次请求"的解码速率（请求之间是平的），tok_s_mean 是
+// 会话均值（累计生成 token ÷ 累计解码耗时）——监控页的解码均值折线与 prefill 同源读后者。
 void Telemetry::push_history() {
     static const char* const kSeries[] = {
         "gpu_util", "gpu_mem_used", "gpu_temp", "gpu_power", "gpu_pcie_rx_mb",
-        "cpu", "ram_used", "disk_read_mb", "tok_s", "prefill_tok_s_mean",
+        "cpu", "ram_used", "disk_read_mb", "tok_s", "tok_s_mean", "prefill_tok_s_mean",
         "igpu_freq_mhz"};
     std::lock_guard<std::mutex> lk(mu_);
     for (const char* key : kSeries) {
