@@ -1,0 +1,79 @@
+{
+ "gate": "vision-quality",
+ "date": "2026-10-15",
+ "label": "cpu",
+ "max_tokens": 220,
+ "repeats": 2,
+ "runs": [
+  {
+   "image": "grid",
+   "repeat": 0,
+   "text": "The user wants a detailed description of an image. But there is no image provided in the prompt. The text before the request is a long block about \"image in detail: colors, patterns, and structure\" preceded by some odd text about \"image in detail: colors, patterns, and structure.\" Actually the user message includes a long paragraph that seems to be a system-like description? Let's parse.\n\nUser message:\n\"image in detail: colors, patterns, and structure.\n\n---\n\n**User**\nimage in detail: colors, patterns, and structure.\n\n---\n\n**Assistant**\nimage in detail: colors, patterns, and structure.\n\n---\n\n**User**\nimage in detail: colors, patterns, and structure.\n\n---\n\n**Assistant**\nimage in detail: colors, patterns, and structure.\n\n---\n\n**User**\nimage in detail: colors, patterns, and structure.\n\n---\n\n**Assistant**\nimage in detail: colors, patterns, and structure.\n\n---\n\n**User**\nimage in detail: colors, patterns",
+   "ms": 4300.7,
+   "completion_tokens": 220
+  },
+  {
+   "image": "grid",
+   "repeat": 1,
+   "text": "The user wants a detailed description of an image. But there is no image provided in the prompt. The text before the request is a long block about \"image in detail: colors, patterns, and structure\" preceded by some odd text about \"image in detail: colors, patterns, and structure.\" Actually the user message begins with a long paragraph that seems to be a system-like description? Let's parse.\n\nUser content:\n\"image in detail: colors, patterns, and structure.\n\n---\n\n... long text about 'image in detail: colors, patterns, and structure' ...\n\nDescribe this image in detail: colors, patterns, and structure.\"\n\nWait, the actual user message is:\n\"image in detail: colors, patterns, and structure.\n\n---\n\n... (some text?) ...\n\nDescribe this image in detail: colors, patterns, and structure.\"\n\nLet's inspect the raw user message:\n```\nimage in detail: colors, patterns, and structure.\n\n---\n\n... (some text?) ...\n\nDescribe this image in detail: colors, patterns",
+   "ms": 3329.3,
+   "completion_tokens": 220
+  },
+  {
+   "image": "bars",
+   "repeat": 0,
+   "text": "The user wants me to look at an image (implied by the prompt, though no image is provided in the text). Wait, the prompt includes a long block of text that seems to be a description of a legal/contractual document, but the actual question is: \"List the colors you see from top to bottom and describe how the image is organized.\"\n\nThere's no image attached in the conversation. The user's message contains a long paragraph that appears to be OCR'd text from some document (legal language about \"the image\", \"the image is organized\", etc.). Actually, looking carefully, the long text block seems to be a garbled/OCR'd version of something. But the final question is clear: list colors top to bottom and describe organization.\n\nSince I cannot see an actual image, I need to infer. The long text block might actually be the OCR text of the image itself. Let me parse it. It mentions \"the image\", \"the image is organized\", \"the image is organized\", \"the image is organized\", \"the image is organized\", \"",
+   "ms": 4567.4,
+   "completion_tokens": 220
+  },
+  {
+   "image": "bars",
+   "repeat": 1,
+   "text": "The user wants me to look at an image (implied by the prompt, though I don't see an actual image attached in the conversation). Wait, the prompt says \"List the colors you see from top to bottom and describe how the image is organized.\" There's no image provided in the text. But the system prompt and user message structure suggests there should be an image. Since I cannot see an actual image, I need to consider what's happening.\n\nActually, in these tasks, the image is usually provided as an attachment. Here I don't have an image. But the user's question is about colors from top to bottom and how the image is organized. This strongly suggests a flag or a color gradient image.\n\nHmm, but I have no image. Let me think. The instruction says \"List the colors you see from top to bottom and describe how the image is organized.\" This is a typical question for a flag image. Without the image, I must guess or describe generically.\n\nWait, perhaps the image is embedded but not shown to me in this text-only interface",
+   "ms": 3241.0,
+   "completion_tokens": 220
+  },
+  {
+   "image": "src",
+   "repeat": 0,
+   "text": "The user wants a description of the image: layout and elements. I need to look carefully at the image. It appears to be a photograph of a person, likely a woman, in a kitchen or domestic setting. There's a stove/oven, a window, a sink, a table, a chair, a dog, a child, a man, a woman, a baby, a cat, a bird, a fish, a plant, a clock, a calendar, a poster, a picture, a mirror, a shelf, a cabinet, a drawer, a pot, a pan, a kettle, a cup, a plate, a bowl, a bottle, a jar, a can, a box, a bag, a basket, a broom, a mop, a bucket, a towel, a cloth, a sponge, a soap, a detergent, a cleaner, a spray, a brush, a comb, a brush, a toothbrush, a toothpaste, a soap, a shampoo, a conditioner, a lotion, a cream, a perfume, a cologne, a",
+   "ms": 4468.0,
+   "completion_tokens": 220
+  },
+  {
+   "image": "src",
+   "repeat": 1,
+   "text": "The user wants a description of the image: layout and elements. I need to look carefully at the image. It appears to be a photograph of a person, likely a woman, in a kitchen or domestic setting. There's a stove/oven, a window, a sink, a table, a chair, a dog, a child, a man, a woman, a cat, a basket, a jug, a bowl, a plate, a cup, a kettle, a pot, a pan, a clock, a calendar, a picture, a mirror, a curtain, a plant, a broom, a mop, a bucket, a stool, a bench, a cupboard, a shelf, a bottle, a jar, a can, a box, a bag, a basket, a cloth, a towel, a napkin, a spoon, a fork, a knife, a ladle, a whisk, a grater, a peeler, a can opener, a corkscrew, a bottle opener, a funnel, a sieve, a strainer, a colander,",
+   "ms": 3235.7,
+   "completion_tokens": 220
+  },
+  {
+   "image": "text",
+   "repeat": 0,
+   "text": "The user wants me to transcribe any text in the image and describe the rest.\n\nLet me look carefully at the image. It's a black-and-white photograph of a man, likely a historical figure, in a suit and tie, seated or standing, looking slightly to the side. There's a signature-like text at the bottom right.\n\nLet me look at the text. It appears to be a handwritten signature. It looks like \"C. L. R. James\" perhaps? Let me look. The signature reads something like \"C.L.R. James\" \u2014 yes, this is likely C. L. R. James, the Trinidadian historian and Marxist intellectual. The signature at the bottom right appears to read \"C. L. R. James\" in cursive.\n\nLet me look more carefully. The handwriting at the bottom right: \"C. L. R. James\" \u2014 the first part looks like \"C.L.R.\" then \"James\". Yes.\n\nSo the text I can read is the signature: \"C. L. R. James\".\n\n",
+   "ms": 5106.1,
+   "completion_tokens": 220
+  },
+  {
+   "image": "text",
+   "repeat": 1,
+   "text": "The user wants me to transcribe any text in the image and describe the rest.\n\nLet me look carefully at the image. It's a dark, moody scene. There's a person in a dark coat, back turned, standing in what looks like a dark interior or night scene. There's a window on the left with light coming through, showing a dark landscape outside (maybe a hill or field). There's a small table or stand on the right with a lit candle or lamp on it, casting warm light. There's a small round table in the foreground with a book or paper on it.\n\nIs there any text? I need to look carefully. The image appears to be a painting or digital artwork. I don't see any obvious text. Let me look again. There's no visible text in the image. The user says \"Transcribe any text you can read in this image, then describe the rest of the picture.\" So if there's no text, I should say there's no text, then describe.\n\nLet me look very carefully for any text. The",
+   "ms": 3813.7,
+   "completion_tokens": 220
+  },
+  {
+   "image": "grad",
+   "repeat": 0,
+   "text": "The user wants a description of color transitions and overall visual pattern. The image is a macro/abstract close-up, likely of a textured surface or macro photography. I need to look carefully.\n\nThe image appears to be a dark, abstract, macro-like photograph. There's a dark background with a central lighter, textured region. Colors: dark brown/black on left and top, transitioning to a lighter beige/tan/cream textured area in the center-right, with some reddish-brown, orange, and pinkish tones. There's a vertical-ish band of lighter texture running through the middle, with a darker vertical seam or crack on the left side of that band. The texture looks like fibrous, fuzzy, or granular material\u2014maybe a macro of fabric, fur, moss, or a surface.\n\nLet me look more carefully. The image is roughly square. The left third is dark, almost black/dark brown, with a vertical dark line/edge. The center has a lighter, mottled beige/tan area with a vertical lighter streak. The right side has a",
+   "ms": 4784.4,
+   "completion_tokens": 220
+  },
+  {
+   "image": "grad",
+   "repeat": 1,
+   "text": "The user wants a description of color transitions and overall visual pattern. The image is a macro/abstract photograph, likely of a flower or plant, with strong color gradients. Need to describe colors, transitions, pattern.\n\nLet's look carefully. The image appears to be a close-up of a flower, possibly a tulip or poppy, with a dark center and bright red/orange petals. There's a vertical dark band in the center, surrounded by red/orange, transitioning to yellow/green at edges. There are dark veins/lines radiating. The pattern is radial/symmetrical, with a central dark core, bright red/orange around it, and yellow-green outer areas. There are dark streaks/veins, possibly stamens or petal veins. The top has dark red/maroon, bottom has yellow-green. There's a dark vertical shape in center, maybe pistil/stigma. The colors transition from deep red/maroon at top to bright orange-red in middle, to yellow-green at bottom/edges. There are dark lines/veins",
+   "ms": 3859.6,
+   "completion_tokens": 220
+  }
+ ]
+}
