@@ -337,9 +337,11 @@ const I18N = {
     "chat.newChat": "新会话已开始",
     "chat.exported": "已导出 qinfer-chat.md",
     "chat.noExport": "没有可导出的对话",
-    "metric.speed": "速度",
+    "metric.speed": "解码速度",
+    "metric.prefill": "预填充速度",
     "metric.gpuLoad": "GPU 负载",
     "metric.vram": "显存",
+    "metric.ram": "系统内存",
     "metric.temp": "GPU 温度",
     "metric.power": "功率",
     "metric.pcie": "PCIe",
@@ -446,12 +448,14 @@ const I18N = {
     "req.stoppedBadge": "已停止",
     "req.closed": "已关闭",
     "cc.cachedConv": "已缓存对话",
-    "cc.theirMemory": "记忆占用",
+    "cc.reusedPrompt": "已复用提示词",
     "cc.enabledNote": "继续已缓存的对话时，引擎会直接恢复状态，无需重新处理。",
     "cc.disabledNote": "引擎保留上次对话的状态，后续请求只需处理新增内容。",
-    "cc.lastReq": "上次请求",
-    "cc.reusedSince": "自启动以来已复用",
-    "cc.parkedRestored": "已暂停 / 已恢复",
+    "cc.hitRate": "命中率",
+    "cc.hits": "命中",
+    "cc.misses": "未命中",
+    "cc.cachedTokens": "缓存 token",
+    "cc.capacity": "缓存容量",
     "about.clientDesc": "任何兼容 OpenAI 或 Anthropic 协议的客户端均可使用以下地址。接口地址：",
     "about.endpointPaths": "端点路径",
     "about.openaiLabel": "OpenAI",
@@ -478,15 +482,14 @@ const I18N = {
     "about.vision": "视觉",
     "about.buildInfo": "构建信息",
     "mon.decodeNow": "实时解码",
+    "mon.decodeMean": "会话均值",
+    "mon.decodeLast": "上次请求",
     "mon.decodeLabel": "解码",
+    "mon.prefillLabel": "上轮预填充",
     "mon.notAvail": "不可用",
     "mon.limit": "上限",
     "mon.cores": "核心",
     "mon.threads": "线程",
-    "conv.reusedOf": "复用",
-    "conv.ofPrompt": "提示词 token 数",
-    "conv.pctAll": "占全部提示词",
-    "conv.tokens": "token",
     "toast.copied": "已复制",
     "toast.imgOver": "超过 20 MB",
     "toast.fileOver": "超过 512 KB",
@@ -520,7 +523,6 @@ const I18N = {
     "misc.confirm": "确认",
     "misc.pastedImage": "粘贴的图片",
     "misc.gpu": "GPU",
-    "misc.evicted": "已驱逐",
     "unit.tokS": "tok/s",
     "unit.tokens": "tokens",
     "unit.seconds": "s",
@@ -615,6 +617,8 @@ const I18N = {
     "chat.exported": "Exported qinfer-chat.md",
     "chat.noExport": "Nothing to export",
     "metric.speed": "Speed",
+    "metric.prefill": "Prefill",
+    "metric.ram": "System RAM",
     "metric.gpuLoad": "GPU load",
     "metric.vram": "VRAM",
     "metric.temp": "GPU temp",
@@ -723,12 +727,14 @@ const I18N = {
     "req.stoppedBadge": "Stopped",
     "req.closed": "Closed",
     "cc.cachedConv": "Cached conversations",
-    "cc.theirMemory": "Memory usage",
+    "cc.reusedPrompt": "Reused prompt tokens",
     "cc.enabledNote": "Continuing a cached conversation restores its state without reprocessing.",
     "cc.disabledNote": "The engine keeps the last conversation's state so follow-ups only process new content.",
-    "cc.lastReq": "Last request",
-    "cc.reusedSince": "Total reused",
-    "cc.parkedRestored": "Parked / Restored",
+    "cc.hitRate": "Hit rate",
+    "cc.hits": "Hits",
+    "cc.misses": "Misses",
+    "cc.cachedTokens": "Cached tokens",
+    "cc.capacity": "Cache capacity",
     "about.clientDesc": "Any OpenAI- or Anthropic-compatible client can use these addresses. Base URL:",
     "about.endpointPaths": "Endpoint paths",
     "about.openaiLabel": "OpenAI",
@@ -755,15 +761,14 @@ const I18N = {
     "about.vision": "Vision",
     "about.buildInfo": "Build info",
     "mon.decodeNow": "Current decode",
+    "mon.decodeMean": "session mean",
+    "mon.decodeLast": "last request",
     "mon.decodeLabel": "Decode",
+    "mon.prefillLabel": "last prefill",
     "mon.notAvail": "not available",
     "mon.limit": "limit",
     "mon.cores": "cores",
     "mon.threads": "threads",
-    "conv.reusedOf": "reused of",
-    "conv.ofPrompt": "prompt tokens",
-    "conv.pctAll": "of all prompt tokens",
-    "conv.tokens": "tokens",
     "toast.copied": "Copied",
     "toast.imgOver": "is over 20 MB",
     "toast.fileOver": "is over 512 KB",
@@ -797,7 +802,6 @@ const I18N = {
     "misc.confirm": "Confirm",
     "misc.pastedImage": "pasted image",
     "misc.gpu": "GPU",
-    "misc.evicted": "evicted",
     "unit.tokS": "tok/s",
     "unit.tokens": "tokens",
     "unit.seconds": "s",
@@ -2295,7 +2299,6 @@ async function pollMetrics() {
     const d = await res.json();
     window.lastMetrics = d;
     const l = d.live || {};
-    const hw = d.hardware || {};
     const state = l.state || "?";
     const queued = l.queued === undefined ? 0 : l.queued;
     const tok = fmtRate(l.tok_s);
@@ -2307,16 +2310,8 @@ async function pollMetrics() {
     } else {
       setPill("idle", tr("state.idle"));
     }
-    // Push sparkline data even when monitor tab isn't visible, so switching to it shows history
-    pushSpark("tok_s", l.tok_s);
-    pushSpark("gpu_util", hw.gpu_util);
-    pushSpark("gpu_mem_used", hw.gpu_mem_used);
-    pushSpark("gpu_temp", hw.gpu_temp);
-    pushSpark("gpu_power", hw.gpu_power);
-    pushSpark("gpu_pcie_rx_mb", hw.gpu_pcie_rx_mb);
-    pushSpark("cpu", hw.cpu);
-    pushSpark("disk_read_mb", hw.disk_read_mb);
-    pushSpark("igpu_freq_mhz", hw.igpu_freq_mhz);
+    // The Monitor tab renders sparklines from the server's own history window,
+    // so the chat-side poll only needs the status line and the pill.
   } catch (e) {
     setStatusDot(false);
     var chatStateEl = $("chat-state");
@@ -3322,17 +3317,50 @@ function kvTable(tbodyId, rows) {
   });
 }
 
-// Metric card definitions for the 4-column grid
+// ---- Monitor speed: the decode rate is a per-request number ------------------
+// The server's live.tok_s is the *last request's* rate, so sampling it once a
+// second draws a flat line between requests and leaves the card blank while idle.
+// Both readings come from here instead: one chart point per request (with the
+// live rate appended while a request runs), and a card that falls back through
+// session mean → last request before giving up.
+var QinferSpeed = {
+  WINDOW: 60,
+  // `requests` is the ring newest-first, as /api/returns it; liveTokS is the
+  // in-flight rate or null. Returns oldest-first numbers for the sparkline.
+  series: function (requests, liveTokS) {
+    var out = [];
+    (requests || []).forEach(function (r) {
+      var v = r && r.decode_tok_s;
+      if (typeof v === "number" && v > 0) out.unshift(v);
+    });
+    if (typeof liveTokS === "number" && liveTokS > 0) out.push(liveTokS);
+    if (out.length > QinferSpeed.WINDOW) out = out.slice(out.length - QinferSpeed.WINDOW);
+    return out;
+  },
+  card: function (live) {
+    var l = live || {};
+    if (l.state === "generating" && l.tok_s != null) return { value: l.tok_s, labelKey: "mon.decodeNow" };
+    if (l.tok_s_mean != null) return { value: l.tok_s_mean, labelKey: "mon.decodeMean" };
+    if (l.tok_s != null) return { value: l.tok_s, labelKey: "mon.decodeLast" };
+    return { value: null, labelKey: "mon.decodeLabel" };
+  },
+};
+
+// Metric card definitions for the 4-column grid. `series` is the key of the
+// server-side 60-sample history block in /metrics; speed is the exception — it
+// plots per-request rates (QinferSpeed.series), not a 1 Hz sample.
 var MON_METRICS = [
   {key: "speed", labelKey: "metric.speed", icon: "i-gauge", unit: "t/s", series: "tok_s"},
+  {key: "prefill", labelKey: "metric.prefill", icon: "i-bolt", unit: "t/s", series: "prefill_tok_s_mean"},
   {key: "gpu", labelKey: "metric.gpuLoad", icon: "i-gpu", unit: "%", series: "gpu_util", max: 100},
-  {key: "vram", labelKey: "metric.vram", icon: "i-layers", unit: "GB", series: "gpu_mem_used"},
-  {key: "temp", labelKey: "metric.temp", icon: "i-thermometer", unit: "\u00b0C", series: "gpu_temp", tone: "warn"},
-  {key: "power", labelKey: "metric.power", icon: "i-bolt", unit: "W", series: "gpu_power"},
+  {key: "vram", labelKey: "metric.vram", icon: "i-layers", unit: "GB", series: "gpu_mem_used", bytes: true, maxFrom: "gpu_mem_total"},
+  {key: "ram", labelKey: "metric.ram", icon: "i-layers", unit: "GB", series: "ram_used", bytes: true, maxFrom: "ram_total"},
+  {key: "temp", labelKey: "metric.temp", icon: "i-thermometer", unit: "\u00b0C", series: "gpu_temp", tone: "warn", max: 90},
+  {key: "power", labelKey: "metric.power", icon: "i-bolt", unit: "W", series: "gpu_power", maxFrom: "gpu_power_limit"},
   {key: "pcie", labelKey: "metric.pcie", icon: "i-link", unit: "", series: "gpu_pcie_rx_mb", tone: "info"},
   {key: "cpu", labelKey: "metric.cpu", icon: "i-cpu", unit: "%", series: "cpu", max: 100},
   {key: "disk", labelKey: "metric.disk", icon: "i-disk", unit: "MB/s", series: "disk_read_mb", tone: "info"},
-  {key: "igpu", labelKey: "metric.igpu", icon: "i-gpu", unit: "MHz", series: "igpu_freq_mhz"},
+  {key: "igpu", labelKey: "metric.igpu", icon: "i-gpu", unit: "MHz", series: "igpu_freq_mhz", maxFrom: "igpu_freq_max_mhz"},
 ];
 
 function initMetricCards() {
@@ -3354,34 +3382,31 @@ function initMetricCards() {
   }).join("");
 }
 
-// Render an SVG sparkline from an array of values (rolling window)
-function sparkline(id, values, max) {
+// Render an SVG sparkline from an array of values (the server's 60-sample
+// history window, or a per-request series). `divisor` scales raw bytes to GB.
+function sparkline(id, values, max, divisor) {
   var svg = $(id);
   if (!svg) return;
-  var v = (values || []).map(function (x) { return x == null ? 0 : x; });
+  var d = divisor || 1;
+  var v = (values || []).map(function (x) { return x == null ? 0 : x / d; });
   if (v.length < 2) {
     svg.querySelector(".line").setAttribute("d", "");
     svg.querySelector(".area").setAttribute("d", "");
     return;
   }
-  // vram stores bytes; convert to GB for display and shape calculation
-  var isVram = (id === "sp-vram");
-  var divisor = isVram ? 1073741824 : 1;
-  var vDisplay = v.map(function(x) { return x / divisor; });
-  var maxDisplay = max ? max / divisor : 0;
-  
-  var top = Math.max(maxDisplay, Math.max.apply(null, vDisplay), 0.01);
-  var positiveValues = vDisplay.filter(function(x) { return x > 0; });
+  var maxDisplay = (max || 0) / d;
+  var top = Math.max(maxDisplay, Math.max.apply(null, v), 0.01);
+  var positiveValues = v.filter(function (x) { return x > 0; });
   var min = positiveValues.length ? Math.min.apply(null, positiveValues) : 0;
-  
-  var pts = vDisplay.map(function (x, i) {
-    return [(i / (vDisplay.length - 1)) * 100, 30 - (x / top) * 26];
+
+  var pts = v.map(function (x, i) {
+    return [(i / (v.length - 1)) * 100, 30 - (x / top) * 26];
   });
   var line = pts.map(function (p, i) { return (i ? "L" : "M") + p[0].toFixed(2) + "," + p[1].toFixed(2); }).join("");
   svg.querySelector(".line").setAttribute("d", line);
   svg.querySelector(".area").setAttribute("d", line + "L100,32L0,32Z");
-  
-  // Update axis labels (now in HTML, not SVG)
+
+  // Axis labels live in the wrapper, not the SVG.
   var wrapper = svg.parentElement;
   if (wrapper) {
     var maxLabel = wrapper.querySelector(".axis-max");
@@ -3404,16 +3429,6 @@ function setMetricValue(key, value, unit, sub) {
   if (el) el.innerHTML = value == null ? "\u2013" : esc(value) + (unit ? '<small>' + esc(unit) + '</small>' : '');
   var s = $("ms-" + key);
   if (s) s.textContent = sub || "";
-}
-
-// Rolling sparkline history: 60 samples per series
-var sparkHistory = {};
-var SPARK_WINDOW = 60;
-
-function pushSpark(series, value) {
-  if (!sparkHistory[series]) sparkHistory[series] = [];
-  sparkHistory[series].push(value);
-  if (sparkHistory[series].length > SPARK_WINDOW) sparkHistory[series].shift();
 }
 
 async function refreshAbout() {
@@ -3591,26 +3606,21 @@ function renderMonitorTab(m) {
   var stateBar = $("state-bar");
   if (stateBar) stateBar.style.width = pct + "%";
 
-  // Push current values into rolling sparkline history
-  pushSpark("tok_s", live.tok_s);
-  pushSpark("gpu_util", hw.gpu_util);
-  pushSpark("gpu_mem_used", hw.gpu_mem_used);
-  pushSpark("gpu_temp", hw.gpu_temp);
-  pushSpark("gpu_power", hw.gpu_power);
-  pushSpark("gpu_pcie_rx_mb", hw.gpu_pcie_rx_mb);
-  pushSpark("cpu", hw.cpu);
-  pushSpark("disk_read_mb", hw.disk_read_mb);
-  pushSpark("igpu_freq_mhz", hw.igpu_freq_mhz);
-
-  // Metric cards
-  var speed = live.state === "generating" ? live.tok_s : null;
-  setMetricValue("speed", speed == null ? null : fmtNum(speed, 1), "t/s",
-    live.state === "generating" ? tr("mon.decodeNow") : tr("mon.decodeLabel"));
+  // Metric cards. Every sparkline reads the server's 60-sample history window
+  // (m.history), so the charts cover the minute before the page was opened and
+  // never depend on how long this tab has been polling.
+  var GB = 1073741824;
+  var speedCard = QinferSpeed.card(live);
+  setMetricValue("speed", speedCard.value == null ? null : fmtNum(speedCard.value, 1), "t/s", tr(speedCard.labelKey));
+  setMetricValue("prefill", live.prefill_tok_s_mean == null ? null : fmtNum(live.prefill_tok_s_mean, 1), "t/s",
+    tr("mon.prefillLabel"));
   setMetricValue("gpu", hw.gpu_util == null ? null : fmtNum(hw.gpu_util), "%",
     st.gpu_name || (st.gpu_note ? tr("mon.notAvail") : ""));
-  var vramUsed = hw.gpu_mem_used != null ? (hw.gpu_mem_used / 1073741824).toFixed(2) : null;
-  var vramTotal = hw.gpu_mem_total ? " / " + (hw.gpu_mem_total / 1073741824).toFixed(0) + " GB" : " GB";
+  var vramUsed = hw.gpu_mem_used != null ? (hw.gpu_mem_used / GB).toFixed(2) : null;
+  var vramTotal = hw.gpu_mem_total ? " / " + (hw.gpu_mem_total / GB).toFixed(0) + " GB" : " GB";
   setMetricValue("vram", vramUsed, vramTotal, "");
+  var ramUsed = hw.ram_used != null ? (hw.ram_used / GB).toFixed(1) : null;
+  setMetricValue("ram", ramUsed, hw.ram_total ? " / " + (hw.ram_total / GB).toFixed(0) + " GB" : " GB", "");
   setMetricValue("temp", hw.gpu_temp == null ? null : fmtNum(hw.gpu_temp), "\u00b0C", "");
   setMetricValue("power", hw.gpu_power == null ? null : fmtNum(hw.gpu_power), "W",
     hw.gpu_power_limit ? tr("mon.limit") + " " + fmtNum(hw.gpu_power_limit) + " W" : "");
@@ -3624,16 +3634,13 @@ function renderMonitorTab(m) {
   if (st.igpu_name) igpuSub += (igpuSub ? " · " : "") + st.igpu_name;
   setMetricValue("igpu", hw.igpu_freq_mhz == null ? null : fmtNum(hw.igpu_freq_mhz), "MHz", igpuSub);
 
-  // Sparklines
-  sparkline("sp-speed", sparkHistory.tok_s);
-  sparkline("sp-gpu", sparkHistory.gpu_util, 100);
-  sparkline("sp-vram", sparkHistory.gpu_mem_used, hw.gpu_mem_total);
-  sparkline("sp-temp", sparkHistory.gpu_temp, 90);
-  sparkline("sp-power", sparkHistory.gpu_power, hw.gpu_power_limit);
-  sparkline("sp-pcie", sparkHistory.gpu_pcie_rx_mb);
-  sparkline("sp-cpu", sparkHistory.cpu, 100);
-  sparkline("sp-disk", sparkHistory.disk_read_mb);
-  sparkline("sp-igpu", sparkHistory.igpu_freq_mhz, hw.igpu_freq_max_mhz);
+  MON_METRICS.forEach(function (m) {
+    var series = m.key === "speed"
+      ? QinferSpeed.series(reqCache_, live.state === "generating" ? live.tok_s : null)
+      : (h[m.series] || []);
+    var mx = m.max != null ? m.max : (m.maxFrom ? hw[m.maxFrom] : null);
+    sparkline("sp-" + m.key, series, mx, m.bytes ? GB : 1);
+  });
 
   // Context fill gauge
   var ctx = eng.max_context || 0;
@@ -3697,7 +3704,7 @@ function renderMonitorTab(m) {
   }
 
   // Conversation cache
-  renderConvCache(m.conversation_cache);
+  renderConvCache(m.conversation_cache, m.totals);
 }
 
 function fmtNum(n, d) {
@@ -3705,37 +3712,41 @@ function fmtNum(n, d) {
   return Number(n).toLocaleString(undefined, {maximumFractionDigits: d || 0, minimumFractionDigits: d || 0});
 }
 
-function renderConvCache(c) {
+// Conversation cache card. /metrics reports the server's real counters:
+// {enabled, capacity, hits, misses, entries, tokens}; the reuse share comes from
+// the session totals (reused / prompt_tokens), which is what the cache saves.
+function renderConvCache(c, totals) {
   var card = $("cc-card");
   if (!card) return;
   card.style.display = c ? "" : "none";
   if (!c) return;
+  var t = totals || {};
   var bars = $("cc-bars");
   if (bars) bars.hidden = !c.enabled;
   if (c.enabled) {
     var slotsText = $("cc-slots-text");
-    if (slotsText) slotsText.textContent = fmtNum(c.parked) + " / " + fmtNum(c.slots);
+    if (slotsText) slotsText.textContent = fmtNum(c.entries) + " / " + fmtNum(c.capacity);
     var slotsBar = $("cc-slots-bar");
-    if (slotsBar) slotsBar.style.width = (c.slots ? Math.min(100, (100 * c.parked) / c.slots) : 0) + "%";
-    var budget = c.budget_mib * 1048576;
+    if (slotsBar) slotsBar.style.width = (c.capacity ? Math.min(100, (100 * (c.entries || 0)) / c.capacity) : 0) + "%";
     var memText = $("cc-mem-text");
     if (memText) {
-      var bytesGB = (c.bytes != null && !isNaN(c.bytes)) ? (c.bytes / 1073741824).toFixed(1) : "\u2013";
-      var budgetGB = (budget && !isNaN(budget)) ? (budget / 1073741824).toFixed(0) : "\u2013";
-      memText.textContent = bytesGB + " / " + budgetGB + " GB";
+      var share = t.prompt_tokens ? " (" + fmtNum((100 * (t.reused || 0)) / t.prompt_tokens) + "%)" : "";
+      memText.textContent = fmtNum(t.reused) + " / " + fmtNum(t.prompt_tokens) + " " + tr("unit.tokens") + share;
     }
     var memBar = $("cc-mem-bar");
-    if (memBar) memBar.style.width = (budget && c.bytes != null ? Math.min(100, (100 * c.bytes) / budget) : 0) + "%";
+    if (memBar) memBar.style.width = (t.prompt_tokens ? Math.min(100, (100 * (t.reused || 0)) / t.prompt_tokens) : 0) + "%";
   }
+  var attempts = (c.hits || 0) + (c.misses || 0);
   var sum = $("cc-sum");
-  if (sum) sum.textContent = c.requests ? fmtNum(c.requests_reused) + " " + tr("conv.reusedOf") + " " + fmtNum(c.requests) + " " + tr("conv.ofPrompt") : "";
+  if (sum) sum.textContent = attempts ? tr("cc.hitRate") + " " + fmtNum((100 * (c.hits || 0)) / attempts) + "%" : "";
   var factsEl = $("cc-facts");
   if (factsEl) {
-    var share = c.prompt_tokens ? " (" + fmtNum((100 * c.reused_tokens) / c.prompt_tokens) + "% " + tr("conv.pctAll") + ")" : "";
-    factsEl.innerHTML =
-      (c.last_prompt != null ? '<dt>' + esc(tr("cc.lastReq")) + '</dt><dd>' + fmtNum(c.last_reused || 0) + ' ' + tr("conv.reusedOf") + ' ' + fmtNum(c.last_prompt) + ' ' + tr("conv.ofPrompt") + '</dd>' : '') +
-      (c.requests ? '<dt>' + esc(tr("cc.reusedSince")) + '</dt><dd>' + fmtNum(c.reused_tokens) + ' ' + tr("conv.tokens") + share + '</dd>' : '') +
-      (c.enabled ? '<dt>' + esc(tr("cc.parkedRestored")) + '</dt><dd>' + fmtNum(c.parks) + ' / ' + fmtNum(c.restores) + (c.evictions ? ' \u00b7 ' + fmtNum(c.evictions) + ' ' + tr("misc.evicted") : '') + '</dd>' : '');
+    factsEl.innerHTML = factsHtml([
+      [tr("cc.hits"), fmtNum(c.hits)],
+      [tr("cc.misses"), fmtNum(c.misses)],
+      [tr("cc.cachedTokens"), fmtNum(c.tokens) + " " + tr("unit.tokens")],
+      [tr("cc.capacity"), fmtNum(c.capacity)],
+    ]);
   }
   var note = $("cc-note");
   if (note) {

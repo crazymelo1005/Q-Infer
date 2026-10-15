@@ -216,6 +216,34 @@ if (sp < 0 || spEnd < sp) {
   }
 }
 
+// --- QinferSpeed: the monitor speed card value and its sparkline series -------
+{
+  const q = src.indexOf("var QinferSpeed = {");
+  if (q < 0) throw new Error("missing QinferSpeed source");
+  const qEnd = src.indexOf("\n};", q);
+  const QS = eval(src.slice(q, qEnd + 3) + "\nQinferSpeed;");
+  const req = (tok) => ({ state: "completed", decode_tok_s: tok });
+  // /metrics lists requests newest first; the chart wants oldest first.
+  eq("series is oldest-first per-request rates", QS.series([req(90), req(80)], null), [80, 90]);
+  eq("series skips requests without a rate", QS.series([req(0), { state: "error" }, req(null), req(70)], null), [70]);
+  eq("series appends the live rate while decoding", QS.series([req(90)], 95), [90, 95]);
+  eq("series caps at the window", QS.series(Array.from({ length: 80 }, (_, i) => req(i + 1)), null).length, QS.WINDOW);
+  // Card value: the live rate while generating, the session mean once idle — the
+  // card must never read empty while the server has a rate to show.
+  const c1 = QS.card({ state: "generating", tok_s: 100, tok_s_mean: 87 });
+  if (c1.value !== 100 || c1.labelKey !== "mon.decodeNow") report("card shows the live rate while generating", { got: c1 });
+  else console.log("ok   card shows the live rate while generating");
+  const c2 = QS.card({ state: "idle", tok_s: 87.2, tok_s_mean: 87.2 });
+  if (c2.value !== 87.2 || c2.labelKey !== "mon.decodeMean") report("card falls back to the session mean when idle", { got: c2 });
+  else console.log("ok   card falls back to the session mean when idle");
+  const c3 = QS.card({ state: "idle", tok_s: 60, tok_s_mean: null });
+  if (c3.value !== 60 || c3.labelKey !== "mon.decodeLast") report("card names the last request when there is no mean", { got: c3 });
+  else console.log("ok   card names the last request when there is no mean");
+  const c4 = QS.card({ state: "idle", tok_s: null, tok_s_mean: null });
+  if (c4.value !== null) report("card stays blank with no data at all", { got: c4 });
+  else console.log("ok   card stays blank with no data at all");
+}
+
 // --- i18n three-way lint: used keys must exist, defined keys must be used ------
 // Scans every tr("...") in app.js and every data-i18n* attribute in index.html.
 // Keys built dynamically at runtime go on the whitelist with a justification.
