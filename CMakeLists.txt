@@ -193,6 +193,10 @@ target_link_libraries(test_records PRIVATE qinfer_serve)
 add_executable(test_prompt_cache tests/unit/test_prompt_cache.cpp)
 target_link_libraries(test_prompt_cache PRIVATE qinfer_serve)
 
+# 服务层默认值：--vision-gpu 默认 on 与默认编码器二进制的选择（iGPU 档 = build-vision-vk/）。
+add_executable(test_serve_config tests/unit/test_serve_config.cpp)
+target_link_libraries(test_serve_config PRIVATE qinfer_serve)
+
 # /metrics 的 Prometheus text 端口（M2 监控）：内容协商 + 三直方图 + vLLM/qinfer 家族映射。
 add_executable(test_prometheus tests/unit/test_prometheus.cpp)
 target_link_libraries(test_prometheus PRIVATE qinfer_serve)
@@ -458,6 +462,7 @@ add_test(NAME scheduler COMMAND test_scheduler)
 add_test(NAME telemetry COMMAND test_telemetry)
 add_test(NAME records COMMAND test_records)
 add_test(NAME prompt_cache COMMAND test_prompt_cache)
+add_test(NAME serve_config COMMAND test_serve_config)
 add_test(NAME prometheus COMMAND test_prometheus)
 add_test(NAME iq4nl COMMAND test_iq4nl)
 add_test(NAME iq2xs COMMAND test_iq2xs)

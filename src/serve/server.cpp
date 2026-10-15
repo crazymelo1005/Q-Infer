@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -295,19 +296,53 @@ Serve::Serve(ServeConfig cfg, std::shared_ptr<Backend> eng)
     // M5b: start vision encoder if configured.
     if (!cfg_.mmproj_path.empty()) {
         vision_ = std::make_shared<engine::VisionProcess>();
-        engine::ProcessConfig pcfg;
-        pcfg.exe = cfg_.vision_binary.empty() ? "build-vision/bin/qinfer-vision" : cfg_.vision_binary;
-        pcfg.args = {"--mmproj", cfg_.mmproj_path, "--model", cfg_.model_path};
-        if (cfg_.vision_gpu) pcfg.args.push_back("--gpu");
-        // Same convention as the engine child: its stderr lands in the server's own log, so a
-        // failed or slow encoder start names its cause instead of vanishing into /dev/null.
-        pcfg.stderr_path = "/dev/stderr";
-        std::string verr;
-        if (!engine::VisionProcess::start(pcfg, *vision_, verr)) {
-            // Log but don't fail: vision is optional, the server can still serve text.
-            std::fprintf(stderr, "vision encoder failed to start: %s\n", verr.c_str());
-            vision_.reset();
+        const bool want_gpu = cfg_.vision_gpu;
+        const bool bin_given = !cfg_.vision_binary.empty();
+        auto spawn = [&](bool gpu) {
+            engine::ProcessConfig pcfg;
+            pcfg.exe = bin_given ? cfg_.vision_binary : default_vision_binary(gpu);
+            pcfg.args = {"--mmproj", cfg_.mmproj_path, "--model", cfg_.model_path};
+            if (gpu) pcfg.args.push_back("--gpu");
+            // Same convention as the engine child: its stderr lands in the server's own log, so a
+            // failed or slow encoder start names its cause instead of vanishing into /dev/null.
+            pcfg.stderr_path = "/dev/stderr";
+            std::string verr;
+            if (engine::VisionProcess::start(pcfg, *vision_, verr)) return true;
+            std::fprintf(stderr, "vision encoder failed to start (%s): %s\n", pcfg.exe.c_str(),
+                         verr.c_str());
+            return false;
+        };
+        bool ok = false;
+        if (want_gpu) {
+            // The ggml-vulkan child needs the two knobs below, set before the spawn (the engine
+            // child is already running, so this env only reaches the encoder). Both honor a value
+            // the operator already exported: setenv(..., 0) never overwrites.
+            //   GGML_VK_ALLOW_SYSMEM_FALLBACK: the 907 MB mmproj exceeds the iGPU's device-local
+            //     heap; without the fallback ggml-vulkan dies with ErrorOutOfDeviceMemory.
+            ::setenv("GGML_VK_ALLOW_SYSMEM_FALLBACK", "1", 0);
+            //   VK_ICD_FILENAMES: with every ICD visible the loader probes the two RTX cards
+            //     first (~31 s of the ~80 s warm-up); pinning the Intel ICD cuts it to ~49 s and
+            //     guarantees the encoder cannot touch the engine's VRAM. Only set when that ICD
+            //     exists - a bogus path would leave the loader with no devices at all.
+            static const char* kIntelIcd = "/usr/share/vulkan/icd.d/intel_icd.json";
+            if (std::getenv("VK_ICD_FILENAMES") == nullptr &&
+                std::filesystem::exists(kIntelIcd))
+                ::setenv("VK_ICD_FILENAMES", kIntelIcd, 1);
+            ok = spawn(true);
+            // The iGPU arm is the default, but a plain build tree (or a machine without Vulkan)
+            // has no build-vision-vk binary: fall back to the CPU encoder so the server keeps
+            // its image capability instead of silently dropping it. An explicit --vision-binary
+            // is taken literally - no silent substitution.
+            if (!ok && !bin_given) {
+                std::fprintf(stderr,
+                             "vision encoder: the iGPU arm is unavailable; falling back to the "
+                             "CPU encoder (build with STRATA_VISION_VULKAN=ON to enable it)\n");
+                ok = spawn(false);
+            }
+        } else {
+            ok = spawn(false);
         }
+        if (!ok) vision_.reset();   // vision is optional; the server still serves text.
     }
 }
 

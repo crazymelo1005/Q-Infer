@@ -82,15 +82,26 @@ struct ServeConfig {
     // Vision (M5b): optional image encoder. When mmproj_path is non-empty, the server starts
     // a VisionProcess and accepts image_url parts in chat requests.
     std::string mmproj_path;           // --mmproj: path to mmproj.gguf
-    std::string vision_binary;         // --vision-binary: path to qinfer-vision (default: build-vision/bin/qinfer-vision)
+    std::string vision_binary;         // --vision-binary: path to qinfer-vision (empty = the
+                                       // per-arm default below; the iGPU arm is build-vision-vk/)
     std::string media_root;            // --media-root: allowed prefix for file:// URLs
     // --vision-gpu on|off: pass --gpu to the encoder child. With the ggml-vulkan build
     // (tools/build_vision.sh STRATA_VISION_VULKAN=ON) that runs the encoder on Vulkan device 0,
     // which on this box is the Intel iGPU: 192 ms against 1375 ms on 8 CPU threads, in system
-    // memory, so it costs the engine no VRAM. Off by default; the reading is distribution-level
-    // (ADR-009) -- the encoder's output is not byte-identical across devices.
-    bool vision_gpu = false;
+    // memory, so it costs the engine no VRAM. ON by default (2026-10-15): the A/B at ADR-009's
+    // distribution level (measure/vision_quality.py, 5 images x 220-token generations) found
+    // the encoder's fp16 divergence below the pipeline's own noise floor -- token-by-token
+    // greedy text is not self-repeatable on either arm, so the arms are indistinguishable at
+    // end-task level. --vision-gpu off selects the CPU encoder for machines without the
+    // Vulkan build; if the iGPU binary fails to start, the server falls back to the CPU one.
+    bool vision_gpu = true;
 };
+
+// The encoder binary that --vision-gpu selects by default: the ggml-vulkan build when the
+// encoder runs on the iGPU, the plain build otherwise. An explicit --vision-binary wins.
+inline const char* default_vision_binary(bool gpu) {
+    return gpu ? "build-vision-vk/bin/qinfer-vision" : "build-vision/bin/qinfer-vision";
+}
 
 class Serve {
 public:

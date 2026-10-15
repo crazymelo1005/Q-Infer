@@ -166,6 +166,8 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     if (a.count("--mmproj")) c.mmproj_path = a["--mmproj"];
     if (a.count("--vision-binary")) c.vision_binary = a["--vision-binary"];
     // --vision-gpu on|off: pass --gpu to the vision child (ggml-vulkan build -> the Intel iGPU).
+    // Default ON since 2026-10-15 (quality A/B at ADR-009's distribution level passed); pass
+    // off to select the CPU encoder explicitly.
     if (a.count("--vision-gpu")) {
         const std::string v = a["--vision-gpu"];
         if (v != "on" && v != "off") { err = "--vision-gpu needs on or off, got \"" + v + "\""; return {}; }
