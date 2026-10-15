@@ -41,6 +41,8 @@
   <span class="st-pill" id="pill" data-state="idle" role="status" aria-live="polite">
     <span class="st-pill__dot"></span><span id="pill-text" data-i18n="state.connecting">Connecting…</span></span>
   <button class="st-btn st-btn--icon" id="btn-lang" type="button" data-i18n-title="lang.title">EN</button>
+  <button class="st-btn st-btn--icon" id="btn-help" type="button" data-i18n-title="keys.help" data-i18n-aria="keys.title">
+    <svg class="st-icon"><use href="/web/sprite.svg#i-keyboard"/></svg></button>
   <button class="st-btn st-btn--icon" id="btn-theme" type="button" data-i18n-title="theme.title">
     <svg class="st-icon"><use id="theme-icon" href="/web/sprite.svg#i-moon"/></svg></button>
 </header>
@@ -97,6 +99,15 @@
         </button>
         <div class="composer-wrap">
           <div class="chat-foot">
+        <details class="drawer" id="sys-drawer">
+          <summary>
+            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-edit"/></svg><span data-i18n="chat.system">System prompt</span><span class="drawer-flag hidden" id="sys-flag">&bull;</span></summary>
+          <div class="drawer-body">
+            <textarea id="sys-prompt" class="input sys-input" rows="3"
+                      placeholder="Instruction just for this conversation (optional)" data-i18n-ph="chat.systemPh"></textarea>
+            <p class="muted small" data-i18n="chat.systemHint">Sent as this conversation's leading system message; other conversations are untouched.</p>
+          </div>
+        </details>
         <details class="drawer" id="sampler-drawer">
           <summary>
             <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-settings"/></svg><span data-i18n="chat.sampler">Sampler</span></summary>

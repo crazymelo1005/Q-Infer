@@ -263,6 +263,84 @@ if (sp < 0 || spEnd < sp) {
   else console.log("ok   card stays blank with no data at all");
 }
 
+// --- QinferTime: the clock a message bubble carries ---------------------------
+// Bubbles store epoch milliseconds; the label has to say "today at 20:17" for
+// this session's traffic and fall back to a date for anything older. The locale
+// is passed in so the assertions do not depend on the machine running them.
+{
+  const t = src.indexOf("var QinferTime = {");
+  if (t < 0) throw new Error("missing QinferTime source");
+  const tEnd = src.indexOf("\n};", t);
+  const QT = eval(src.slice(t, tEnd + 3) + "\nQinferTime;");
+  const now = new Date(2026, 9, 15, 20, 17, 30).getTime();   // 2026-10-15 20:17:30 local
+  eq("same day shows the clock only", QT.clock(now - 60000, now, "en-GB"), "20:16");
+  eq("yesterday shows the date", QT.clock(now - 26 * 3600 * 1000, now, "en-GB"), "14 Oct, 18:17");
+  eq("missing stamp shows nothing", QT.clock(null, now, "en-GB"), "");
+  eq("full() carries date and time", QT.full(now, "en-GB"), "15 Oct 2026, 20:17:30");
+}
+
+// --- QinferKeys: one place decides what a shortcut means ----------------------
+// The handler only executes the action name; matching stays pure so the
+// modifier combinations and the "do not steal typing" rule are testable.
+{
+  const k = src.indexOf("var QinferKeys = {");
+  if (k < 0) throw new Error("missing QinferKeys source");
+  const kEnd = src.indexOf("\n};", k);
+  const QK = eval(src.slice(k, kEnd + 3) + "\nQinferKeys;");
+  const ev = (key, mod, target) => Object.assign({key: key, target: target || {tagName: "BODY"}}, mod || {});
+  eq("Cmd/Ctrl+Shift+O opens a conversation", QK.match(ev("O", {metaKey: true, shiftKey: true})), "newConv");
+  eq("Cmd/Ctrl+O alone is left to the browser", QK.match(ev("O", {metaKey: true})), null);
+  eq("Cmd/Ctrl+K focuses the composer", QK.match(ev("k", {ctrlKey: true})), "focusInput");
+  eq("Cmd/Ctrl+B toggles the sidebar", QK.match(ev("b", {ctrlKey: true})), "toggleSidebar");
+  eq("bare ? asks for help", QK.match(ev("?")), "help");
+  eq("? while typing is not a shortcut",
+     QK.match(ev("?", null, {tagName: "TEXTAREA"})), null);
+  eq("Escape always reports itself", QK.match(ev("Escape", null, {tagName: "INPUT"})), "escape");
+  eq("a plain letter is no shortcut", QK.match(ev("k")), null);
+  eq("unknown keys are no shortcut", QK.match(ev("F9", {altKey: true})), null);
+  eq("typing is detected in editable hosts",
+     [QK.isTyping({tagName: "INPUT"}), QK.isTyping({tagName: "DIV", isContentEditable: true}),
+      QK.isTyping({tagName: "DIV"}), QK.isTyping(null)], [true, true, false, false]);
+  // The ? dialog and the dispatch share one table, so the help panel can never
+  // advertise a shortcut the handler does not implement.
+  const mac = QK.rows(true), win = QK.rows(false);
+  eq("help lists the same actions on both platforms", mac.map(r => r.labelKey), win.map(r => r.labelKey));
+  eq("mac shows the command glyph", mac[0].keys.indexOf("⌘"), 0);
+  eq("windows shows Ctrl", win[0].keys.indexOf("Ctrl"), 0);
+  const acts = ["keys.focusInput", "keys.newConv", "keys.toggleSidebar", "keys.help",
+                "keys.escape", "keys.send", "keys.newline"];
+  eq("help covers every bound action", mac.map(r => r.labelKey), acts);
+  eq("every help row names its keys", mac.every(r => typeof r.keys === "string" && r.keys.length > 0), true);
+  // Escape walks the open layers top-down and only stops a run when nothing is open.
+  eq("firstOpen picks the topmost layer",
+     QK.firstOpen([{name: "confirm", open: false}, {name: "help", open: true}, {name: "think", open: true}]),
+     "help");
+  eq("firstOpen is null when nothing is open",
+     QK.firstOpen([{name: "help", open: false}, {name: "think", open: false}]), null);
+  eq("firstOpen survives an empty layer list", QK.firstOpen([]), null);
+}
+
+// --- QinferSystem: the per-conversation instruction ---------------------------
+// A conversation may carry its own system prompt. It becomes the leading system
+// message of the payload — and replaces one already there rather than stacking.
+{
+  const y = src.indexOf("var QinferSystem = {");
+  if (y < 0) throw new Error("missing QinferSystem source");
+  const yEnd = src.indexOf("\n};", y);
+  const QS = eval(src.slice(y, yEnd + 3) + "\nQinferSystem;");
+  const hist = [{role: "user", content: "hi"}, {role: "assistant", content: "yo"}];
+  eq("no instruction leaves the payload alone", QS.apply("", hist), hist);
+  eq("blank instruction leaves the payload alone", QS.apply("   \n ", hist), hist);
+  eq("missing instruction leaves the payload alone", QS.apply(undefined, hist), hist);
+  eq("instruction becomes the head", QS.apply("Be terse.", hist)[0], {role: "system", content: "Be terse."});
+  eq("instruction keeps the history after it", QS.apply("Be terse.", hist).length, 3);
+  eq("instruction is trimmed", QS.apply("  Be terse.  ", hist)[0].content, "Be terse.");
+  eq("a second apply replaces the head", QS.apply("Be warm.", QS.apply("Be terse.", hist))[0].content, "Be warm.");
+  eq("replacement keeps one system message",
+     QS.apply("Be warm.", QS.apply("Be terse.", hist)).filter(m => m.role === "system").length, 1);
+  eq("empty history still carries the instruction", QS.apply("Be terse.", []).length, 1);
+}
+
 // --- QinferActivity: the requests page session totals -------------------------
 // /metrics reports totals as raw counters; the card turns them into labelled rows
 // and a reuse share. Nothing here may invent a number the server did not send.

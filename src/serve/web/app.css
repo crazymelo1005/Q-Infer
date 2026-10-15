@@ -21,7 +21,9 @@ main{flex:1;min-height:0;display:flex}
 .chat-empty + .msg-list{padding-top:0}
 .msg-list{display:flex;flex-direction:column;gap:var(--st-s-4)}
 .bubble{max-width:min(78%,720px);padding:10px 14px;border-radius:var(--st-r-lg);word-break:break-word}
-.bubble .bubble-role{font-size:11px;color:var(--st-ink-muted);margin-bottom:2px}
+.bubble .bubble-role{display:flex;align-items:baseline;gap:8px;font-size:11px;color:var(--st-ink-muted);margin-bottom:2px}
+.bubble .bubble-time{margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap}
+.bubble.user .bubble-time{color:inherit;opacity:.75}
 .bubble.user{align-self:flex-end;background:var(--st-accent);color:var(--st-accent-ink);border-bottom-right-radius:6px}
 .bubble.assistant{align-self:flex-start;background:var(--st-surface);border:1px solid var(--st-line);border-bottom-left-radius:6px}
 .bubble.error{align-self:flex-start;background:var(--st-danger-tint);border:1px dashed var(--st-danger);color:var(--st-danger-text)}
@@ -417,6 +419,17 @@ main{flex:1;min-height:0;display:flex}
 .st-modal__card{background:var(--st-surface);border:1px solid var(--st-line);border-radius:var(--st-r-md);box-shadow:var(--st-shadow-lg,0 12px 32px rgba(15,23,42,.24));padding:var(--st-s-5);max-width:360px;width:100%}
 .st-modal__msg{margin:0 0 var(--st-s-4);color:var(--st-ink);font-size:var(--st-fs-sm);line-height:1.5}
 .st-modal__btns{display:flex;justify-content:flex-end;gap:var(--st-s-2)}
+/* Shortcut help dialog: a two-column key/description table inside the modal card. */
+.keys-card{max-width:440px}
+.keys-card__title{display:flex;align-items:center;gap:var(--st-s-2);font:700 var(--st-fs-md)/1.3 var(--st-font);color:var(--st-ink);margin-bottom:var(--st-s-4)}
+.keys-list{display:grid;grid-template-columns:max-content 1fr;gap:var(--st-s-2) var(--st-s-4);margin:0 0 var(--st-s-4);align-items:center}
+.keys-list dt{justify-self:start}
+.keys-list dd{margin:0;font-size:var(--st-fs-sm);color:var(--st-ink-soft);line-height:1.4}
+.st-kbd{display:inline-block;font:600 var(--st-fs-2xs,11px)/1 var(--st-font-mono);color:var(--st-ink);background:var(--st-surface-2);border:1px solid var(--st-line);border-bottom-width:2px;border-radius:6px;padding:4px 7px;white-space:nowrap}
+/* Per-conversation system prompt */
+.sys-input{resize:vertical;min-height:64px;font-size:var(--st-fs-sm);line-height:1.5}
+.drawer-flag{color:var(--st-accent,currentColor);font-weight:900;line-height:1}
+.drawer-flag.hidden{display:none}
 .conv-item__edit{width:100%;min-width:0;height:26px;padding:var(--st-s-1) var(--st-s-2);font-size:var(--st-fs-xs)}
 
 /* ---- Conversation grouping + sidebar footer (P1) ---- */

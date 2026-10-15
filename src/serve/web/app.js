@@ -374,6 +374,18 @@ const I18N = {
     "chat.thinkMedium": "中",
     "chat.thinkXhigh": "极高",
     "chat.thinkLevelAria": "思考档位",
+    "keys.title": "键盘快捷键",
+    "keys.focusInput": "聚焦输入框",
+    "keys.newConv": "新建对话",
+    "keys.toggleSidebar": "显示或隐藏对话栏",
+    "keys.help": "打开这份快捷键清单",
+    "keys.escape": "关闭当前浮层；没有浮层时停止生成",
+    "keys.send": "发送消息",
+    "keys.newline": "输入框内换行",
+    "chat.system": "系统提示词",
+    "chat.systemPh": "只对本对话生效的系统指令（可留空）",
+    "chat.systemHint": "作为本对话的首条 system 消息发送，不影响其他对话。",
+    "misc.close": "关闭",
     "mon.state": "模型状态",
     "mon.searchPh": "搜索路径 / 模型 / 状态",
     "mon.filterTitle": "状态过滤",
@@ -665,6 +677,18 @@ const I18N = {
     "chat.thinkMedium": "Medium",
     "chat.thinkXhigh": "xHigh",
     "chat.thinkLevelAria": "Thinking level",
+    "keys.title": "Keyboard shortcuts",
+    "keys.focusInput": "Focus the message box",
+    "keys.newConv": "Start a new conversation",
+    "keys.toggleSidebar": "Show or hide the conversation list",
+    "keys.help": "Open this shortcut list",
+    "keys.escape": "Close what is open; with nothing open, stop generating",
+    "keys.send": "Send the message",
+    "keys.newline": "New line in the message box",
+    "chat.system": "System prompt",
+    "chat.systemPh": "Instruction just for this conversation (optional)",
+    "chat.systemHint": "Sent as this conversation's leading system message; other conversations are untouched.",
+    "misc.close": "Close",
     "mon.state": "Model state",
     "mon.searchPh": "Search path / model / state",
     "mon.filterTitle": "Filter by state",
@@ -929,13 +953,30 @@ function applyLang() {
   // Only the shell pages' brand carries no data-i18n; the monitor page sets its
   // own title through the [data-i18n] pass above. Skip it to avoid overriding.
   if (bd && !bd.dataset.i18n) bd.textContent = tr("brand.tag");
-  // Refresh role labels of already-rendered bubbles (dynamically built, no data-i18n).
+  // Refresh dynamically-built bubbles: they carry no data-i18n, so re-label them
+  // here. Only the inner .bubble-who span changes — overwriting .bubble-role would
+  // destroy the timestamp beside it. Times are locale-formatted, so they refresh too.
   document.querySelectorAll("#msg-list .bubble").forEach(function (b) {
-    const r = b.querySelector(".bubble-role");
-    if (!r) return;
-    r.textContent = b.classList.contains("user") ? tr("chat.you")
+    if (b.classList.contains("tool-call")) {
+      // Its label is plain text, so it is safe to rewrite in place.
+      const r = b.querySelector(".bubble-role");
+      const names = (b._toolCalls || []).map(function (tc) { return tc.function.name; }).join(", ");
+      if (r) r.textContent = tr("tool.calling") + ": " + names;
+      return;
+    }
+    const who = b.querySelector(".bubble-who");
+    if (!who) return;
+    who.textContent = b.classList.contains("user") ? tr("chat.you")
       : b.classList.contains("error") ? tr("chat.error") : tr("chat.assistant");
+    const when = b.querySelector(".bubble-time");
+    if (when && b._ts != null) {
+      when.textContent = QinferTime.clock(b._ts);
+      when.title = QinferTime.full(b._ts);
+    }
   });
+  // Sidebar group headings ("Today"/"今天") come from tr() at build time, so the
+  // list needs a re-render; conversation titles are user content and stay as typed.
+  QinferConv.renderList();
   // Refresh dynamically-rendered panels that use tr() at build time
   // Re-render metric card labels (built once by initMetricCards)
   initMetricCards();
@@ -1073,6 +1114,8 @@ function showConfirm(message, confirmLabel) {
     card.className = "st-modal__card";
     var msg = document.createElement("p");
     msg.className = "st-modal__msg";
+    msg.id = "st-modal-msg";
+    overlay.setAttribute("aria-labelledby", msg.id);
     msg.textContent = message;
     var btns = document.createElement("div");
     btns.className = "st-modal__btns";
@@ -1105,6 +1148,103 @@ function showConfirm(message, confirmLabel) {
     document.addEventListener("keydown", onKey);
     bOk.focus();
   });
+}
+
+/* ---- Shortcut help dialog: renders the same table the handler binds, so the
+   list can never drift from what the keys actually do. ---- */
+function isMacKeys() {
+  var nav = window.navigator || {};
+  return /mac|iphone|ipad|ipod/i.test(nav.platform || nav.userAgent || "");
+}
+function showHelpDialog() {
+  if (document.querySelector(".st-modal")) return;   // one modal at a time
+  var overlay = document.createElement("div");
+  overlay.className = "st-modal";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  var card = document.createElement("div");
+  card.className = "st-modal__card keys-card";
+  var title = document.createElement("div");
+  title.className = "keys-card__title";
+  title.innerHTML = '<svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-keyboard"/></svg>';
+  var h = document.createElement("span");
+  h.id = "keys-dialog-title";
+  h.textContent = tr("keys.title");
+  title.appendChild(h);
+  var dl = document.createElement("dl");
+  dl.className = "keys-list";
+  QinferKeys.rows(isMacKeys()).forEach(function (r) {
+    var dt = document.createElement("dt");
+    var kbd = document.createElement("kbd");
+    kbd.className = "st-kbd";
+    kbd.textContent = r.keys;
+    dt.appendChild(kbd);
+    var dd = document.createElement("dd");
+    dd.textContent = tr(r.labelKey);
+    dl.appendChild(dt);
+    dl.appendChild(dd);
+  });
+  var btns = document.createElement("div");
+  btns.className = "st-modal__btns";
+  var bClose = document.createElement("button");
+  bClose.type = "button";
+  bClose.className = "st-btn st-btn--secondary";
+  bClose.textContent = tr("misc.close");
+  btns.appendChild(bClose);
+  card.appendChild(title);
+  card.appendChild(dl);
+  card.appendChild(btns);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  function close() {
+    document.removeEventListener("keydown", onKey);
+    overlay.remove();
+    bClose.blur();
+  }
+  function onKey(e) {
+    if (e.key === "Escape") { e.preventDefault(); close(); }
+  }
+  bClose.addEventListener("click", close);
+  overlay.addEventListener("click", function (e) { if (e.target === overlay) close(); });
+  document.addEventListener("keydown", onKey);
+  bClose.focus();
+}
+
+/* ---- Dismissible layers -----------------------------------------------------
+   Escape walks these top-down before it reaches "stop generating". The thinking
+   popover floats above the footer drawers, and within the drawers the one opened
+   last is the one the user means. */
+var drawerStack = [];
+function trackDrawer(id) {
+  const d = $(id);
+  if (!d) return;
+  d.addEventListener("toggle", function () {
+    const i = drawerStack.indexOf(id);
+    if (i >= 0) drawerStack.splice(i, 1);
+    if (d.open) drawerStack.unshift(id);
+  });
+}
+function setDrawer(id, open) {
+  const d = $(id);
+  if (d) d.open = open;
+}
+function closeThinkPopover() {
+  const pop = $("think-popover"), chip = $("btn-thinking");
+  if (pop) pop.classList.add("hidden");
+  if (chip) chip.setAttribute("aria-expanded", "false");
+}
+function overlayLayers() {
+  const pop = $("think-popover");
+  const layers = [{name: "think", open: !!pop && !pop.classList.contains("hidden")}];
+  drawerStack.forEach(function (id) {
+    const d = $(id);
+    layers.push({name: "drawer:" + id, open: !!d && d.open});
+  });
+  return layers;
+}
+function toggleConvSidebar() {
+  const sb = $("conv-sidebar");
+  if (sb) sb.classList.toggle("hidden");
 }
 
 /* ---- Status dot ---- */
@@ -1473,13 +1613,22 @@ function hideEmptyPrompt() {
   if (e) e.style.display = "none";
 }
 
-function addMsg(role, text, attachList) {
+function addMsg(role, text, attachList, ts) {
   hideEmptyPrompt();
   const el = document.createElement("div");
   el.className = "bubble " + role;
+  el._ts = ts == null ? Date.now() : ts;
   const label = document.createElement("div");
   label.className = "bubble-role";
-  label.textContent = role === "user" ? tr("chat.you") : role === "error" ? tr("chat.error") : tr("chat.assistant");
+  const name = document.createElement("span");
+  name.className = "bubble-who";
+  name.textContent = role === "user" ? tr("chat.you") : role === "error" ? tr("chat.error") : tr("chat.assistant");
+  const when = document.createElement("span");
+  when.className = "bubble-time";
+  when.textContent = QinferTime.clock(el._ts);
+  when.title = QinferTime.full(el._ts);
+  label.appendChild(name);
+  label.appendChild(when);
   const body = document.createElement("div");
   body.className = "bubble-body";
   // User messages: plain text. Assistant/error: will be rendered as Markdown when complete.
@@ -2116,7 +2265,7 @@ async function doChatRound() {
   var tools = QinferTools.getDefinitions();
   var body = {
     model: modelId,
-    messages: collectMessages(),
+    messages: QinferSystem.apply(convSystemText(), collectMessages()),
     stream: true,
     stream_options: { include_usage: true },   // ask for the final usage frame
     max_tokens: parseInt($("s-max-tokens").value, 10) || 2048,
@@ -2685,14 +2834,10 @@ function initChat() {
       it.addEventListener("click", function (e) {
         e.stopPropagation();
         setThinkLevel(it.dataset.level);
-        thinkPop.classList.add("hidden");
-        thinkChip.setAttribute("aria-expanded", "false");
+        closeThinkPopover();
       });
     });
-    document.addEventListener("click", function () {
-      thinkPop.classList.add("hidden");
-      thinkChip.setAttribute("aria-expanded", "false");
-    });
+    document.addEventListener("click", closeThinkPopover);
   }
   // Presets: one click sets the seven sampling fields.
   var chips = $("preset-chips");
@@ -2731,19 +2876,44 @@ function initChat() {
       e.preventDefault();
       sendChat();
     }
-  });  // Global keyboard shortcuts
+  });  // Global keyboard shortcuts: QinferKeys.match names the action, this runs it.
   document.addEventListener("keydown", function (e) {
-    // Escape to stop generation
-    if (e.key === "Escape" && streaming && abortCtrl) {
-      stopChat();
+    const action = QinferKeys.match(e);
+    if (!action) return;
+    if (action === "escape") {
+      // A modal (confirm dialog, shortcut help) owns its own Escape handler.
+      if (document.querySelector(".st-modal")) return;
+      const top = QinferKeys.firstOpen(overlayLayers());
+      if (top === "think") closeThinkPopover();
+      else if (top && top.indexOf("drawer:") === 0) setDrawer(top.slice(7), false);
+      else if (streaming && abortCtrl) stopChat();
+      return;
     }
-    // Cmd/Ctrl+K focuses the composer.
-    if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
-      e.preventDefault();
-      var ci = $("chat-input");
+    e.preventDefault();
+    if (action === "focusInput") {
+      const ci = $("chat-input");
       if (ci) ci.focus();
+    } else if (action === "newConv") {
+      const conv = QinferConv.create();
+      QinferConv.switchTo(conv.id);
+    } else if (action === "toggleSidebar") {
+      toggleConvSidebar();
+    } else if (action === "help") {
+      showHelpDialog();
     }
   });
+  // Per-conversation system prompt: the drawer is the editor, the record is the store.
+  const sysEl = $("sys-prompt");
+  if (sysEl) {
+    sysEl.addEventListener("input", function () {
+      syncSysFlag();
+      QinferConv.saveSystem(sysEl.value);
+    });
+  }
+  trackDrawer("sys-drawer");
+  trackDrawer("sampler-drawer");
+  const btnHelp = $("btn-help");
+  if (btnHelp) btnHelp.addEventListener("click", showHelpDialog);
   // Tool panel
   initToolPanel();
   // Conversation history search: filter the rendered list by title.
@@ -2951,6 +3121,24 @@ function initScrollToBottom() {
   });
 }
 
+/* ---- Per-conversation system prompt --------------------------------------
+   The textarea is the live editor; the conversation record is the store. Keep
+   the two in sync through these three helpers so a drawer left collapsed still
+   shows a dot when the conversation carries an instruction. */
+function convSystemText() {
+  const el = $("sys-prompt");
+  return el ? el.value : "";
+}
+function syncSysFlag() {
+  const flag = $("sys-flag");
+  if (flag) flag.classList.toggle("hidden", !convSystemText().trim());
+}
+function sysApplyToConv(conv) {
+  const el = $("sys-prompt");
+  if (el) el.value = conv && conv.system ? conv.system : "";
+  syncSysFlag();
+}
+
 /* ---- Conversation history management ---- */
 var QinferConv = {
   STORAGE_KEY: "qinfer.conversations",
@@ -2968,6 +3156,15 @@ var QinferConv = {
     try { localStorage.setItem(this.STORAGE_KEY, JSON.stringify(convs)); } catch (e) {}
   },
 
+  // Persist only the instruction: typing must not rewrite the message list.
+  saveSystem: function(text) {
+    var convs = this.loadAll();
+    var conv = convs.find(function(c) { return c.id === QinferConv.currentId; });
+    if (!conv || conv.system === text) return;
+    conv.system = text;
+    this.saveAll(convs);
+  },
+
   // Get current conversation
   getCurrent: function() {
     if (!this.currentId) return null;
@@ -2979,7 +3176,7 @@ var QinferConv = {
   create: function() {
     var convs = this.loadAll();
     var id = "conv_" + Date.now();
-    var conv = { id: id, title: tr("conv.untitled"), messages: [], created: Date.now(), updated: Date.now() };
+    var conv = { id: id, title: tr("conv.untitled"), messages: [], system: "", created: Date.now(), updated: Date.now() };
     convs.unshift(conv);
     this.saveAll(convs);
     this.renderList();
@@ -2998,7 +3195,7 @@ var QinferConv = {
       var role = b.classList.contains("user") ? "user" : "assistant";
       var bodyEl = b.querySelector(".bubble-body");
       var text = b._rawText || (bodyEl ? bodyEl.textContent : "");
-      if (text) msgs.push({ role: role, content: text });
+      if (text) msgs.push({ role: role, content: text, ts: b._ts });
       if (b === bubble) break;
     }
     var nid = "conv_" + Date.now();
@@ -3009,6 +3206,7 @@ var QinferConv = {
       created: Date.now(),
       updated: Date.now(),
       params: cur ? cur.params : undefined,
+      system: cur ? cur.system || "" : "",
     });
     this.saveAll(convs);
     this.switchTo(nid);
@@ -3027,6 +3225,8 @@ var QinferConv = {
     // Restore this conversation's parameter overrides (absent = keep current).
     samplerApply(conv.params);
     if (typeof syncOverrideBadge === "function") syncOverrideBadge();
+    // Restore the conversation's own system prompt.
+    sysApplyToConv(conv);
     $("msg-list").innerHTML = "";
     if (conv.messages.length === 0) {
       var empty = $("chat-empty");
@@ -3036,9 +3236,9 @@ var QinferConv = {
       if (empty) empty.style.display = "none";
       conv.messages.forEach(function(msg) {
         if (msg.role === "user") {
-          addMsg("user", msg.content);
+          addMsg("user", msg.content, null, msg.ts);
         } else if (msg.role === "assistant") {
-          var body = addMsg("assistant", "");
+          var body = addMsg("assistant", "", null, msg.ts);
           // Parse thinking content from saved data
           var parsed = parseThinkingContent(msg.content);
           var answerText = parsed.answer || msg.content;
@@ -3075,7 +3275,7 @@ var QinferConv = {
       var role = b.classList.contains("user") ? "user" : "assistant";
       var text = b._rawText || b.querySelector(".bubble-body").textContent;
       if (text) {
-        var msg = { role: role, content: text };
+        var msg = { role: role, content: text, ts: b._ts || conv.updated };
         // Save thinking content separately for assistant messages
         if (role === "assistant") {
           var thinkingText = b._thinkingText || "";
@@ -3085,6 +3285,7 @@ var QinferConv = {
       }
     });
     conv.messages = messages;
+    conv.system = convSystemText();
     if (conv.params) conv.params = samplerSnapshot();
     if (typeof syncOverrideBadge === "function") syncOverrideBadge();
     conv.updated = Date.now();
@@ -3203,6 +3404,7 @@ var QinferConv = {
           title: String(c.title || tr("conv.untitled")).slice(0, 80),
           messages: c.messages,
           params: c.params || undefined,
+          system: typeof c.system === "string" ? c.system : "",
           pinned: !!c.pinned,
           created: c.created || Date.now(),
           updated: c.updated || Date.now(),
@@ -3293,9 +3495,7 @@ var QinferConv = {
     var btnClose = $("btn-close-conv");
     var btnNew = $("btn-new-conv");
     if (btnToggle) {
-      btnToggle.addEventListener("click", function() {
-        sidebar.classList.toggle("hidden");
-      });
+      btnToggle.addEventListener("click", toggleConvSidebar);
     }
     if (btnClose) {
       btnClose.addEventListener("click", function() {
@@ -3346,6 +3546,87 @@ function kvTable(tbodyId, rows) {
     tb.appendChild(tr);
   });
 }
+
+// ---- Message timestamps ------------------------------------------------------
+// Bubbles carry epoch milliseconds; the label shows the clock for today's
+// messages and grows a date for anything older. Formatting goes through Intl so
+// the stamp follows the UI language rather than a hand-rolled pattern.
+var QinferTime = {
+  locale: function () { return uiLang() === "en" ? "en-GB" : "zh-CN"; },
+  clock: function (ms, now, locale) {
+    if (ms == null) return "";
+    var a = new Date(ms), b = new Date(now == null ? Date.now() : now);
+    var sameDay = a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    return new Intl.DateTimeFormat(locale || QinferTime.locale(), sameDay
+      ? {hour: "2-digit", minute: "2-digit"}
+      : {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}).format(a);
+  },
+  full: function (ms, locale) {
+    if (ms == null) return "";
+    return new Intl.DateTimeFormat(locale || QinferTime.locale(),
+      {dateStyle: "medium", timeStyle: "medium"}).format(new Date(ms));
+  },
+};
+
+// ---- Keyboard shortcuts ------------------------------------------------------
+// match() only names the action; the handler decides what it does, so Escape can
+// close an overlay or stop a run depending on what is open. Typing in a field
+// must never trigger the bare "?" command.
+var QinferKeys = {
+  isTyping: function (el) {
+    if (!el || !el.tagName) return false;
+    var t = el.tagName.toUpperCase();
+    return t === "INPUT" || t === "TEXTAREA" || t === "SELECT" || el.isContentEditable === true;
+  },
+  match: function (e) {
+    var mod = !!(e.metaKey || e.ctrlKey);
+    var k = e.key;
+    if (k === "Escape") return "escape";
+    if (mod && e.shiftKey && !e.altKey && (k === "O" || k === "o")) return "newConv";
+    if (mod && !e.shiftKey && !e.altKey && (k === "K" || k === "k")) return "focusInput";
+    if (mod && !e.shiftKey && !e.altKey && (k === "B" || k === "b")) return "toggleSidebar";
+    if (!mod && !e.altKey && k === "?" && !QinferKeys.isTyping(e.target)) return "help";
+    return null;
+  },
+  // rows(): one table feeds both the "?" dialog and the reader, so the help
+  // panel can never list a binding the handler does not implement.
+  rows: function (mac) {
+    var mod = mac ? "⌘" : "Ctrl";
+    return [
+      {keys: mod + " + K", labelKey: "keys.focusInput"},
+      {keys: mod + " + Shift + O", labelKey: "keys.newConv"},
+      {keys: mod + " + B", labelKey: "keys.toggleSidebar"},
+      {keys: "?", labelKey: "keys.help"},
+      {keys: "Esc", labelKey: "keys.escape"},
+      {keys: "Enter", labelKey: "keys.send"},
+      {keys: "Shift + Enter", labelKey: "keys.newline"},
+    ];
+  },
+  // firstOpen(): Escape walks the dismissible layers in z-order and returns the
+  // topmost one that is up; null means nothing is up, so Escape stops a run.
+  firstOpen: function (layers) {
+    var list = layers || [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].open) return list[i].name;
+    }
+    return null;
+  },
+};
+
+// ---- Per-conversation system prompt ------------------------------------------
+// A conversation may carry its own instruction. It goes in front of the history
+// as the system message, replacing any system message already there so repeated
+// sends never stack instructions.
+var QinferSystem = {
+  apply: function (system, messages) {
+    var text = (system == null ? "" : String(system)).trim();
+    var out = messages || [];
+    if (!text) return out;
+    var head = { role: "system", content: text };
+    if (out.length && out[0].role === "system") return [head].concat(out.slice(1));
+    return [head].concat(out);
+  },
+};
 
 // ---- Monitor speed: the decode rate is a per-request number ------------------
 // The server's live.tok_s is the *last request's* rate, so sampling it once a

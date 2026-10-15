@@ -346,6 +346,16 @@ grep -q 'QinferRequests' "$R" && grep -q 'initMonitor' "$R" && grep -q 'sparklin
 grep -q 'renderRequestsTab' "$R" && grep -q 'QinferActivity' "$R" \
   && ok "/web/app.js (Requests tab render)" || bad "/web/app.js: missing requests render"
 
+# 16c. Frontend part four: the chat surface carries per-message times, keyboard
+#      shortcuts with a help dialog, and a per-conversation system prompt.
+curl -s "http://$HOST:$PORT/" > "$R"
+grep -q 'id="sys-drawer"' "$R" && grep -q 'id="sys-prompt"' "$R" && grep -q 'id="btn-help"' "$R" \
+  && ok "/ chat extras skeleton (sys-drawer/sys-prompt/btn-help)" || bad "/ chat extras: $(head -c 200 "$R")"
+curl -s "http://$HOST:$PORT/web/app.js" > "$R"
+grep -q 'QinferTime' "$R" && grep -q 'QinferKeys' "$R" && grep -q 'QinferSystem' "$R" \
+  && grep -q 'showHelpDialog' "$R" && grep -q 'bubble-time' "$R" \
+  && ok "/web/app.js (times/shortcuts/system prompt wired)" || bad "/web/app.js: missing chat extras"
+
 # 16a. chat encoding-failure bookkeeping: Chinese content necessarily triggers out-of-vocabulary tokenization
 #      failure → 500, and the newest ring record is state=error, path=/v1/chat/completions (verifies the
 #      encoding-failure path also completes its closing bookkeeping).
