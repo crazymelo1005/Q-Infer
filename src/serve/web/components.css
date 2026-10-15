@@ -131,3 +131,15 @@ a:hover{text-decoration:underline}
 .st-collapse>summary{list-style:none;display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;font-size:var(--st-fs-sm);font-weight:500;color:var(--st-ink-muted)}
 .st-collapse>summary::-webkit-details-marker{display:none}
 .st-collapse__body{padding:0 14px 14px;font-size:var(--st-fs-sm);color:var(--st-ink-muted);line-height:1.6}
+/* ---- Chips (preset pickers, static labels) and popover menus ---- */
+.st-chip{display:inline-flex;align-items:center;gap:var(--st-s-1);padding:var(--st-s-1) var(--st-s-3);border:1px solid var(--st-line);border-radius:var(--st-r-pill);background:var(--st-surface);color:var(--st-ink-soft);font:var(--st-fw-medium) var(--st-fs-xs)/1.7 var(--st-font);cursor:pointer;transition:background var(--st-dur) var(--st-ease),color var(--st-dur) var(--st-ease),border-color var(--st-dur) var(--st-ease)}
+.st-chip:hover{background:var(--st-surface-2);color:var(--st-ink)}
+.st-chip.active{background:var(--st-accent-soft);border-color:var(--st-accent);color:var(--st-accent-text)}
+.st-chip--static{cursor:default;opacity:.7}
+.st-chip--static.active{opacity:1}
+.st-popover{position:absolute;z-index:60;min-width:136px;padding:var(--st-s-1);background:var(--st-surface);border:1px solid var(--st-line);border-radius:var(--st-r-md);box-shadow:var(--st-sh-pop)}
+.st-popover__item{display:block;width:100%;text-align:left;padding:var(--st-s-2) var(--st-s-3);border:0;border-radius:var(--st-r-sm);background:none;color:var(--st-ink-soft);font:var(--st-fw-regular) var(--st-fs-sm)/1.4 var(--st-font);cursor:pointer}
+.st-popover__item:hover{background:var(--st-surface-2);color:var(--st-ink)}
+.st-popover__item.active{color:var(--st-accent-text);font-weight:var(--st-fw-bold)}
+.st-popover__item.active::after{content:"\2713";float:right}
+.st-btn--sm{padding:var(--st-s-1) var(--st-s-3);font-size:var(--st-fs-xs);height:auto}

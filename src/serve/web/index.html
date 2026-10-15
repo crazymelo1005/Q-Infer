@@ -68,10 +68,10 @@
         </div>
         <div class="conv-sidebar__foot">
           <button class="st-btn st-btn--secondary conv-foot-btn" id="btn-import-conv" type="button" data-i18n-title="conv.importAll">
-            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-upload"/></svg><span data-i18n="conv.importAll">Import</span>
+            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-upload"/></svg><span data-i18n="conv.importBtn">Import</span>
           </button>
           <button class="st-btn st-btn--secondary conv-foot-btn" id="btn-export-conv" type="button" data-i18n-title="conv.exportAll">
-            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-download"/></svg><span data-i18n="conv.exportAll">Export</span>
+            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-download"/></svg><span data-i18n="conv.exportBtn">Export</span>
           </button>
           <input type="file" id="conv-import-file" accept="application/json,.json" hidden>
         </div>
@@ -95,65 +95,80 @@
         </button>
         <div class="composer-wrap">
           <div class="chat-foot">
-        <details class="drawer">
+        <details class="drawer" id="sampler-drawer">
           <summary>
             <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-settings"/></svg><span data-i18n="chat.sampler">Sampler</span></summary>
-          <div class="drawer-grid">
-            <div class="field">
-              <label for="s-temp" data-i18n="chat.temperature">Temperature</label>
-              <input id="s-temp" class="input" type="number" min="0" max="2" step="0.05" value="0.8">
+          <div class="drawer-body">
+            <div class="drawer-section">
+              <span class="drawer-label" data-i18n="sampler.preset">Preset</span>
+              <div class="preset-chips" id="preset-chips" role="group" data-i18n-aria="sampler.preset">
+                <button type="button" class="st-chip" data-preset="precise" data-i18n="sampler.precise">Precise</button>
+                <button type="button" class="st-chip" data-preset="balanced" data-i18n="sampler.balanced">Balanced</button>
+                <button type="button" class="st-chip" data-preset="creative" data-i18n="sampler.creative">Creative</button>
+                <span class="st-chip st-chip--static" id="preset-custom" data-i18n="sampler.custom">Custom</span>
+              </div>
             </div>
-            <div class="field">
-              <label for="s-top-p" data-i18n="chat.topP">top_p</label>
-              <input id="s-top-p" class="input" type="number" min="0.05" max="1" step="0.05" value="0.95">
+            <div class="drawer-section">
+              <span class="drawer-label" data-i18n="sampler.sampling">Sampling</span>
+              <div class="drawer-grid">
+                <div class="field field--slider">
+                  <label for="s-temp" data-i18n="chat.temperature">Temperature</label>
+                  <div class="slider-row"><input id="s-temp" class="slider" type="range" min="0" max="2" step="0.05" value="0.8" data-i18n-title="sampler.tipTemp"><output id="s-temp-out" for="s-temp">0.80</output></div>
+                </div>
+                <div class="field field--slider">
+                  <label for="s-top-p" data-i18n="chat.topP">top_p</label>
+                  <div class="slider-row"><input id="s-top-p" class="slider" type="range" min="0.05" max="1" step="0.01" value="0.95" data-i18n-title="sampler.tipTopP"><output id="s-top-p-out" for="s-top-p">0.95</output></div>
+                </div>
+                <div class="field">
+                  <label for="s-top-k" data-i18n="chat.topK">top_k</label>
+                  <input id="s-top-k" class="input" type="number" min="0" max="1000" step="1" value="40" data-i18n-title="sampler.tipTopK">
+                </div>
+                <div class="field field--slider">
+                  <label for="s-min-p" data-i18n="chat.minP">min_p</label>
+                  <div class="slider-row"><input id="s-min-p" class="slider" type="range" min="0" max="1" step="0.01" value="0.05" data-i18n-title="sampler.tipMinP"><output id="s-min-p-out" for="s-min-p">0.05</output></div>
+                </div>
+                <div class="field field--slider">
+                  <label for="s-pres-pen" data-i18n="chat.presPen">presence_penalty</label>
+                  <div class="slider-row"><input id="s-pres-pen" class="slider" type="range" min="0" max="2" step="0.1" value="0" data-i18n-title="sampler.tipPresPen"><output id="s-pres-pen-out" for="s-pres-pen">0.0</output></div>
+                </div>
+                <div class="field field--slider">
+                  <label for="s-freq-pen" data-i18n="chat.freqPen">frequency_penalty</label>
+                  <div class="slider-row"><input id="s-freq-pen" class="slider" type="range" min="0" max="2" step="0.1" value="0" data-i18n-title="sampler.tipFreqPen"><output id="s-freq-pen-out" for="s-freq-pen">0.0</output></div>
+                </div>
+                <div class="field field--slider">
+                  <label for="s-rep-pen" data-i18n="chat.repPen">repeat_penalty</label>
+                  <div class="slider-row"><input id="s-rep-pen" class="slider" type="range" min="1" max="2" step="0.05" value="1" data-i18n-title="sampler.tipRepPen"><output id="s-rep-pen-out" for="s-rep-pen">1.00</output></div>
+                </div>
+              </div>
             </div>
-            <div class="field">
-              <label for="s-top-k" data-i18n="chat.topK">top_k</label>
-              <input id="s-top-k" class="input" type="number" min="0" max="1000" step="1" value="40">
+            <div class="drawer-section">
+              <span class="drawer-label" data-i18n="sampler.generation">Generation</span>
+              <div class="drawer-grid">
+                <div class="field">
+                  <label for="s-max-tokens" data-i18n="chat.maxTokens">Max tokens</label>
+                  <input id="s-max-tokens" class="input" type="number" min="1" max="32768" step="1" value="2048" data-i18n-title="sampler.tipMaxTokens">
+                </div>
+                <div class="field">
+                  <label for="s-seed" data-i18n="chat.seedLabel">seed (-1 = random)</label>
+                  <input id="s-seed" class="input" type="number" step="1" value="-1" data-i18n-title="sampler.tipSeed">
+                </div>
+                <div class="field">
+                  <label for="s-ctx" data-i18n="chat.contextLen">Context length</label>
+                  <select id="s-ctx" class="input">
+                    <option value="0" data-i18n="chat.ctxAuto">Auto</option>
+                    <option value="4096">4K</option>
+                    <option value="8192">8K</option>
+                    <option value="16384">16K</option>
+                    <option value="32768">32K</option>
+                    <option value="65536">64K</option>
+                  </select>
+                </div>
+              </div>
             </div>
-            <div class="field">
-              <label for="s-min-p" data-i18n="chat.minP">min_p</label>
-              <input id="s-min-p" class="input" type="number" min="0" max="1" step="0.01" value="0.05">
-            </div>
-            <div class="field">
-              <label for="s-pres-pen" data-i18n="chat.presPen">presence_penalty</label>
-              <input id="s-pres-pen" class="input" type="number" min="0" max="2" step="0.1" value="0">
-            </div>
-            <div class="field">
-              <label for="s-freq-pen" data-i18n="chat.freqPen">frequency_penalty</label>
-              <input id="s-freq-pen" class="input" type="number" min="0" max="2" step="0.1" value="0">
-            </div>
-            <div class="field">
-              <label for="s-rep-pen" data-i18n="chat.repPen">repeat_penalty</label>
-              <input id="s-rep-pen" class="input" type="number" min="1" max="2" step="0.05" value="1">
-            </div>
-            <div class="field">
-              <label for="s-seed" data-i18n="chat.seedLabel">seed (-1 = random)</label>
-              <input id="s-seed" class="input" type="number" step="1" value="-1">
-            </div>
-            <div class="field">
-              <label for="s-max-tokens" data-i18n="chat.maxTokens">Max tokens</label>
-              <input id="s-max-tokens" class="input" type="number" min="1" max="32768" step="1" value="2048">
-            </div>
-            <div class="field">
-              <label for="s-think" data-i18n="chat.thinkMode">Thinking mode</label>
-              <select id="s-think" class="input">
-                <option value="off" data-i18n="chat.thinkOff">Off</option>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="xhigh" selected>xHigh</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="s-ctx" data-i18n="chat.contextLen">Context length</label>
-              <select id="s-ctx" class="input">
-                <option value="0" data-i18n="chat.ctxAuto">Auto</option>
-                <option value="4096">4K</option>
-                <option value="8192">8K</option>
-                <option value="16384">16K</option>
-                <option value="32768">32K</option>
-                <option value="65536">64K</option>
-              </select>
+            <div class="drawer-foot">
+              <button type="button" class="st-btn st-btn--secondary st-btn--sm" id="btn-reset-sampler" data-i18n="sampler.reset">Reset to defaults</button>
+              <span class="override-badge hidden" id="sampler-override" data-i18n-title="sampler.overrideTip"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-pin"/></svg><span data-i18n="sampler.overrideBadge">This conversation</span></span>
+              <button type="button" class="st-btn st-btn--secondary st-btn--sm hidden" id="btn-clear-override" data-i18n="sampler.clearOverride">Sync from global</button>
             </div>
           </div>
         </details>
@@ -164,8 +179,16 @@
           <div class="st-composer__bar">
             <button type="button" class="st-btn st-btn--icon" id="btn-export" data-i18n-title="chat.exportTitleLong">
               <svg class="st-icon"><use href="/web/sprite.svg#i-download"/></svg></button>
-            <button type="button" class="st-btn st-btn--icon thinking-toggle active" id="btn-thinking" data-i18n-title="chat.thinkingToggle">
-              <svg class="st-icon"><use href="/web/sprite.svg#i-thinking"/></svg></button>
+            <div class="think-wrap">
+              <button type="button" class="st-btn thinking-toggle" id="btn-thinking" aria-haspopup="listbox" aria-expanded="false" data-i18n-title="chat.thinkingToggle" data-i18n-aria="chat.thinkLevelAria">
+                <svg class="st-icon"><use href="/web/sprite.svg#i-thinking"/></svg><span class="think-level" id="think-level">xHigh</span></button>
+              <div class="st-popover hidden" id="think-popover" role="listbox" data-i18n-aria="chat.thinkMode">
+                <button type="button" class="st-popover__item" role="option" data-level="off" data-i18n="chat.thinkOff">Off</button>
+                <button type="button" class="st-popover__item" role="option" data-level="low" data-i18n="chat.thinkLow">Low</button>
+                <button type="button" class="st-popover__item" role="option" data-level="medium" data-i18n="chat.thinkMedium">Medium</button>
+                <button type="button" class="st-popover__item" role="option" data-level="xhigh" data-i18n="chat.thinkXhigh">xHigh</button>
+              </div>
+            </div>
             <span class="spacer"></span>
             <button type="button" class="st-btn st-btn--secondary" id="btn-stop" hidden>
               <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-stop"/></svg><span data-i18n="chat.stop">Stop</span></button>

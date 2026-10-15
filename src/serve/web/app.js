@@ -324,8 +324,6 @@ const I18N = {
     "chat.prefilling": "正在处理提示词…",
     "chat.thinking": "思考中…",
     "chat.thinkingToggle": "思考模式",
-    "chat.thinkingOn": "思考模式已开启",
-    "chat.thinkingOff": "思考模式已关闭",
     "chat.topK": "top_k",
     "chat.minP": "min_p",
     "chat.presPen": "存在惩罚",
@@ -348,6 +346,32 @@ const I18N = {
     "metric.cpu": "CPU",
     "metric.disk": "磁盘读取",
     "metric.igpu": "核显频率",
+    "sampler.preset": "预设",
+    "sampler.precise": "精确",
+    "sampler.balanced": "平衡",
+    "sampler.creative": "创造",
+    "sampler.custom": "自定义",
+    "sampler.sampling": "采样",
+    "sampler.generation": "生成",
+    "sampler.reset": "恢复默认",
+    "sampler.resetDone": "已恢复默认参数",
+    "sampler.overrideBadge": "本对话",
+    "sampler.overrideTip": "本对话保存了自己的参数；切回该对话时自动套用",
+    "sampler.clearOverride": "同步全局",
+    "sampler.overrideCleared": "已改为跟随全局参数",
+    "sampler.tipTemp": "0-2：越大越随机；0.8 平衡，0.2 稳定",
+    "sampler.tipTopP": "0.05-1：只从累计概率前 p 的候选里采样",
+    "sampler.tipTopK": "0-1000：只保留概率前 k 个词；0 = 关闭",
+    "sampler.tipMinP": "0-1：丢弃概率低于最高词 p 倍的候选",
+    "sampler.tipPresPen": "0-2：按是否已出现惩罚，鼓励展开新话题",
+    "sampler.tipFreqPen": "0-2：按出现次数惩罚，抑制重复",
+    "sampler.tipRepPen": "1-2：对已出现的词施加对数概率惩罚；1 = 关闭",
+    "sampler.tipMaxTokens": "单次回复的最大 token 数",
+    "sampler.tipSeed": "固定种子可复现采样；-1 每次随机",
+    "chat.thinkLow": "低",
+    "chat.thinkMedium": "中",
+    "chat.thinkXhigh": "极高",
+    "chat.thinkLevelAria": "思考档位",
     "mon.state": "模型状态",
     "mon.searchPh": "搜索路径 / 模型 / 状态",
     "mon.filterTitle": "状态过滤",
@@ -529,6 +553,8 @@ const I18N = {
     "conv.groupEarlier": "更早",
     "conv.exportAll": "导出全部对话",
     "conv.importAll": "导入对话",
+    "conv.importBtn": "导入",
+    "conv.exportBtn": "导出",
     "conv.exportedToast": "已导出 {n} 个对话",
     "conv.importedToast": "已导入 {n} 个对话",
     "conv.importBadFormat": "导入失败：文件格式不正确",
@@ -575,8 +601,6 @@ const I18N = {
     "chat.prefilling": "Processing prompt…",
     "chat.thinking": "Thinking…",
     "chat.thinkingToggle": "Thinking mode",
-    "chat.thinkingOn": "Thinking mode enabled",
-    "chat.thinkingOff": "Thinking mode disabled",
     "chat.topK": "top_k",
     "chat.minP": "min_p",
     "chat.presPen": "presence_penalty",
@@ -599,6 +623,32 @@ const I18N = {
     "metric.cpu": "CPU",
     "metric.disk": "Disk read",
     "metric.igpu": "iGPU freq",
+    "sampler.preset": "Preset",
+    "sampler.precise": "Precise",
+    "sampler.balanced": "Balanced",
+    "sampler.creative": "Creative",
+    "sampler.custom": "Custom",
+    "sampler.sampling": "Sampling",
+    "sampler.generation": "Generation",
+    "sampler.reset": "Reset to defaults",
+    "sampler.resetDone": "Sampler reset to defaults",
+    "sampler.overrideBadge": "This conversation",
+    "sampler.overrideTip": "This conversation keeps its own parameters; switching to it applies them",
+    "sampler.clearOverride": "Sync from global",
+    "sampler.overrideCleared": "Now follows the global parameters",
+    "sampler.tipTemp": "0-2: higher is more random; 0.8 balanced, 0.2 steady",
+    "sampler.tipTopP": "0.05-1: sample only from the top-p probability mass",
+    "sampler.tipTopK": "0-1000: keep only the k most likely tokens; 0 = off",
+    "sampler.tipMinP": "0-1: drop candidates below p x the top token's probability",
+    "sampler.tipPresPen": "0-2: penalize tokens that already appeared, encouraging new topics",
+    "sampler.tipFreqPen": "0-2: penalize by how often a token appeared, curbing repetition",
+    "sampler.tipRepPen": "1-2: log-probability penalty on tokens already used; 1 = off",
+    "sampler.tipMaxTokens": "Maximum tokens in one reply",
+    "sampler.tipSeed": "A fixed seed makes sampling reproducible; -1 draws a new one each time",
+    "chat.thinkLow": "Low",
+    "chat.thinkMedium": "Medium",
+    "chat.thinkXhigh": "xHigh",
+    "chat.thinkLevelAria": "Thinking level",
     "mon.state": "Model state",
     "mon.searchPh": "Search path / model / state",
     "mon.filterTitle": "Filter by state",
@@ -780,6 +830,8 @@ const I18N = {
     "conv.groupEarlier": "Earlier",
     "conv.exportAll": "Export all conversations",
     "conv.importAll": "Import conversations",
+    "conv.importBtn": "Import",
+    "conv.exportBtn": "Export",
     "conv.exportedToast": "Exported {n} conversations",
     "conv.importedToast": "Imported {n} conversations",
     "conv.importBadFormat": "Import failed: not a Q-Infer export file",
@@ -1117,7 +1169,47 @@ async function readSSE(res, onEvent) {
   framesFrom("");
 }
 
-/* ---- Sampler: /props defaults, sessionStorage value wins when present ---- */
+/* ---- Sampler: presets, persistence, and what the current conversation overrides ----
+   Presets are the three starting points the drawer offers; "custom" is whatever the
+   sliders say after an edit. Settings live in localStorage (shared across tabs, like
+   theme/lang); the old per-tab sessionStorage key is migrated once on first load. */
+var QinferSampler = {
+  PRESETS: {
+    precise: { temperature: 0.2, top_p: 0.9, top_k: 20, min_p: 0.1, presence_penalty: 0, frequency_penalty: 0, repeat_penalty: 1 },
+    balanced: { temperature: 0.8, top_p: 0.95, top_k: 40, min_p: 0.05, presence_penalty: 0, frequency_penalty: 0, repeat_penalty: 1 },
+    creative: { temperature: 1.2, top_p: 0.98, top_k: 80, min_p: 0.02, presence_penalty: 0, frequency_penalty: 0, repeat_penalty: 1 },
+  },
+  STORAGE_KEY: "qinfer.sampler",
+  LEGACY_KEY: "qinfer_sampler",
+  // Name of the preset these sampling fields equal, else "custom".
+  matchPreset: function(fields) {
+    for (var name in this.PRESETS) {
+      var p = this.PRESETS[name], same = true;
+      for (var k in p) { if (Number(fields[k]) !== Number(p[k])) { same = false; break; } }
+      if (same) return name;
+    }
+    return "custom";
+  },
+  // Saved settings; a pre-existing per-tab sessionStorage value is migrated once.
+  load: function() {
+    try {
+      var raw = localStorage.getItem(this.STORAGE_KEY);
+      if (!raw) {
+        raw = sessionStorage.getItem(this.LEGACY_KEY);
+        if (raw) {
+          localStorage.setItem(this.STORAGE_KEY, raw);
+          sessionStorage.removeItem(this.LEGACY_KEY);
+        }
+      }
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  },
+  save: function(obj) {
+    try { localStorage.setItem(this.STORAGE_KEY, JSON.stringify(obj)); } catch (e) {}
+  },
+};
+
+/* ---- Sampler: /props defaults, saved value wins when present ---- */
 function saveSampler() {
   const s = {
     temperature: parseFloat($("s-temp").value),
@@ -1130,48 +1222,169 @@ function saveSampler() {
     seed: parseInt($("s-seed").value, 10),
     max_tokens: parseInt($("s-max-tokens").value, 10),
   };
-  if ($("s-think")) s.think = $("s-think").value;
+  s.think = thinkLevel;
   if ($("s-ctx")) s.ctx = $("s-ctx").value;
-  sessionStorage.setItem("qinfer_sampler", JSON.stringify(s));
+  QinferSampler.save(s);
+  syncPresetChips();
+  // A conversation on an override follows its own edits; an edit that brings the
+  // drawer level with the global set drops the badge.
+  var cur = QinferConv.currentId ? QinferConv.loadAll().find(function (c) { return c.id === QinferConv.currentId; }) : null;
+  if (cur && cur.params) { cur.params = samplerSnapshot(); QinferConv.saveAll(QinferConv.loadAll().map(function (c) { return c.id === cur.id ? cur : c; })); }
+  if (typeof syncOverrideBadge === "function") syncOverrideBadge();
 }
 function loadSampler() {
-  const raw = sessionStorage.getItem("qinfer_sampler");
-  if (!raw) return false;
-  try {
-    const s = JSON.parse(raw);
-    if (s.temperature !== undefined) $("s-temp").value = s.temperature;
-    if (s.top_p !== undefined) $("s-top-p").value = s.top_p;
-    if (s.top_k !== undefined) $("s-top-k").value = s.top_k;
-    if (s.min_p !== undefined) $("s-min-p").value = s.min_p;
-    if (s.presence_penalty !== undefined) $("s-pres-pen").value = s.presence_penalty;
-    if (s.frequency_penalty !== undefined) $("s-freq-pen").value = s.frequency_penalty;
-    if (s.repeat_penalty !== undefined) $("s-rep-pen").value = s.repeat_penalty;
-    if (s.seed !== undefined) $("s-seed").value = s.seed;
-    if (s.max_tokens !== undefined) $("s-max-tokens").value = s.max_tokens;
-    if (s.think !== undefined && $("s-think")) $("s-think").value = s.think;
-    if (s.ctx !== undefined && $("s-ctx")) $("s-ctx").value = s.ctx;
-    return !!$("s-temp");
-  } catch (e) { return false; }
+  const s = QinferSampler.load();
+  if (!s) return false;
+  if (s.temperature !== undefined) $("s-temp").value = s.temperature;
+  if (s.top_p !== undefined) $("s-top-p").value = s.top_p;
+  if (s.top_k !== undefined) $("s-top-k").value = s.top_k;
+  if (s.min_p !== undefined) $("s-min-p").value = s.min_p;
+  if (s.presence_penalty !== undefined) $("s-pres-pen").value = s.presence_penalty;
+  if (s.frequency_penalty !== undefined) $("s-freq-pen").value = s.frequency_penalty;
+  if (s.repeat_penalty !== undefined) $("s-rep-pen").value = s.repeat_penalty;
+  if (s.seed !== undefined) $("s-seed").value = s.seed;
+  if (s.max_tokens !== undefined) $("s-max-tokens").value = s.max_tokens;
+  if (s.think !== undefined) setThinkLevel(s.think, { silent: true });
+  if (s.ctx !== undefined && $("s-ctx")) $("s-ctx").value = s.ctx;
+  return !!$("s-temp");
 }
 
-// Reflect the Generation selector's thinking mode on the composer toggle.
-function syncThinkBtn() {
-  var b = $("btn-thinking"), s = $("s-think");
-  if (b && s) b.classList.toggle("active", s.value !== "off");
+/* ---- Thinking level: the composer chip + popover is the only control ----
+   The drawer's four-level select was removed (2026-10-15): one source of truth,
+   and the chip shows the current level instead of a bare on/off highlight. */
+var THINK_LEVELS = ["off", "low", "medium", "xhigh"];
+var THINK_LABEL_KEYS = { off: "chat.thinkOff", low: "chat.thinkLow", medium: "chat.thinkMedium", xhigh: "chat.thinkXhigh" };
+var thinkLevel = "xhigh";
+function thinkLevelLabel(level) { return tr(THINK_LABEL_KEYS[level] || "chat.thinkOff"); }
+function setThinkLevel(level, opts) {
+  if (THINK_LEVELS.indexOf(level) < 0) level = "xhigh";
+  thinkLevel = level;
+  var label = $("think-level");
+  if (label) label.textContent = thinkLevelLabel(level);
+  var chip = $("btn-thinking");
+  if (chip) chip.classList.toggle("active", level !== "off");
+  var pop = $("think-popover");
+  if (pop) pop.querySelectorAll(".st-popover__item").forEach(function (it) {
+    var on = it.dataset.level === level;
+    it.classList.toggle("active", on);
+    it.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  if (!opts || !opts.silent) saveSampler();
 }
 // The sampler + generation fields as a plain object, for per-conversation overrides.
 function samplerSnapshot() {
   var s = {};
-  ["s-temp", "s-top-p", "s-top-k", "s-min-p", "s-pres-pen", "s-freq-pen", "s-rep-pen", "s-seed", "s-max-tokens", "s-think", "s-ctx"].forEach(function (id) {
+  SAMPLER_FIELDS.forEach(function (id) {
     if ($(id)) s[id] = $(id).value;
   });
+  s["s-think"] = thinkLevel;
   return s;
 }
 // Apply a saved override set to the fields (no-op for a missing/empty set).
 function samplerApply(s) {
   if (!s) return;
-  Object.keys(s).forEach(function (id) { if ($(id)) $(id).value = s[id]; });
-  syncThinkBtn();
+  Object.keys(s).forEach(function (id) {
+    if (id === "s-think") { setThinkLevel(s[id], { silent: true }); return; }
+    if ($(id)) $(id).value = s[id];
+  });
+  syncSliderOutputs();
+  syncPresetChips();
+}
+
+/* ---- Sampler drawer helpers: field tables, slider readouts, presets ----
+   Field ids are the same ones the snapshot/apply pair and the request body use,
+   so a saved conversation keeps working across this redesign. */
+var SAMPLER_FIELDS = ["s-temp", "s-top-p", "s-top-k", "s-min-p", "s-pres-pen", "s-freq-pen", "s-rep-pen", "s-seed", "s-max-tokens", "s-ctx"];
+var SLIDER_FIELDS = ["s-temp", "s-top-p", "s-min-p", "s-pres-pen", "s-freq-pen", "s-rep-pen"];
+// Field id -> param name for preset matching.
+var SAMPLER_PARAM_NAMES = {
+  "s-temp": "temperature", "s-top-p": "top_p", "s-top-k": "top_k", "s-min-p": "min_p",
+  "s-pres-pen": "presence_penalty", "s-freq-pen": "frequency_penalty", "s-rep-pen": "repeat_penalty",
+};
+var samplerDefaults = null;
+
+function captureSamplerDefaults() {
+  var d = {};
+  SAMPLER_FIELDS.forEach(function (id) { if ($(id)) d[id] = $(id).value; });
+  d["s-think"] = THINK_LEVELS.indexOf(thinkLevel) >= 0 ? thinkLevel : "xhigh";
+  samplerDefaults = d;
+}
+// Decimals for the little readout beside a slider.
+function fmtSlider(id, v) {
+  var digits = (id === "s-min-p" || id === "s-pres-pen" || id === "s-freq-pen") ? 2
+    : (id === "s-temp" || id === "s-top-p" || id === "s-rep-pen") ? 2 : 1;
+  return Number(v).toFixed(digits);
+}
+function syncSliderOutputs() {
+  SLIDER_FIELDS.forEach(function (id) {
+    var el = $(id), out = $(id + "-out");
+    if (el && out) out.textContent = fmtSlider(id, el.value);
+  });
+}
+// Light the chip of the preset these fields equal, else the Custom chip.
+function syncPresetChips() {
+  var wrap = $("preset-chips");
+  if (!wrap) return;
+  var fields = {};
+  Object.keys(SAMPLER_PARAM_NAMES).forEach(function (id) {
+    if ($(id)) fields[SAMPLER_PARAM_NAMES[id]] = Number($(id).value);
+  });
+  var name = QinferSampler.matchPreset(fields);
+  wrap.querySelectorAll("[data-preset]").forEach(function (b) {
+    b.classList.toggle("active", b.dataset.preset === name);
+  });
+  var custom = $("preset-custom");
+  if (custom) custom.classList.toggle("active", name === "custom");
+}
+function applyPreset(name) {
+  var p = QinferSampler.PRESETS[name];
+  if (!p) return;
+  Object.keys(SAMPLER_PARAM_NAMES).forEach(function (id) {
+    if ($(id) && p[SAMPLER_PARAM_NAMES[id]] !== undefined) $(id).value = p[SAMPLER_PARAM_NAMES[id]];
+  });
+  syncSliderOutputs();
+  saveSampler();
+}
+function resetSampler() {
+  if (!samplerDefaults) captureSamplerDefaults();
+  Object.keys(samplerDefaults).forEach(function (id) {
+    if (id === "s-think") { setThinkLevel(samplerDefaults[id], { silent: true }); return; }
+    if ($(id)) $(id).value = samplerDefaults[id];
+  });
+  syncSliderOutputs();
+  saveSampler();
+  showToast(tr("sampler.resetDone"));
+}
+// Compare two parameter sets by parameter name (the drawer's snapshot is keyed
+// by field id, the stored set by parameter name). ctx and think travel along.
+function samplerComparable(obj, fromFields) {
+  var out = {};
+  Object.keys(SAMPLER_PARAM_NAMES).forEach(function (id) {
+    var name = SAMPLER_PARAM_NAMES[id], v = fromFields ? obj[id] : obj[name];
+    if (v !== undefined && v !== null && v !== "") out[name] = Number(v);
+  });
+  var think = fromFields ? obj["s-think"] : obj.think;
+  var ctx = fromFields ? obj["s-ctx"] : obj.ctx;
+  if (think !== undefined) out.think = think;
+  if (ctx !== undefined) out.ctx = ctx;
+  return out;
+}
+// The active conversation is on its own parameter set when it differs from the
+// saved global one; the badge and the sync button say so (and nothing else does).
+function samplerOverrideActive() {
+  var conv = QinferConv.currentId
+    ? QinferConv.loadAll().find(function (c) { return c.id === QinferConv.currentId; }) : null;
+  if (!conv || !conv.params) return false;
+  var global = QinferSampler.load();
+  if (!global) return false;
+  return JSON.stringify(samplerComparable(conv.params, true)) !== JSON.stringify(samplerComparable(global, false));
+}
+function syncOverrideBadge() {
+  var badge = $("sampler-override"), clear = $("btn-clear-override");
+  if (!badge) return;
+  var has = samplerOverrideActive();
+  badge.classList.toggle("hidden", !has);
+  if (clear) clear.classList.toggle("hidden", !has);
 }
 
 // A short relative time for the conversation list (i18n'd).
@@ -1204,11 +1417,19 @@ async function loadProps() {
     const res = await api("/props");
     if (!res.ok) return;
     const d = await res.json();
+    const p = (d.default_generation_settings || {}).params || {};
+    // The server's defaults are what "Reset to defaults" restores.
+    if (samplerDefaults) {
+      if (p.temperature !== undefined) samplerDefaults["s-temp"] = p.temperature;
+      if (p.top_p !== undefined) samplerDefaults["s-top-p"] = p.top_p;
+      if (p.seed !== undefined) samplerDefaults["s-seed"] = p.seed;
+    }
     if (!loadSampler()) {
-      const p = (d.default_generation_settings || {}).params || {};
       if (p.temperature !== undefined) $("s-temp").value = p.temperature;
       if (p.top_p !== undefined) $("s-top-p").value = p.top_p;
       if (p.seed !== undefined) $("s-seed").value = p.seed;
+      syncSliderOutputs();
+      syncPresetChips();
     }
   } catch (e) { /* fall back to defaults */ }
 }
@@ -1876,7 +2097,7 @@ async function doChatRound() {
   };
   // Thinking mode + reasoning effort come from the Generation selector (the
   // composer toggle is a shortcut that writes this selector).
-  var thinkMode = $("s-think") ? $("s-think").value : "xhigh";
+  var thinkMode = thinkLevel;
   body.enable_thinking = thinkMode !== "off";
   if (thinkMode !== "off") body.reasoning_effort = thinkMode;
   // Context tiers: truncate the history to the chosen budget (0 = auto/none).
@@ -2415,30 +2636,65 @@ function initAttachmentHandlers() {
 
 /* ---- Chat setup ---- */
 function initChat() {
-  ["s-temp", "s-top-p", "s-top-k", "s-min-p", "s-pres-pen", "s-freq-pen", "s-rep-pen", "s-seed", "s-max-tokens", "s-ctx"].forEach(function (id) {
-    if ($(id)) $(id).addEventListener("change", saveSampler);
+  // Defaults for "Reset" come from the page as shipped; /props may refine them (loadProps).
+  captureSamplerDefaults();
+  // Sliders show a live readout and persist on release; other fields on change.
+  SAMPLER_FIELDS.forEach(function (id) {
+    var el = $(id);
+    if (!el) return;
+    el.addEventListener("input", function () {
+      if (SLIDER_FIELDS.indexOf(id) >= 0) { syncSliderOutputs(); syncPresetChips(); }
+    });
+    el.addEventListener("change", saveSampler);
   });
-  // Thinking mode: the composer toggle is a shortcut for the Generation selector
-  // (Off <-> last non-off level).
-  var thinkBtn = $("btn-thinking");
-  var lastThink = "xhigh";
-  if ($("s-think")) {
-    $("s-think").addEventListener("change", function () {
-      if ($("s-think").value !== "off") lastThink = $("s-think").value;
-      syncThinkBtn(); saveSampler();
+  // Thinking: one chip + popover (no drawer select anymore).
+  var thinkChip = $("btn-thinking"), thinkPop = $("think-popover");
+  if (thinkChip && thinkPop) {
+    thinkChip.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var willOpen = thinkPop.classList.contains("hidden");
+      thinkPop.classList.toggle("hidden", !willOpen);
+      thinkChip.setAttribute("aria-expanded", willOpen ? "true" : "false");
+    });
+    thinkPop.querySelectorAll(".st-popover__item").forEach(function (it) {
+      it.addEventListener("click", function (e) {
+        e.stopPropagation();
+        setThinkLevel(it.dataset.level);
+        thinkPop.classList.add("hidden");
+        thinkChip.setAttribute("aria-expanded", "false");
+      });
+    });
+    document.addEventListener("click", function () {
+      thinkPop.classList.add("hidden");
+      thinkChip.setAttribute("aria-expanded", "false");
     });
   }
-  if (thinkBtn) {
-    thinkBtn.addEventListener("click", function() {
-      var sel = $("s-think");
-      if (!sel) return;
-      if (sel.value === "off") { sel.value = lastThink; } else { lastThink = sel.value; sel.value = "off"; }
-      syncThinkBtn();
-      saveSampler();
-      showToast(sel.value === "off" ? tr("chat.thinkingOff") : tr("chat.thinkingOn"));
+  // Presets: one click sets the seven sampling fields.
+  var chips = $("preset-chips");
+  if (chips) chips.querySelectorAll("[data-preset]").forEach(function (b) {
+    b.addEventListener("click", function () { applyPreset(b.dataset.preset); });
+  });
+  var btnReset = $("btn-reset-sampler");
+  if (btnReset) btnReset.addEventListener("click", function () { resetSampler(); });
+  var btnClear = $("btn-clear-override");
+  if (btnClear) btnClear.addEventListener("click", function () {
+    var conv = QinferConv.currentId ? QinferConv.loadAll().find(function (c) { return c.id === QinferConv.currentId; }) : null;
+    if (!conv) return;
+    var g = QinferSampler.load() || {};
+    samplerApply({
+      "s-temp": g.temperature, "s-top-p": g.top_p, "s-top-k": g.top_k, "s-min-p": g.min_p,
+      "s-pres-pen": g.presence_penalty, "s-freq-pen": g.frequency_penalty, "s-rep-pen": g.repeat_penalty,
+      "s-seed": g.seed, "s-max-tokens": g.max_tokens, "s-ctx": g.ctx, "s-think": g.think,
     });
-  }
-  syncThinkBtn();
+    conv.params = samplerSnapshot();
+    QinferConv.saveAll(QinferConv.loadAll().map(function (c) { return c.id === conv.id ? conv : c; }));
+    syncOverrideBadge();
+    showToast(tr("sampler.overrideCleared"));
+  });
+  setThinkLevel(thinkLevel, { silent: true });
+  syncSliderOutputs();
+  syncPresetChips();
+  syncOverrideBadge();
   initAttachmentHandlers();
   $("btn-send").addEventListener("click", sendChat);
   $("btn-stop").addEventListener("click", stopChat);
@@ -2745,6 +3001,7 @@ var QinferConv = {
     if (!conv) return;
     // Restore this conversation's parameter overrides (absent = keep current).
     samplerApply(conv.params);
+    if (typeof syncOverrideBadge === "function") syncOverrideBadge();
     $("msg-list").innerHTML = "";
     if (conv.messages.length === 0) {
       var empty = $("chat-empty");
@@ -2803,7 +3060,8 @@ var QinferConv = {
       }
     });
     conv.messages = messages;
-    conv.params = samplerSnapshot();
+    if (conv.params) conv.params = samplerSnapshot();
+    if (typeof syncOverrideBadge === "function") syncOverrideBadge();
     conv.updated = Date.now();
     // Auto-generate title from first user message
     if (conv.title === tr("conv.untitled") && messages.length > 0) {

@@ -157,6 +157,65 @@ if (typeof I18N === "undefined" || !I18N.zh || !I18N.en) {
   } else console.log("ok   assistant label is Q-Infer in both languages");
 }
 
+// --- sampler presets + persistence -------------------------------------------
+// The block is pure apart from localStorage/sessionStorage, which are stubbed
+// with in-memory objects before the eval.
+const sp = src.indexOf("var QinferSampler = {");
+const spEnd = src.indexOf("\n};", sp);
+if (sp < 0 || spEnd < sp) {
+  report("QinferSampler block present", { at: sp });
+} else {
+  const lsData = {}, ssData = {};
+  globalThis.localStorage = {
+    getItem: k => (k in lsData ? lsData[k] : null),
+    setItem: (k, v) => { lsData[k] = String(v); },
+    removeItem: k => { delete lsData[k]; },
+  };
+  globalThis.sessionStorage = {
+    getItem: k => (k in ssData ? ssData[k] : null),
+    setItem: (k, v) => { ssData[k] = String(v); },
+    removeItem: k => { delete ssData[k]; },
+  };
+  const S = eval(src.slice(sp, spEnd + 3) + "\nQinferSampler;");
+  if (!S || !S.PRESETS || !S.matchPreset || !S.load || !S.save) {
+    report("QinferSampler shape", { keys: S && Object.keys(S) });
+  } else {
+    // The balanced preset is the shipped default, so it must match the drawer
+    // defaults as written in index.html.
+    const idxHtml = require("fs").readFileSync(require("path").join(__dirname, "../../src/serve/web/index.html"), "utf8");
+    const defs = {};
+    for (const m of idxHtml.matchAll(/id="s-([a-z-]+)"[^>]*value="([^"]+)"/g)) defs[m[1]] = m[2];
+    const balanced = S.PRESETS.balanced;
+    const defsAgree = Number(defs.temp) === balanced.temperature && Number(defs["top-p"]) === balanced.top_p
+      && Number(defs["top-k"]) === balanced.top_k && Number(defs["min-p"]) === balanced.min_p;
+    if (!defsAgree) report("balanced preset equals the drawer defaults", { drawer: defs, balanced: balanced });
+    else console.log("ok   balanced preset equals the drawer defaults");
+
+    if (S.matchPreset(S.PRESETS.balanced) !== "balanced") report("matchPreset finds balanced", {});
+    else if (S.matchPreset(Object.assign({}, S.PRESETS.precise)) !== "precise") report("matchPreset finds precise", {});
+    else {
+      const tweaked = Object.assign({}, S.PRESETS.balanced, { temperature: 0.95 });
+      if (S.matchPreset(tweaked) !== "custom") report("matchPreset says custom after a tweak", { got: S.matchPreset(tweaked) });
+      else console.log("ok   matchPreset names the built-ins and calls a tweak custom");
+    }
+
+    // Legacy per-tab value is migrated into localStorage exactly once.
+    ssData[src.match(/LEGACY_KEY: "([^"]+)"/)[1]] = JSON.stringify({ temperature: 0.5, think: "low" });
+    const migrated = S.load();
+    const legacyKey = src.match(/LEGACY_KEY: "([^"]+)"/)[1], newKey = src.match(/STORAGE_KEY: "([^"]+)"/)[1];
+    if (!migrated || migrated.temperature !== 0.5 || migrated.think !== "low") report("legacy sampler migrates", { got: migrated });
+    else if (!lsData[newKey]) report("migration writes the new key", { ls: lsData });
+    else if (legacyKey in ssData) report("migration removes the legacy key", { ss: ssData });
+    else console.log("ok   legacy sessionStorage sampler migrates to localStorage once");
+
+    // Round trip through save/load.
+    S.save({ temperature: 1.1, think: "off" });
+    const back = S.load();
+    if (!back || back.temperature !== 1.1 || back.think !== "off") report("sampler save/load round trip", { got: back });
+    else console.log("ok   sampler save/load round trips");
+  }
+}
+
 // --- i18n three-way lint: used keys must exist, defined keys must be used ------
 // Scans every tr("...") in app.js and every data-i18n* attribute in index.html.
 // Keys built dynamically at runtime go on the whitelist with a justification.
