@@ -110,6 +110,41 @@ if (typeof QinferMD !== "undefined") {
   } else console.log("ok   a plain bullet stays a normal list item");
 }
 
+// --- QinferMD: intraword underscores -----------------------------------------
+// Model output is full of snake_case identifiers (max_tokens, has_rings). A rule
+// that lets "_" emphasise inside a word turns those into italics and eats the
+// underscore, so the parameter name the model is talking about stops matching the
+// code. CommonMark forbids intraword "_" emphasis; "_" next to a word boundary
+// still emphasises, and "*" keeps its intraword behaviour.
+if (typeof QinferMD !== "undefined") {
+  ["columns planet, has_rings and nothing else",
+   "a_snake_case_name stays literal",
+   "max_tokens: 512 and temperature: 0.7",
+   "| planet | has_rings |",
+   "a__b__c stays literal"].forEach(function (line) {
+    const out = QinferMD.render(line);
+    if (out.indexOf("<em>") >= 0 || out.indexOf("<strong>") >= 0) {
+      report("no intraword emphasis for: " + line, { got: out });
+    } else console.log("ok   no intraword emphasis in: " + line);
+  });
+  // The positive half of the rule: a real italic still renders.
+  const ital = QinferMD.render("this is _italic text_ here");
+  if (ital.indexOf("<em>italic text</em>") < 0) report("boundary underscore still emphasises", { got: ital });
+  else console.log("ok   boundary underscore still emphasises");
+  // Two adjacent italics must both render (the rule consumes the leading space).
+  const pair = QinferMD.render("a _b_ and _c_ end");
+  if ((pair.match(/<em>/g) || []).length !== 2) report("adjacent italics both render", { got: pair });
+  else console.log("ok   adjacent italics both render");
+  // Underscore emphasis that opens a line is still emphasis (nothing precedes it).
+  const lead = QinferMD.render("_starts the line_");
+  if (lead.indexOf("<em>starts the line</em>") < 0) report("leading underscore emphasises", { got: lead });
+  else console.log("ok   leading underscore emphasises");
+  // Asterisks keep intraword behaviour (CommonMark allows a*b*c).
+  const star = QinferMD.render("a*b*c");
+  if (star.indexOf("<em>b</em>") < 0) report("star emphasis still applies", { got: star });
+  else console.log("ok   star emphasis still applies");
+}
+
 // --- QinferMD: fenced-code syntax highlighting ------------------------------
 // The highlighter runs on RAW code and escapes as it wraps, so a payload inside a
 // code fence can never come back as live HTML.
@@ -176,6 +211,125 @@ if (typeof I18N === "undefined" || !I18N.zh || !I18N.en) {
   }
 }
 
+// --- the header pill ---------------------------------------------------------
+// The pill is a badge: it names the state and the live rate. The "State" label
+// belongs to the chat footer summary, so a pill that repeats it reads wrong.
+{
+  const a = src.indexOf("var STATE_TR = {");
+  const p = src.indexOf("function pillText(", a);
+  if (a < 0 || p < a) throw new Error("missing pill helpers");
+  const end = src.indexOf("\n}", p);
+  const realTr = tr;
+  try {
+    tr = (k) => I18N.en[k] || k;
+    const pill = eval(src.slice(a, end + 2) + "\npillText;");
+    eq("pill names the state and the rate",
+       pill("generating", "82.4"), "Generating · 82.4 " + I18N.en["unit.tokS"]);
+    eq("unknown state passes through", pill("queued", "0"),
+       "Queued · 0 " + I18N.en["unit.tokS"]);
+    if (pill("generating", "82.4").indexOf(I18N.en["mon.stateLine"]) === 0) {
+      report("pill has no redundant state label", { got: pill("generating", "82.4") });
+    } else console.log("ok   pill has no redundant state label");
+  } finally { tr = realTr; }
+}
+
+// --- the sidebar title -------------------------------------------------------
+// An untitled conversation stores an empty title, so changing the language
+// re-labels it instead of freezing the words of whatever language created it.
+{
+  const p = src.indexOf("function convTitle(");
+  if (p < 0) throw new Error("missing convTitle helper");
+  const end = src.indexOf("\n}", p);
+  const realTr = tr;
+  try {
+    tr = (k) => I18N.en[k] || k;
+    const titleOf = eval(src.slice(p, end + 2) + "\nconvTitle;");
+    eq("untitled shows the localized placeholder", titleOf({ title: "" }), I18N.en["conv.untitled"]);
+    eq("a real title shows as typed", titleOf({ title: "Paris weather" }), "Paris weather");
+  } finally { tr = realTr; }
+  // create() storing a translated title is exactly the bug the sentinel removes.
+  if (/title:\s*tr\("conv\.untitled"\)/.test(src)) {
+    report("empty title is the untitled marker", { got: "create() stores a translated title" });
+  } else console.log("ok   empty title is the untitled marker");
+}
+
+// --- the transcript turn -------------------------------------------------------
+// A saved/replayed turn comes from one rendered bubble. Two things the UI shows
+// must never become model context: an error line (the request failed, the model
+// never said that) and the empty shell of a bubble that holds nothing.
+{
+  const p = src.indexOf("function msgFromBubble(");
+  if (p < 0) throw new Error("missing msgFromBubble helper");
+  const end = src.indexOf("\n}", p);
+  const turn = eval(src.slice(p, end + 2) + "\nmsgFromBubble;");
+
+  // A stand-in for a rendered bubble: classList + a body holding textContent.
+  const bubble = (cls, text, extra) => Object.assign({
+    classList: { contains: (c) => cls.split(" ").indexOf(c) >= 0 },
+    querySelector: () => ({ textContent: text }),
+  }, extra || {});
+
+  eq("an error bubble is not a turn", turn(bubble("bubble error", "boom"), 1), null);
+  eq("an empty assistant bubble is not a turn", turn(bubble("bubble assistant", ""), 1), null);
+  eq("a user turn keeps its raw text",
+     turn(bubble("bubble user", "**hi**", { _rawText: "**hi**" }), 7),
+     { role: "user", content: "**hi**", ts: 7 });
+  eq("a turn falls back to the given time",
+     turn(bubble("bubble user", "hi"), 42).ts, 42);
+  eq("a turn prefers its own time",
+     turn(bubble("bubble user", "hi", { _ts: 9 }), 42).ts, 9);
+  eq("assistant thinking rides along",
+     turn(bubble("bubble assistant", "ans", { _thinkingText: "why" }), 1).thinking, "why");
+
+  // Attachments are what makes a resumed conversation still hold its image.
+  const img = { kind: "image", name: "dot.png", url: "data:image/png;base64,AA" };
+  const file = { kind: "file", name: "a.txt", text: "hello" };
+  eq("a text-free image turn is still a turn",
+     turn(bubble("bubble user", "", { _attachments: [img] }), 1),
+     { role: "user", content: "", ts: 1, attachments: [img] });
+  eq("attachments keep both kinds",
+     turn(bubble("bubble user", "q", { _attachments: [img, file] }), 1).attachments.length, 2);
+  eq("an assistant bubble stores no attachments",
+     turn(bubble("bubble assistant", "a", { _attachments: [img] }), 1).attachments, undefined);
+
+  // The same shape is what the sidebar save and the request builder read, so a
+  // divergence between them is the bug this helper exists to prevent.
+  ["function collectMessages()", "saveCurrent: function"].forEach(function (fn) {
+    const at = src.indexOf(fn);
+    if (at < 0) { report("missing " + fn, {}); return; }
+    const stop = src.indexOf("\n}", at);
+    const body = src.slice(at, stop);
+    if (body.indexOf("msgFromBubble(") < 0) {
+      report(fn.split("(")[0].replace("saveCurrent: function", "saveCurrent") + " uses the shared turn helper",
+             { got: "no msgFromBubble call" });
+    } else console.log("ok   " + fn + " uses the shared turn helper");
+  });
+}
+
+// --- the storage-quota fallback ------------------------------------------------
+// Images are data URLs and localStorage caps out around 5 MB, so a save can fail.
+// Dropping the image payloads keeps the text of the conversation.
+{
+  const p = src.indexOf("function withoutImages(");
+  if (p < 0) throw new Error("missing withoutImages helper");
+  const end = src.indexOf("\n}", p);
+  const strip = eval(src.slice(p, end + 2) + "\nwithoutImages;");
+  const conv = {
+    id: "c", title: "t",
+    messages: [
+      { role: "user", content: "q", attachments: [{ kind: "image", name: "a", url: "data:..." },
+                                                  { kind: "file", name: "b", text: "x" }] },
+      { role: "assistant", content: "a" },
+    ],
+  };
+  const out = strip([conv]);
+  eq("images are dropped", out[0].messages[0].attachments.length, 1);
+  eq("text attachments survive", out[0].messages[0].attachments[0].kind, "file");
+  eq("other turns are untouched", out[0].messages[1].content, "a");
+  if (conv.messages[0].attachments.length !== 2) report("the original is not mutated", {});
+  else console.log("ok   the original is not mutated");
+}
+
 // --- sampler presets + persistence -------------------------------------------
 // The block is pure apart from localStorage/sessionStorage, which are stubbed
 // with in-memory objects before the eval.
@@ -235,18 +389,12 @@ if (sp < 0 || spEnd < sp) {
   }
 }
 
-// --- QinferSpeed: the monitor speed card value and its sparkline series -------
+// --- QinferSpeed: the monitor speed card value, and where its line comes from ---
 {
   const q = src.indexOf("var QinferSpeed = {");
   if (q < 0) throw new Error("missing QinferSpeed source");
   const qEnd = src.indexOf("\n};", q);
   const QS = eval(src.slice(q, qEnd + 3) + "\nQinferSpeed;");
-  const req = (tok) => ({ state: "completed", decode_tok_s: tok });
-  // /metrics lists requests newest first; the chart wants oldest first.
-  eq("series is oldest-first per-request rates", QS.series([req(90), req(80)], null), [80, 90]);
-  eq("series skips requests without a rate", QS.series([req(0), { state: "error" }, req(null), req(70)], null), [70]);
-  eq("series appends the live rate while decoding", QS.series([req(90)], 95), [90, 95]);
-  eq("series caps at the window", QS.series(Array.from({ length: 80 }, (_, i) => req(i + 1)), null).length, QS.WINDOW);
   // Card value: the live rate while generating, the session mean once idle — the
   // card must never read empty while the server has a rate to show.
   const c1 = QS.card({ state: "generating", tok_s: 100, tok_s_mean: 87 });
@@ -261,6 +409,99 @@ if (sp < 0 || spEnd < sp) {
   const c4 = QS.card({ state: "idle", tok_s: null, tok_s_mean: null });
   if (c4.value !== null) report("card stays blank with no data at all", { got: c4 });
   else console.log("ok   card stays blank with no data at all");
+
+  // The line under the card. It used to be assembled in the browser from the
+  // request ring, which draws one step per request and nothing at all between
+  // them; every other card reads the server's 1 Hz history window. The decode
+  // mean now does the same, so the two rate charts share one source of truth.
+  const mmStart = src.indexOf("var MON_METRICS = [");
+  const mmEnd = src.indexOf("\n];", mmStart);
+  if (mmStart < 0 || mmEnd < mmStart) throw new Error("missing MON_METRICS");
+  const MON = eval(src.slice(mmStart, mmEnd + 3) + "\nMON_METRICS;");
+  const byKey = (k) => MON.filter((m) => m.key === k)[0];
+  eq("the decode-mean line reads the server history", byKey("speed").series, "tok_s_mean");
+  eq("the prefill line reads the server history", byKey("prefill").series, "prefill_tok_s_mean");
+  eq("QinferSpeed no longer assembles its own series", typeof QS.series, "undefined");
+  if (src.indexOf('m.key === "speed"') >= 0) {
+    report("the render loop has no per-card special case", { got: 'still branches on m.key === "speed"' });
+  } else console.log("ok   the render loop has no per-card special case");
+}
+
+// --- chat scrolling: one writer, and it knows when to stop following ----------
+// Following the newest turn is what makes a long reply readable, but yanking the
+// viewport while someone is reading history is worse than not following at all.
+// nearBottom() is the whole decision, so it is asserted here.
+{
+  const p = src.indexOf("function nearBottom(");
+  if (p < 0) throw new Error("missing nearBottom helper");
+  const end = src.indexOf("\n}", p);
+  const nb = eval(src.slice(p, end + 2) + "\nnearBottom;");
+  const at = (scrollTop) => ({ scrollTop: scrollTop, scrollHeight: 1000, clientHeight: 100 });
+  eq("sitting at the end is near", nb(at(900), 80), true);
+  eq("just inside the slack is near", nb(at(830), 80), true);
+  eq("just outside the slack is not", nb(at(800), 80), false);
+  eq("scrolled up into history is not", nb(at(120), 80), false);
+  eq("a missing scroller counts as near", nb(null, 80), true);
+  // The scroller is #chat-scroll; #msg-list has no overflow of its own, so every
+  // write to its scrollTop was a no-op and the newest turn could land below the
+  // fold mid-stream.
+  if (src.indexOf('$("msg-list").scrollTop') >= 0) {
+    report("only the real scroller is scrolled", { got: 'still writes #msg-list.scrollTop' });
+  } else console.log("ok   only the real scroller is scrolled");
+}
+
+// --- QinferQueue: the line-up behind the running reply ------------------------
+// The queue is the one place a message can sit without being sent, so the rules
+// that matter are the ones about *when* it moves: never while a reply is running,
+// never while paused, and never by silently dropping what it cannot hold.
+{
+  const q = src.indexOf("var QinferQueue = {");
+  const qEnd = src.indexOf("\n};", q);
+  if (q < 0 || qEnd < q) throw new Error("missing QinferQueue source");
+  const realLS = global.localStorage;
+  const store = {};
+  global.localStorage = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = String(v); },
+    removeItem: (k) => { delete store[k]; },
+  };
+  try {
+    const Q = eval(src.slice(q, qEnd + 3) + "\nQinferQueue;");
+    let items = [];
+    const first = Q.push(items, "  first  ", []);
+    eq("push trims the text", first.text, "first");
+    eq("push appends", items.length, 1);
+    eq("push refuses an empty message", Q.push(items, "   ", []), null);
+    eq("push keeps an attachment-only message", Q.push(items, "", [{ kind: "image", url: "data:x" }]) !== null, true);
+    // The cap exists so a full queue is announced rather than quietly eaten.
+    let many = [];
+    for (let i = 0; i < Q.CAP; i++) Q.push(many, "m" + i, []);
+    eq("a full queue refuses more", Q.push(many, "one too many", []), null);
+    eq("and holds exactly its cap", many.length, Q.CAP);
+
+    const a = Q.push([], "a", []), b = Q.push([], "b", []), c = Q.push([], "c", []);
+    const list = [a, b, c];
+    eq("remove drops one by id", Q.removeId(list, b.id).map((i) => i.text), ["a", "c"]);
+    eq("move reorders forwards", Q.move(list, 0, 2).map((i) => i.text), ["b", "c", "a"]);
+    eq("move reorders backwards", Q.move(list, 2, 0).map((i) => i.text), ["c", "a", "b"]);
+    eq("an out-of-range move is a no-op", Q.move(list, 5, 0).map((i) => i.text), ["a", "b", "c"]);
+    if (list.map((i) => i.text).join() !== "a,b,c") report("move leaves the input alone", { got: list });
+    else console.log("ok   move leaves the input alone");
+
+    // Pause gates the queue and nothing else: it must not fire the next turn while
+    // a reply runs, and a paused queue stays put even with the engine idle.
+    eq("advances when idle and unpaused", Q.canAdvance(false, false), true);
+    eq("a running reply blocks the queue", Q.canAdvance(false, true), false);
+    eq("a paused queue stays put", Q.canAdvance(true, false), false);
+    eq("pause never resumes mid-reply", Q.canAdvance(true, true), false);
+
+    Q.write([a], true);
+    const back = Q.read();
+    eq("the items survive a reload", back.items.map((i) => i.text), ["a"]);
+    eq("so does the paused flag", back.paused, true);
+    store["qinfer.queue"] = "{not json";
+    eq("a corrupt store reads as empty", Q.read().items.length, 0);
+  } finally { global.localStorage = realLS; }
 }
 
 // --- QinferTime: the clock a message bubble carries ---------------------------

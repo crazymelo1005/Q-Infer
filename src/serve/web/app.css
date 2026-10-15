@@ -13,7 +13,11 @@ main{flex:1;min-height:0;display:flex}
 /* ---- Chat ---- */
 .chat-layout{display:flex;flex:1;min-height:0;overflow:hidden}
 .chat-main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
-.chat-scroll{flex:1;min-height:0;overflow-y:auto}
+/* overflow-anchor:none — the browser's scroll anchoring tries to hold the content
+   under the viewport steady, which fights a streaming reply: each re-rendered
+   block above the viewport pulls scrollTop back up, so the newest turn drifts out
+   of view even while the follower keeps writing the bottom. */
+.chat-scroll{flex:1;min-height:0;overflow-y:auto;overflow-anchor:none}
 .chat{max-width:min(980px,90%);margin:0 auto;padding:var(--st-s-8) var(--st-s-6) var(--st-s-6);display:flex;flex-direction:column;gap:var(--st-s-6)}
 .chat-empty{margin:min(12vh,80px) auto 0;text-align:center}
 .chat-empty__title{font-weight:900;font-size:var(--st-fs-display);line-height:1.1;letter-spacing:-.02em}
@@ -23,8 +27,11 @@ main{flex:1;min-height:0;display:flex}
 .bubble{max-width:min(78%,720px);padding:10px 14px;border-radius:var(--st-r-lg);word-break:break-word}
 .bubble .bubble-role{display:flex;align-items:baseline;gap:8px;font-size:11px;color:var(--st-ink-muted);margin-bottom:2px}
 .bubble .bubble-time{margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* The user bubble is filled with the accent colour, so the muted grey the role
+   line uses elsewhere fails contrast on it. Inherit the accent's own ink. */
+.bubble.user .bubble-role{color:var(--st-accent-ink);opacity:.8}
 .bubble.user .bubble-time{color:inherit;opacity:.75}
-.bubble.user{align-self:flex-end;background:var(--st-accent);color:var(--st-accent-ink);border-bottom-right-radius:6px}
+.bubble.user{align-self:flex-end;background:var(--st-accent-strong);color:var(--st-accent-ink);border-bottom-right-radius:6px}
 .bubble.assistant{align-self:flex-start;background:var(--st-surface);border:1px solid var(--st-line);border-bottom-left-radius:6px}
 .bubble.error{align-self:flex-start;background:var(--st-danger-tint);border:1px dashed var(--st-danger);color:var(--st-danger-text)}
 .bubble .bubble-body{white-space:pre-wrap;overflow-wrap:anywhere}
@@ -51,12 +58,19 @@ main{flex:1;min-height:0;display:flex}
 .bubble.assistant .bubble-body hr{margin:1em 0;border:none;border-top:1px solid var(--st-line)}
 
 /* Message action bar */
-.bubble-actions{display:flex;gap:var(--st-s-1);margin-top:var(--st-s-2);opacity:0;transition:opacity 0.2s;pointer-events:none}
-.bubble:hover .bubble-actions,.bubble-actions:hover{opacity:1;pointer-events:auto}
-.bubble-action{width:28px;height:28px;padding:0;background:transparent;border:1px solid var(--st-line);border-radius:var(--st-r-sm);color:var(--st-ink-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s}
-.bubble-action:hover{background:var(--st-surface-2);color:var(--st-ink);border-color:var(--st-ink-muted)}
-.bubble-action.active{background:var(--st-accent-tint);color:var(--st-accent-text);border-color:var(--st-accent)}
-.bubble-action.active:hover{background:var(--st-accent);color:var(--st-accent-ink)}
+/* Bubble actions: ghost icons that appear on hover, and — because a control that
+   only exists on hover is unreachable by keyboard — on focus too. Touch devices
+   have no hover, so there they are simply always visible. */
+.bubble-actions{display:flex;gap:2px;margin-top:var(--st-s-2);opacity:0;transition:opacity 0.2s;pointer-events:none}
+.bubble:hover .bubble-actions,.bubble:focus-within .bubble-actions,.bubble-actions:hover{opacity:1;pointer-events:auto}
+.bubble-action{width:30px;height:30px;padding:0;background:transparent;border:1px solid transparent;border-radius:var(--st-r-sm);color:var(--st-ink-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background var(--st-dur) var(--st-ease),color var(--st-dur) var(--st-ease)}
+.bubble-action:hover{background:var(--st-surface-2);color:var(--st-ink)}
+.bubble-action:focus-visible{outline:2px solid var(--st-focus);outline-offset:1px}
+.bubble-action.active{background:var(--st-accent-tint);color:var(--st-accent-text)}
+.bubble.user .bubble-action{color:var(--st-accent-ink);opacity:.72}
+.bubble.user .bubble-action:hover{background:rgba(255,255,255,.18);color:var(--st-accent-ink);opacity:1}
+.bubble.user .bubble-action.active{background:rgba(255,255,255,.28);color:var(--st-accent-ink);opacity:1}
+@media (hover:none){.bubble-actions{opacity:1;pointer-events:auto}}
 
 /* Conversation sidebar */
 .conv-sidebar{width:280px;flex-shrink:0;background:var(--st-surface);border-right:1px solid var(--st-line);display:flex;flex-direction:column;overflow:hidden;transition:width 0.2s,margin-left 0.2s}
@@ -85,10 +99,53 @@ main{flex:1;min-height:0;display:flex}
 }
 
 /* Scroll to bottom button */
-.scroll-bottom-btn{position:absolute;bottom:calc(100% + 8px);right:var(--st-s-4);width:36px;height:36px;border-radius:50%;background:var(--st-surface);border:1px solid var(--st-line);box-shadow:var(--st-sh-card);color:var(--st-ink-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:5;transition:opacity 0.2s,transform 0.2s}
-.scroll-bottom-btn:hover{background:var(--st-surface-2);color:var(--st-ink)}
-.scroll-bottom-btn svg{transform:rotate(180deg)}
-.scroll-bottom-btn.hidden{opacity:0;pointer-events:none;transform:translateY(8px)}
+/* Chat float bar: outline, turn paging, jump-to-newest (with the count of turns
+   that arrived while the reader was scrolled up). */
+.chat-floatbar{position:absolute;bottom:calc(100% + 8px);right:var(--st-s-4);display:flex;flex-direction:column;align-items:center;gap:6px;z-index:6}
+.float-btn{position:relative;width:36px;height:36px;border-radius:50%;background:var(--st-surface);border:1px solid var(--st-line);box-shadow:var(--st-sh-card);color:var(--st-ink-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:opacity .2s,transform .2s,color var(--st-dur) var(--st-ease),background var(--st-dur) var(--st-ease)}
+.float-btn:hover{background:var(--st-surface-2);color:var(--st-ink)}
+.float-btn:focus-visible{outline:2px solid var(--st-focus);outline-offset:2px}
+.float-btn.hidden{opacity:0;pointer-events:none;transform:translateY(8px)}
+.float-badge{position:absolute;top:-5px;right:-5px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--st-accent);color:var(--st-accent-ink);font:700 10px/17px var(--st-font);text-align:center}
+.float-badge.hidden{display:none}
+
+/* Conversation outline: one row per turn, click to jump there. */
+.outline-pop{position:absolute;bottom:0;right:calc(100% + 10px);width:min(300px,60vw);max-height:min(360px,50vh);display:flex;flex-direction:column;background:var(--st-surface);border:1px solid var(--st-line);border-radius:var(--st-r-md);box-shadow:var(--st-sh-pop);z-index:7;overflow:hidden}
+.outline-pop.hidden{display:none}
+.outline-pop__head{padding:var(--st-s-2) var(--st-s-3);font-size:var(--st-fs-xs);font-weight:600;color:var(--st-ink-muted);border-bottom:1px solid var(--st-line-soft);background:var(--st-surface-2)}
+.outline-pop__list{overflow-y:auto;padding:var(--st-s-1);display:flex;flex-direction:column;gap:1px}
+.outline-pop__empty{padding:var(--st-s-2) var(--st-s-3);margin:0}
+.outline-item{display:flex;align-items:baseline;gap:6px;width:100%;text-align:left;padding:6px var(--st-s-2);border:0;border-radius:var(--st-r-sm);background:none;color:var(--st-ink-soft);font:var(--st-fw-regular) var(--st-fs-sm)/1.45 var(--st-font);cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.outline-item:hover{background:var(--st-surface-2);color:var(--st-ink)}
+.outline-item.active{background:var(--st-accent-tint);color:var(--st-accent-text)}
+.outline-item__idx{flex:none;color:var(--st-ink-muted);font-variant-numeric:tabular-nums;font-size:var(--st-fs-xs)}
+.bubble.turn-flash{outline:2px solid var(--st-accent);outline-offset:2px}
+
+/* Message queue, anchored just above the composer */
+.queue-panel{max-width:980px;width:100%;margin:0 auto var(--st-s-2);border:1px solid var(--st-line);border-radius:var(--st-r-md);background:var(--st-surface);box-shadow:var(--st-sh-card);overflow:hidden}
+.queue-panel.hidden{display:none}
+.queue-panel__head{display:flex;align-items:center;gap:var(--st-s-2);padding:var(--st-s-1) var(--st-s-2) var(--st-s-1) var(--st-s-3);background:var(--st-surface-2);border-bottom:1px solid var(--st-line-soft)}
+.queue-panel__title{display:flex;align-items:center;gap:6px;font-size:var(--st-fs-xs);font-weight:600;color:var(--st-ink-soft)}
+.queue-panel__count{min-width:18px;padding:0 5px;border-radius:9px;background:var(--st-accent-tint);color:var(--st-accent-text);font:700 11px/18px var(--st-font);text-align:center;font-variant-numeric:tabular-nums}
+.queue-panel__state{font-size:var(--st-fs-xs);color:var(--st-ink-muted)}
+.queue-panel__state.is-paused{color:var(--st-warn-text)}
+#btn-queue-pause.is-paused{background:var(--st-warn-tint);border-color:var(--st-warn);color:var(--st-warn-text)}
+.queue-list{list-style:none;margin:0;padding:var(--st-s-1);display:flex;flex-direction:column;gap:2px;max-height:168px;overflow-y:auto}
+.queue-item{display:flex;align-items:center;gap:var(--st-s-2);padding:4px var(--st-s-2);border-radius:var(--st-r-sm);font-size:var(--st-fs-sm);color:var(--st-ink-soft)}
+.queue-item:hover{background:var(--st-surface-2)}
+.queue-item--over{background:var(--st-accent-tint);box-shadow:inset 0 2px 0 var(--st-accent)}
+.queue-item.dragging{opacity:.5}
+.queue-item__grip{flex:none;display:flex;color:var(--st-ink-muted);cursor:grab}
+.queue-item__idx{flex:none;min-width:16px;color:var(--st-ink-muted);font-variant-numeric:tabular-nums;font-size:var(--st-fs-xs)}
+.queue-item__text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.queue-item__input{flex:1;min-width:0;height:28px}
+.queue-item__actions{flex:none;display:flex;gap:2px;opacity:0;transition:opacity var(--st-dur) var(--st-ease)}
+.queue-item:hover .queue-item__actions,.queue-item:focus-within .queue-item__actions{opacity:1}
+
+/* The composer's primary slot doubles as the stop control while a reply runs; a
+   neutral surface reads as "cancel" without shouting. */
+.st-btn--stop{background:var(--st-surface);color:var(--st-danger-text);border:1px solid var(--st-line)}
+.st-btn--stop:hover{background:var(--st-danger-tint);border-color:var(--st-danger);color:var(--st-danger-text)}
 
 /* Tool call bubbles */
 .bubble.tool-call{align-self:stretch;max-width:100%;background:var(--st-surface-2);border:1px solid var(--st-line);padding:var(--st-s-3)}
@@ -148,7 +205,7 @@ main{flex:1;min-height:0;display:flex}
 .chat-tool-item__desc{font-size:var(--st-fs-xs);color:var(--st-ink-muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .chat-tool-item .st-toggle{flex:none}
 .status-dot{width:9px;height:9px;border-radius:50%;background:var(--st-ink-muted);display:inline-block}
-.status-dot.ok{background:var(--st-accent);box-shadow:0 0 0 3px var(--st-accent-tint)}
+.status-dot.ok{background:var(--st-info);box-shadow:0 0 0 3px var(--st-info-tint)}
 .status-dot.bad{background:var(--st-danger);box-shadow:0 0 0 3px var(--st-danger-tint)}
 
 /* ---- Monitor / About ---- */
@@ -285,8 +342,6 @@ main{flex:1;min-height:0;display:flex}
 .btn.ghost:hover{background:var(--st-surface-2);color:var(--st-ink)}
 .input{border:1.5px solid var(--st-line);background:var(--st-surface);color:var(--st-ink);border-radius:var(--st-r-md);padding:8px 12px;font:400 var(--st-fs-md)/1.4 var(--st-font);height:40px}
 .input:focus{outline:0;border-color:var(--st-focus);box-shadow:0 0 0 3px color-mix(in srgb,var(--st-focus) 20%,transparent)}
-.keybox{display:flex;align-items:center;gap:var(--st-s-2)}
-.keybox label{font-size:var(--st-fs-sm);color:var(--st-ink-muted)}
 .key-row{display:flex;align-items:center;gap:var(--st-s-2)}
 .key-input{width:min(320px,40vw)}
 .tab-btn{cursor:pointer}
@@ -369,7 +424,6 @@ main{flex:1;min-height:0;display:flex}
   
   /* API key input */
   .key-input{width:100%;max-width:280px}
-  .keybox label{display:none}
 }
 
 /* ---- 小手机 (<400px): 超紧凑 ---- */
@@ -449,8 +503,21 @@ main{flex:1;min-height:0;display:flex}
 .slider-row output{min-width:3.4em;text-align:right;font:var(--st-fw-medium) var(--st-fs-xs) var(--st-font-mono);color:var(--st-ink-soft)}
 .drawer-foot{display:flex;align-items:center;gap:var(--st-s-2);flex-wrap:wrap;border-top:1px solid var(--st-line);padding-top:var(--st-s-3)}
 .override-badge{display:inline-flex;align-items:center;gap:var(--st-s-1);padding:2px var(--st-s-2);border-radius:var(--st-r-pill);background:var(--st-info-tint);color:var(--st-info-text);font:var(--st-fw-medium) var(--st-fs-xs)/1.6 var(--st-font)}
-.think-wrap{position:relative;display:inline-flex}
-.think-wrap .st-popover{bottom:calc(100% + var(--st-s-2));left:0}
-.thinking-toggle{width:auto;gap:var(--st-s-1);padding:0 var(--st-s-2)}
-.thinking-toggle .think-level{font-size:var(--st-fs-xs);font-weight:var(--st-fw-medium)}
-.thinking-toggle.active{background:var(--st-accent-soft);color:var(--st-accent-text)}
+/* Thinking level: a segmented control. The current level is always visible and
+   any level is one click away; "off" mutes the whole control. */
+.think-seg{display:inline-flex;align-items:center;gap:2px;padding:2px;border:1px solid var(--st-line);border-radius:var(--st-r-pill);background:var(--st-surface-2)}
+.think-seg__icon{margin:0 4px 0 6px;color:var(--st-accent);flex:none}
+.think-seg__opt{padding:3px 10px;border:0;border-radius:var(--st-r-pill);background:transparent;color:var(--st-ink-muted);font:var(--st-fw-medium) var(--st-fs-xs)/1.6 var(--st-font);cursor:pointer;transition:background var(--st-dur) var(--st-ease),color var(--st-dur) var(--st-ease)}
+.think-seg__opt:hover{color:var(--st-ink);background:var(--st-line-soft)}
+.think-seg__opt.active{background:var(--st-accent);color:var(--st-accent-ink)}
+.think-seg__opt:focus-visible{outline:2px solid var(--st-focus);outline-offset:1px}
+.think-seg.is-off .think-seg__icon{color:var(--st-ink-muted);opacity:.6}
+
+/* A switch row: the box is the input, the ::after is the knob. Used where a
+   setting is on/off rather than a value to type. */
+.st-switch-row{display:inline-flex;align-items:center;gap:var(--st-s-2);cursor:pointer;font:var(--st-fw-medium) var(--st-fs-xs)/1.6 var(--st-font);color:var(--st-ink-soft);user-select:none}
+.st-switch{appearance:none;position:relative;flex:none;width:32px;height:18px;margin:0;border:1px solid var(--st-line);border-radius:var(--st-r-pill);background:var(--st-surface-2);cursor:pointer;transition:background var(--st-dur) var(--st-ease),border-color var(--st-dur) var(--st-ease)}
+.st-switch::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--st-ink-muted);transition:transform var(--st-dur) var(--st-ease),background var(--st-dur) var(--st-ease)}
+.st-switch:checked{background:var(--st-accent-tint);border-color:var(--st-accent)}
+.st-switch:checked::after{transform:translateX(14px);background:var(--st-accent)}
+.st-switch:focus-visible{outline:2px solid var(--st-focus);outline-offset:2px}

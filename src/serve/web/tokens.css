@@ -1,5 +1,7 @@
-/* Q-Infer 前端设计令牌（对标 Strata UI 的设计体系：Outfit 可变字体、绿 accent、4pt 间距网格、
+/* Q-Infer 前端设计令牌（对标 Strata UI 的设计体系：Outfit 可变字体、4pt 间距网格、
    大圆角、层次阴影、浅深双主题；深色默认跟随系统，或由 <html data-theme="dark"> 显式覆盖）。
+   主色为橙（--st-accent，主操作/选中/进行中），信息与数据用蓝（--st-info，链接/图表/连接态），
+   两者之外只保留警示橙黄与危险红——不引入第三种品牌色。
    Outfit 字体为 SIL Open Font License 1.1（随附 web/fonts/OFL.txt），字重 100-900。 */
 
 @font-face{font-family:"Outfit";src:url("fonts/outfit-latin-wght.woff2") format("woff2-variations");font-weight:100 900;font-display:swap;unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
@@ -35,14 +37,19 @@
   --st-ink-muted:#6f6f6f;
   --st-icon:#2F384C;
 
-  --st-accent:#10b981;
-  --st-accent-hover:#0c8a60;
+  /* 品牌橙：填充色（白字按钮、选中态、进行中）与作为文字的两个梯度分开取值，
+     因为同一支橙做底色要够亮、做正文要够深，一个值两边都合规不了。 */
+  --st-accent:#f2600c;
+  --st-accent-strong:#c94a02;
+  --st-accent-hover:#d94f05;
   --st-accent-ink:#ffffff;
-  --st-accent-tint:#ecfdf5;
-  --st-accent-text:#0c8a60;
-  --st-focus:#405de6;
+  --st-accent-tint:#fff2e8;
+  --st-accent-tint-hover:#ffe3d0;
+  --st-accent-text:#c2410c;
+  --st-accent-glow:rgba(242,96,12,.26);
+  --st-focus:#1d6fe0;
 
-  --st-info:#0f97ff; --st-info-tint:#e8f4ff; --st-info-text:#0668c2;
+  --st-info:#1d6fe0; --st-info-tint:#e9f1fe; --st-info-text:#1557b0;
   --st-warn:#e39b0b; --st-warn-tint:#fff6e0; --st-warn-text:#8a5a00;
   --st-danger:#e0283f; --st-danger-tint:#fdecee; --st-danger-text:#b01a2e;
 
@@ -57,7 +64,7 @@
   --bg:var(--st-bg); --panel:var(--st-surface); --panel-2:var(--st-surface-2);
   --border:var(--st-line); --text:var(--st-ink); --dim:var(--st-ink-muted);
   --accent:var(--st-accent); --accent-soft:var(--st-accent-tint); --accent-text:var(--st-accent-ink);
-  --ok:var(--st-accent); --warn:var(--st-warn); --err:var(--st-danger);
+  --ok:var(--st-info); --warn:var(--st-warn); --err:var(--st-danger);
   --code-bg:var(--st-code-bg);
   --radius:var(--st-r-md); --radius-sm:var(--st-r-sm);
   --font:var(--st-font); --mono:var(--st-font-mono);
@@ -70,9 +77,10 @@
     --st-bg:#0e1113; --st-surface:#161a1d; --st-surface-2:#1d2226;
     --st-line:#2a3036; --st-line-soft:#22272c;
     --st-ink:#eef1f3; --st-ink-soft:#c7cdd3; --st-ink-muted:#8e979f; --st-icon:#c7cdd3;
-    --st-accent:#34d399; --st-accent-hover:#4ade80; --st-accent-ink:#052e20;
-    --st-accent-tint:rgba(52,211,153,.12); --st-accent-text:#4ade80; --st-focus:#7b93ff;
-    --st-info:#3aa9ff; --st-info-tint:rgba(58,169,255,.12); --st-info-text:#7cc4ff;
+    --st-accent:#ff8a3d; --st-accent-strong:#ff8a3d; --st-accent-hover:#ffa361; --st-accent-ink:#2b1200;
+    --st-accent-tint:rgba(255,138,61,.14); --st-accent-tint-hover:rgba(255,138,61,.22);
+    --st-accent-text:#ffb887; --st-accent-glow:rgba(255,138,61,.30); --st-focus:#5b9bff;
+    --st-info:#5b9bff; --st-info-tint:rgba(91,155,255,.14); --st-info-text:#8dbcff;
     --st-warn:#f5b53d; --st-warn-tint:rgba(245,181,61,.12); --st-warn-text:#f8c96a;
     --st-danger:#ff5a6e; --st-danger-tint:rgba(255,90,110,.12); --st-danger-text:#ff8a98;
     --st-code-bg:#0a0c0e;
@@ -83,7 +91,7 @@
     --bg:var(--st-bg); --panel:var(--st-surface); --panel-2:var(--st-surface-2);
     --border:var(--st-line); --text:var(--st-ink); --dim:var(--st-ink-muted);
     --accent:var(--st-accent); --accent-soft:var(--st-accent-tint); --accent-text:var(--st-accent-ink);
-    --ok:var(--st-accent); --warn:var(--st-warn); --err:var(--st-danger);
+    --ok:var(--st-info); --warn:var(--st-warn); --err:var(--st-danger);
     --code-bg:var(--st-code-bg);
   }
 }
@@ -93,9 +101,10 @@
   --st-bg:#0e1113; --st-surface:#161a1d; --st-surface-2:#1d2226;
   --st-line:#2a3036; --st-line-soft:#22272c;
   --st-ink:#eef1f3; --st-ink-soft:#c7cdd3; --st-ink-muted:#8e979f; --st-icon:#c7cdd3;
-  --st-accent:#34d399; --st-accent-hover:#4ade80; --st-accent-ink:#052e20;
-  --st-accent-tint:rgba(52,211,153,.12); --st-accent-text:#4ade80; --st-focus:#7b93ff;
-  --st-info:#3aa9ff; --st-info-tint:rgba(58,169,255,.12); --st-info-text:#7cc4ff;
+  --st-accent:#ff8a3d; --st-accent-strong:#ff8a3d; --st-accent-hover:#ffa361; --st-accent-ink:#2b1200;
+  --st-accent-tint:rgba(255,138,61,.14); --st-accent-tint-hover:rgba(255,138,61,.22);
+  --st-accent-text:#ffb887; --st-accent-glow:rgba(255,138,61,.30); --st-focus:#5b9bff;
+  --st-info:#5b9bff; --st-info-tint:rgba(91,155,255,.14); --st-info-text:#8dbcff;
   --st-warn:#f5b53d; --st-warn-tint:rgba(245,181,61,.12); --st-warn-text:#f8c96a;
   --st-danger:#ff5a6e; --st-danger-tint:rgba(255,90,110,.12); --st-danger-text:#ff8a98;
   --st-code-bg:#0a0c0e;
@@ -106,7 +115,7 @@
   --bg:var(--st-bg); --panel:var(--st-surface); --panel-2:var(--st-surface-2);
   --border:var(--st-line); --text:var(--st-ink); --dim:var(--st-ink-muted);
   --accent:var(--st-accent); --accent-soft:var(--st-accent-tint); --accent-text:var(--st-accent-ink);
-  --ok:var(--st-accent); --warn:var(--st-warn); --err:var(--st-danger);
+  --ok:var(--st-info); --warn:var(--st-warn); --err:var(--st-danger);
   --code-bg:var(--st-code-bg);
 }
 
@@ -164,28 +173,6 @@
   overflow-y: auto;
 }
 
-/* Thinking toggle button in composer bar */
-.thinking-toggle {
-  position: relative;
-  transition: all var(--st-dur) var(--st-ease);
-}
-
-.thinking-toggle.active {
-  color: var(--st-accent);
-  background: var(--st-accent-soft);
-}
-
-.thinking-toggle.active:hover {
-  background: var(--st-accent-soft-hover);
-}
-
-.thinking-toggle:not(.active) {
-  opacity: 0.5;
-}
-
-.thinking-toggle:not(.active):hover {
-  opacity: 0.8;
-}
 /* Per-reply token usage line under an assistant bubble */
 .bubble-meta {
   margin-top: 6px;

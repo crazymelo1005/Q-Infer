@@ -39,7 +39,7 @@ a:hover{text-decoration:underline}
 .st-metric__label{display:flex;align-items:center;gap:8px;font-size:var(--st-fs-sm);font-weight:500;color:var(--st-ink-muted)}
 .st-metric__value{font-weight:900;font-size:var(--st-fs-stat);line-height:1;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
 .st-metric__unit{font-weight:500;font-size:var(--st-fs-md);color:var(--st-ink-muted);margin-left:4px}
-.st-metric__spark{width:100%;height:32px;color:var(--st-accent)}
+.st-metric__spark{width:100%;height:32px;color:var(--st-info)}
 
 /* 进度条与仪表 */
 .st-progress{height:8px;border-radius:var(--st-r-pill);background:var(--st-surface-2);border:1px solid var(--st-line-soft);overflow:hidden;position:relative}
@@ -81,7 +81,7 @@ a:hover{text-decoration:underline}
 /* 按钮 */
 .st-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:42px;padding:0 18px;border-radius:var(--st-r-md);border:0;font:700 var(--st-fs-md)/1 var(--st-font);cursor:pointer;transition:background var(--st-dur),transform 120ms}
 .st-btn:active{transform:translateY(1px)}
-.st-btn--primary{background:var(--st-accent);color:var(--st-accent-ink);box-shadow:0 6px 16px rgba(16,185,129,.24),inset 0 1px 0 rgba(255,255,255,.18)}
+.st-btn--primary{background:var(--st-accent-strong);color:var(--st-accent-ink);box-shadow:0 6px 16px var(--st-accent-glow),inset 0 1px 0 rgba(255,255,255,.18)}
 .st-btn--primary:hover{background:var(--st-accent-hover)}
 .st-btn--secondary{background:transparent;color:var(--st-ink);border:1.5px solid var(--st-line)}
 .st-btn--secondary:hover{background:var(--st-surface-2)}
@@ -121,7 +121,7 @@ a:hover{text-decoration:underline}
 .st-toast{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border-radius:var(--st-r-md);background:var(--st-surface);border:1px solid var(--st-line);box-shadow:var(--st-sh-pop);font-size:var(--st-fs-md);color:var(--st-ink-soft);max-width:420px;animation:toast-in 180ms var(--st-ease)}
 .st-toast__title{font-weight:700;color:var(--st-ink)}
 .st-toast--info .st-icon{color:var(--st-info)}
-.st-toast--success .st-icon{color:var(--st-accent)}
+.st-toast--success .st-icon{color:var(--st-info)}
 .st-toast--warn .st-icon{color:var(--st-warn)}
 .st-toast--error .st-icon{color:var(--st-danger)}
 @keyframes toast-in{from{opacity:0;transform:translateY(6px)}}

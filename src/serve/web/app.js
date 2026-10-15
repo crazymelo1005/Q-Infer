@@ -259,13 +259,16 @@ var QinferMD = {
       return '<code>' + inlineCodes[parseInt(idx)] + '</code>';
     });
     
-    // Bold: **text** or __text__
+    // Bold: **text** or __text__. Asterisks emphasise anywhere; an underscore only
+    // at a word boundary, because the underscore rules below are the same rules.
     text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    text = text.replace(/__(.+?)__/g, '<strong>$1</strong>');
-    
-    // Italic: *text* or _text_
+    text = text.replace(/(^|[^\w])__(?=\S)([\s\S]*?\S)__(?!\w)/g, '$1<strong>$2</strong>');
+
+    // Italic: *text* or _text_. An underscore never emphasises inside a word —
+    // replies are full of snake_case identifiers (max_tokens, has_rings) and a
+    // greedy _(.*?)_ swallows the underscores right out of the name being named.
     text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
-    text = text.replace(/_(.+?)_/g, '<em>$1</em>');
+    text = text.replace(/(^|[^\w])_(?=\S)([\s\S]*?\S)_(?!\w)/g, '$1<em>$2</em>');
     
     // Images: ![alt](url). Only https is turned into an <img> (the HTML is already
     // escaped, so the URL cannot break out of the attribute); anything else stays
@@ -287,7 +290,7 @@ const I18N = {
     "lang.title": "切换语言（中 / EN）",
     "state.connecting": "连接中…",
     "chat.title": "本地推理引擎",
-    "chat.sub": "模型在本机运行，数据不会离开您的设备。可在「关于」页设置 API 密钥。",
+    "chat.sub": "模型在本机运行，数据不离开本机。API 密钥在「关于」页设置。",
     "chat.sampler": "采样器",
     "chat.seedLabel": "seed（-1 = 随机）",
     "chat.inputPh": "输入消息，Enter 发送，Shift+Enter 换行",
@@ -296,11 +299,11 @@ const I18N = {
     "chat.assistant": "Q-Infer",
     "chat.copy": "复制",
     "chat.regenerate": "重新生成",
-    "chat.good": "赞",
-    "chat.bad": "踩",
+    "chat.good": "有帮助",
+    "chat.bad": "没帮助",
     "chat.codeCopy": "复制",
     "chat.codeCopied": "已复制",
-    "chat.usageMeta": "上下文 {p} · 生成 {c} · 合计 {t} tokens",
+    "chat.usageMeta": "提示词 {p} · 生成 {c} · 合计 {t} tokens",
     "chat.edit": "编辑",
     "chat.editHint": "已撤回该轮，改好后发送",
     "chat.continueTitle": "继续生成",
@@ -309,7 +312,26 @@ const I18N = {
     "chat.thinkOff": "关",
     "chat.contextLen": "上下文长度",
     "chat.ctxAuto": "自动",
-    "chat.scrollBottom": "回到底部",
+    "chat.scrollBottom": "回到最新",
+    "chat.copyFailed": "复制失败：浏览器拒绝了剪贴板访问",
+    "chat.outline": "对话大纲",
+    "chat.outlineEmpty": "还没有内容",
+    "chat.prevTurn": "上一轮",
+    "chat.nextTurn": "下一轮",
+    "queue.title": "消息队列",
+    "queue.pause": "暂停",
+    "queue.resume": "继续",
+    "queue.paused": "已暂停，队列不再自动发送",
+    "queue.waiting": "待发送",
+    "queue.clear": "清空",
+    "queue.remove": "移除",
+    "queue.edit": "编辑",
+    "queue.interject": "打断并发送",
+    "queue.reorder": "拖动排序",
+    "queue.full": "队列已满（上限 {n} 条）",
+    "queue.queued": "已加入队列",
+    "queue.cleared": "队列已清空",
+    "queue.attachment": "（仅附件）",
     "conv.closeSidebar": "收起侧栏",
     "conv.searchPh": "搜索对话",
     "conv.noMatch": "无匹配对话",
@@ -319,11 +341,10 @@ const I18N = {
     "conv.timeDay": "{n} 天前",
     "conv.branch": "从这里分支",
     "conv.branched": "分支对话",
-    "conv.branchedToast": "已从该轮分支出新对话",
+    "conv.branchedToast": "已从这一轮新建对话",
     "chat.error": "错误",
-    "chat.prefilling": "正在处理提示词…",
+    "chat.prefilling": "正在预填充…",
     "chat.thinking": "思考中…",
-    "chat.thinkingToggle": "思考模式",
     "chat.topK": "top_k",
     "chat.minP": "min_p",
     "chat.presPen": "存在惩罚",
@@ -334,7 +355,7 @@ const I18N = {
     "chat.failed": "请求失败",
     "chat.failedPrefix": "请求失败：",
     "chat.idle": "空闲",
-    "chat.newChat": "新会话已开始",
+    "chat.newChat": "新对话已开始",
     "chat.exported": "已导出 qinfer-chat.md",
     "chat.noExport": "没有可导出的对话",
     "metric.speed": "解码速度",
@@ -357,9 +378,9 @@ const I18N = {
     "sampler.generation": "生成",
     "sampler.reset": "恢复默认",
     "sampler.resetDone": "已恢复默认参数",
-    "sampler.overrideBadge": "本对话",
-    "sampler.overrideTip": "本对话保存了自己的参数；切回该对话时自动套用",
-    "sampler.clearOverride": "同步全局",
+    "sampler.overrideTip": "本对话有自己的参数，切回时自动生效",
+    "sampler.overrideSwitch": "仅本对话使用",
+    "sampler.overrideKept": "本对话已保存自己的参数",
     "sampler.overrideCleared": "已改为跟随全局参数",
     "sampler.tipTemp": "0-2：越大越随机；0.8 平衡，0.2 稳定",
     "sampler.tipTopP": "0.05-1：只从累计概率前 p 的候选里采样",
@@ -373,13 +394,12 @@ const I18N = {
     "chat.thinkLow": "低",
     "chat.thinkMedium": "中",
     "chat.thinkXhigh": "极高",
-    "chat.thinkLevelAria": "思考档位",
     "keys.title": "键盘快捷键",
     "keys.focusInput": "聚焦输入框",
     "keys.newConv": "新建对话",
     "keys.toggleSidebar": "显示或隐藏对话栏",
     "keys.help": "打开这份快捷键清单",
-    "keys.escape": "关闭当前浮层；没有浮层时停止生成",
+    "keys.escape": "关闭当前弹层；没有弹层时停止生成",
     "keys.send": "发送消息",
     "keys.newline": "输入框内换行",
     "chat.system": "系统提示词",
@@ -400,7 +420,7 @@ const I18N = {
     "about.apiKeyHint": "仅当服务端启动时带了 --api-key 才需要",
     "about.apiKeyPh": "不需要",
     "about.show": "显示",
-    "about.apiKeyNote": "密钥仅保存在浏览器本地存储中，跨标签页共享，不会上传到任何服务器。",
+    "about.apiKeyNote": "密钥只存在浏览器本地（localStorage），跨标签页共享，不会上传。",
     "about.engine": "模型与引擎",
     "about.props": "能力（/props）",
     "about.hw": "硬件信息",
@@ -453,7 +473,7 @@ const I18N = {
     "mon.session": "本次会话",
     "mon.reqHistory": "请求记录",
     "act.requests": "请求数",
-    "act.prompt": "输入 token",
+    "act.prompt": "提示词 token",
     "act.completion": "输出 token",
     "act.reused": "复用 token",
     "act.busy": "计算耗时",
@@ -518,6 +538,7 @@ const I18N = {
     "toast.imgOver": "超过 20 MB",
     "toast.fileOver": "超过 512 KB",
     "toast.notText": "不是文本文件",
+    "toast.storageFull": "浏览器存储空间已满，本次保存已丢弃图片附件",
 
     "chat.temperature": "温度",
     "chat.topP": "top_p",
@@ -527,7 +548,7 @@ const I18N = {
     "filter.error": "错误",
     "req.tabInput": "输入",
     "req.tabOutput": "输出",
-    "req.tabReasoning": "推理",
+    "req.tabReasoning": "思考",
     "req.field.id": "ID",
     "req.field.path": "路径",
     "req.field.model": "模型",
@@ -562,7 +583,7 @@ const I18N = {
     "tool.noTools": "未启用任何工具",
 
     // Conversation history
-    "conv.history": "对话历史",
+    "conv.history": "对话",
     "conv.new": "新对话",
     "conv.toggle": "显示对话列表",
     "conv.empty": "暂无对话记录",
@@ -583,7 +604,7 @@ const I18N = {
     "conv.exportBtn": "导出",
     "conv.exportedToast": "已导出 {n} 个对话",
     "conv.importedToast": "已导入 {n} 个对话",
-    "conv.importBadFormat": "导入失败：文件格式不正确",
+    "conv.importBadFormat": "导入失败：不是 Q-Infer 导出文件",
   },
   en: {
     "brand.tag": "Local inference",
@@ -599,10 +620,10 @@ const I18N = {
     "chat.assistant": "Q-Infer",
     "chat.copy": "Copy",
     "chat.regenerate": "Regenerate",
-    "chat.good": "Good",
-    "chat.bad": "Bad",
+    "chat.good": "Helpful",
+    "chat.bad": "Not helpful",
     "chat.codeCopy": "Copy",
-    "chat.codeCopied": "Copied!",
+    "chat.codeCopied": "Copied",
     "chat.usageMeta": "prompt {p} · completion {c} · total {t} tokens",
     "chat.edit": "Edit",
     "chat.editHint": "Turn retracted — edit and send again",
@@ -612,7 +633,26 @@ const I18N = {
     "chat.thinkOff": "Off",
     "chat.contextLen": "Context length",
     "chat.ctxAuto": "Auto",
-    "chat.scrollBottom": "Scroll to bottom",
+    "chat.scrollBottom": "Jump to newest",
+    "chat.copyFailed": "Copy failed: the browser refused clipboard access",
+    "chat.outline": "Outline",
+    "chat.outlineEmpty": "Nothing here yet",
+    "chat.prevTurn": "Previous turn",
+    "chat.nextTurn": "Next turn",
+    "queue.title": "Message queue",
+    "queue.pause": "Pause",
+    "queue.resume": "Resume",
+    "queue.paused": "paused — the queue is not sending",
+    "queue.waiting": "waiting",
+    "queue.clear": "Clear",
+    "queue.remove": "Remove",
+    "queue.edit": "Edit",
+    "queue.interject": "Interject & send",
+    "queue.reorder": "Drag to reorder",
+    "queue.full": "The queue is full ({n} items max)",
+    "queue.queued": "Added to the queue",
+    "queue.cleared": "Queue cleared",
+    "queue.attachment": "(attachments only)",
     "conv.closeSidebar": "Close sidebar",
     "conv.searchPh": "Search conversations",
     "conv.noMatch": "No matching conversations",
@@ -622,11 +662,10 @@ const I18N = {
     "conv.timeDay": "{n} d ago",
     "conv.branch": "Branch from here",
     "conv.branched": "Branched conversation",
-    "conv.branchedToast": "Branched a new conversation from this turn",
+    "conv.branchedToast": "Created a new conversation branching from this turn",
     "chat.error": "Error",
-    "chat.prefilling": "Processing prompt…",
+    "chat.prefilling": "Prefilling…",
     "chat.thinking": "Thinking…",
-    "chat.thinkingToggle": "Thinking mode",
     "chat.topK": "top_k",
     "chat.minP": "min_p",
     "chat.presPen": "presence_penalty",
@@ -640,12 +679,12 @@ const I18N = {
     "chat.newChat": "New chat started",
     "chat.exported": "Exported qinfer-chat.md",
     "chat.noExport": "Nothing to export",
-    "metric.speed": "Speed",
-    "metric.prefill": "Prefill",
+    "metric.speed": "Decode speed",
+    "metric.prefill": "Prefill speed",
     "metric.ram": "System RAM",
     "metric.gpuLoad": "GPU load",
     "metric.vram": "VRAM",
-    "metric.temp": "GPU temp",
+    "metric.temp": "GPU temperature",
     "metric.power": "Power",
     "metric.pcie": "PCIe",
     "metric.cpu": "CPU",
@@ -660,14 +699,14 @@ const I18N = {
     "sampler.generation": "Generation",
     "sampler.reset": "Reset to defaults",
     "sampler.resetDone": "Sampler reset to defaults",
-    "sampler.overrideBadge": "This conversation",
-    "sampler.overrideTip": "This conversation keeps its own parameters; switching to it applies them",
-    "sampler.clearOverride": "Sync from global",
+    "sampler.overrideTip": "This conversation has its own settings, applied whenever you switch back to it",
+    "sampler.overrideSwitch": "This conversation only",
+    "sampler.overrideKept": "This conversation keeps its own settings",
     "sampler.overrideCleared": "Now follows the global parameters",
     "sampler.tipTemp": "0-2: higher is more random; 0.8 balanced, 0.2 steady",
     "sampler.tipTopP": "0.05-1: sample only from the top-p probability mass",
     "sampler.tipTopK": "0-1000: keep only the k most likely tokens; 0 = off",
-    "sampler.tipMinP": "0-1: drop candidates below p x the top token's probability",
+    "sampler.tipMinP": "0-1: drop candidates below p times the top token's probability",
     "sampler.tipPresPen": "0-2: penalize tokens that already appeared, encouraging new topics",
     "sampler.tipFreqPen": "0-2: penalize by how often a token appeared, curbing repetition",
     "sampler.tipRepPen": "1-2: log-probability penalty on tokens already used; 1 = off",
@@ -675,14 +714,13 @@ const I18N = {
     "sampler.tipSeed": "A fixed seed makes sampling reproducible; -1 draws a new one each time",
     "chat.thinkLow": "Low",
     "chat.thinkMedium": "Medium",
-    "chat.thinkXhigh": "xHigh",
-    "chat.thinkLevelAria": "Thinking level",
+    "chat.thinkXhigh": "Extra high",
     "keys.title": "Keyboard shortcuts",
     "keys.focusInput": "Focus the message box",
     "keys.newConv": "Start a new conversation",
     "keys.toggleSidebar": "Show or hide the conversation list",
     "keys.help": "Open this shortcut list",
-    "keys.escape": "Close what is open; with nothing open, stop generating",
+    "keys.escape": "Close the open panel; if none is open, stop generating",
     "keys.send": "Send the message",
     "keys.newline": "New line in the message box",
     "chat.system": "System prompt",
@@ -696,14 +734,14 @@ const I18N = {
     "mon.noReq": "No requests yet",
     "mon.pickHint": "Pick a request on the left to inspect it",
     "mon.stateLine": "State",
-    "mon.queued": "queued",
+    "mon.queued": "Queued",
     "mon.unreachable": "Server unreachable, retrying…",
     "about.apiKey": "Connection settings",
     "about.apiKeyLabel": "API key",
     "about.apiKeyHint": "Only needed if the server was started with --api-key",
     "about.apiKeyPh": "Not needed",
     "about.show": "Show",
-    "about.apiKeyNote": "The key is stored only in this browser's local storage, shared across tabs, and never uploaded.",
+    "about.apiKeyNote": "The key lives only in this browser's local storage, shared across tabs; it is never uploaded.",
     "about.engine": "Model and engine",
     "about.props": "Capabilities (/props)",
     "about.hw": "Hardware",
@@ -757,13 +795,13 @@ const I18N = {
     "mon.reqHistory": "Request log",
     "act.requests": "Requests",
     "act.prompt": "Prompt tokens",
-    "act.completion": "Completion tokens",
+    "act.completion": "Output tokens",
     "act.reused": "Reused tokens",
     "act.busy": "Compute time",
     "act.perReq": "{n} per request",
     "act.ofPrompt": "{n} of prompt",
-    "act.prefill": "prefill",
-    "act.decode": "decode",
+    "act.prefill": "Prefill",
+    "act.decode": "Decode",
     "req.thTime": "Time",
     "req.thStatus": "Status",
     "req.thPrompt": "Prompt",
@@ -787,7 +825,7 @@ const I18N = {
     "about.endpointPaths": "Endpoint paths",
     "about.openaiLabel": "OpenAI",
     "about.anthropicLabel": "Anthropic",
-    "about.monitoringLabel": "Monitoring",
+    "about.monitoringLabel": "Monitor",
     "about.model": "Model",
     "about.engineLabel": "Engine",
     "about.service": "Service",
@@ -821,6 +859,7 @@ const I18N = {
     "toast.imgOver": "is over 20 MB",
     "toast.fileOver": "is over 512 KB",
     "toast.notText": "is not a text file",
+    "toast.storageFull": "browser storage is full — image attachments were dropped from this save",
 
     "chat.temperature": "Temperature",
     "chat.topP": "top_p",
@@ -830,7 +869,7 @@ const I18N = {
     "filter.error": "Error",
     "req.tabInput": "Input",
     "req.tabOutput": "Output",
-    "req.tabReasoning": "Reasoning",
+    "req.tabReasoning": "Thinking",
     "req.field.id": "ID",
     "req.field.path": "Path",
     "req.field.model": "Model",
@@ -923,6 +962,19 @@ function trState(s) {
   return STATE_TR[s] ? tr(STATE_TR[s]) : s;
 }
 
+// The header pill reads as a badge, so it carries the state word and the live
+// rate — the "State" label belongs to the chat footer summary, not the pill.
+function pillText(state, tok) {
+  return trState(state) + " · " + tok + " " + tr("unit.tokS");
+}
+
+// An untitled conversation stores an empty title, and the placeholder is resolved
+// here at render time. Storing tr("conv.untitled") instead would freeze the title
+// to whatever language the conversation happened to be created in.
+function convTitle(conv) {
+  return conv.title || tr("conv.untitled");
+}
+
 // Apply the UI language: data-i18n text, data-i18n-ph placeholders,
 // data-i18n-title/title tooltips; the toggle button label follows along.
 function applyLang() {
@@ -942,6 +994,10 @@ function applyLang() {
   document.querySelectorAll("[data-i18n-aria]").forEach(function (el) {
     el.setAttribute("aria-label", tr(el.dataset.i18nAria));
   });
+  // Two runtime surfaces carry their own labels: the composer's primary button
+  // (Send or Stop, depending on whether a reply is running) and the queue rows.
+  if (typeof syncSendButton === "function") syncSendButton();
+  if (typeof queueRender === "function") queueRender();
   // Rich key with inline markup (e.g. the /props paragraph): safe here because
   // the dictionaries are static, no user input ever reaches them.
   document.querySelectorAll("[data-i18n-html]").forEach(function (el) {
@@ -1171,6 +1227,7 @@ function showHelpDialog() {
   h.id = "keys-dialog-title";
   h.textContent = tr("keys.title");
   title.appendChild(h);
+  overlay.setAttribute("aria-labelledby", h.id);
   var dl = document.createElement("dl");
   dl.className = "keys-list";
   QinferKeys.rows(isMacKeys()).forEach(function (r) {
@@ -1228,14 +1285,12 @@ function setDrawer(id, open) {
   const d = $(id);
   if (d) d.open = open;
 }
-function closeThinkPopover() {
-  const pop = $("think-popover"), chip = $("btn-thinking");
-  if (pop) pop.classList.add("hidden");
-  if (chip) chip.setAttribute("aria-expanded", "false");
-}
 function overlayLayers() {
-  const pop = $("think-popover");
-  const layers = [{name: "think", open: !!pop && !pop.classList.contains("hidden")}];
+  const outline = $("outline-pop");
+  // Topmost first: the outline popover is transient, then the drawers.
+  const layers = [
+    {name: "outline", open: !!outline && !outline.classList.contains("hidden")},
+  ];
   drawerStack.forEach(function (id) {
     const d = $(id);
     layers.push({name: "drawer:" + id, open: !!d && d.open});
@@ -1404,7 +1459,7 @@ function saveSampler() {
   // drawer level with the global set drops the badge.
   var cur = QinferConv.currentId ? QinferConv.loadAll().find(function (c) { return c.id === QinferConv.currentId; }) : null;
   if (cur && cur.params) { cur.params = samplerSnapshot(); QinferConv.saveAll(QinferConv.loadAll().map(function (c) { return c.id === cur.id ? cur : c; })); }
-  if (typeof syncOverrideBadge === "function") syncOverrideBadge();
+  if (typeof syncOverrideSwitch === "function") syncOverrideSwitch();
 }
 function loadSampler() {
   const s = QinferSampler.load();
@@ -1427,22 +1482,22 @@ function loadSampler() {
    The drawer's four-level select was removed (2026-10-15): one source of truth,
    and the chip shows the current level instead of a bare on/off highlight. */
 var THINK_LEVELS = ["off", "low", "medium", "xhigh"];
-var THINK_LABEL_KEYS = { off: "chat.thinkOff", low: "chat.thinkLow", medium: "chat.thinkMedium", xhigh: "chat.thinkXhigh" };
 var thinkLevel = "xhigh";
-function thinkLevelLabel(level) { return tr(THINK_LABEL_KEYS[level] || "chat.thinkOff"); }
 function setThinkLevel(level, opts) {
   if (THINK_LEVELS.indexOf(level) < 0) level = "xhigh";
   thinkLevel = level;
-  var label = $("think-level");
-  if (label) label.textContent = thinkLevelLabel(level);
-  var chip = $("btn-thinking");
-  if (chip) chip.classList.toggle("active", level !== "off");
-  var pop = $("think-popover");
-  if (pop) pop.querySelectorAll(".st-popover__item").forEach(function (it) {
-    var on = it.dataset.level === level;
-    it.classList.toggle("active", on);
-    it.setAttribute("aria-selected", on ? "true" : "false");
-  });
+  // The segments are the control, so the state lives on them: aria-checked for
+  // assistive tech, .active for the eye.
+  var seg = $("think-seg");
+  if (seg) {
+    seg.querySelectorAll(".think-seg__opt").forEach(function (b) {
+      var on = b.dataset.level === level;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-checked", on ? "true" : "false");
+      b.setAttribute("tabindex", on ? "0" : "-1");
+    });
+    seg.classList.toggle("is-off", level === "off");
+  }
   if (!opts || !opts.silent) saveSampler();
 }
 // The sampler + generation fields as a plain object, for per-conversation overrides.
@@ -1529,36 +1584,39 @@ function resetSampler() {
   saveSampler();
   showToast(tr("sampler.resetDone"));
 }
-// Compare two parameter sets by parameter name (the drawer's snapshot is keyed
-// by field id, the stored set by parameter name). ctx and think travel along.
-function samplerComparable(obj, fromFields) {
-  var out = {};
-  Object.keys(SAMPLER_PARAM_NAMES).forEach(function (id) {
-    var name = SAMPLER_PARAM_NAMES[id], v = fromFields ? obj[id] : obj[name];
-    if (v !== undefined && v !== null && v !== "") out[name] = Number(v);
-  });
-  var think = fromFields ? obj["s-think"] : obj.think;
-  var ctx = fromFields ? obj["s-ctx"] : obj.ctx;
-  if (think !== undefined) out.think = think;
-  if (ctx !== undefined) out.ctx = ctx;
-  return out;
-}
-// The active conversation is on its own parameter set when it differs from the
-// saved global one; the badge and the sync button say so (and nothing else does).
-function samplerOverrideActive() {
+// An explicit switch replaces the old diff-based badge: "on" means this
+// conversation carries its own parameter set, and that is a state the reader
+// chooses — not something they have to infer from a difference.
+function convHasOverride() {
   var conv = QinferConv.currentId
     ? QinferConv.loadAll().find(function (c) { return c.id === QinferConv.currentId; }) : null;
-  if (!conv || !conv.params) return false;
-  var global = QinferSampler.load();
-  if (!global) return false;
-  return JSON.stringify(samplerComparable(conv.params, true)) !== JSON.stringify(samplerComparable(global, false));
+  return !!(conv && conv.params);
 }
-function syncOverrideBadge() {
-  var badge = $("sampler-override"), clear = $("btn-clear-override");
-  if (!badge) return;
-  var has = samplerOverrideActive();
-  badge.classList.toggle("hidden", !has);
-  if (clear) clear.classList.toggle("hidden", !has);
+function syncOverrideSwitch() {
+  var el = $("s-override");
+  if (el) el.checked = convHasOverride();
+}
+// Turning the switch on snapshots what the fields hold now; turning it off drops
+// the conversation's set and puts the global one back in the fields.
+function setConvOverride(on) {
+  if (!QinferConv.currentId) return;
+  var convs = QinferConv.loadAll();
+  var conv = convs.find(function (c) { return c.id === QinferConv.currentId; });
+  if (!conv) return;
+  if (on) {
+    conv.params = samplerSnapshot();
+  } else {
+    delete conv.params;
+  }
+  QinferConv.saveAll(convs);
+  if (!on) {
+    loadSampler();
+    syncSliderOutputs();
+    syncPresetChips();
+  }
+  syncOverrideSwitch();
+  if (on) showToast(tr("sampler.overrideKept"));
+  else showToast(tr("sampler.overrideCleared"));
 }
 
 // A short relative time for the conversation list (i18n'd).
@@ -1700,12 +1758,12 @@ function addMsg(role, text, attachList, ts) {
     var uactions = document.createElement("div");
     uactions.className = "bubble-actions";
     uactions.innerHTML = '<button class="bubble-action" data-action="copy" title="' + tr("chat.copy") + '" aria-label="' + tr("chat.copy") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-copy"/></svg></button>' +
-      '<button class="bubble-action" data-action="edit" title="' + tr("chat.edit") + '" aria-label="' + tr("chat.edit") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-settings"/></svg></button>' +
+      '<button class="bubble-action" data-action="edit" title="' + tr("chat.edit") + '" aria-label="' + tr("chat.edit") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-edit"/></svg></button>' +
       '<button class="bubble-action" data-action="branch" title="' + tr("conv.branch") + '" aria-label="' + tr("conv.branch") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-new-chat"/></svg></button>';
     el.appendChild(uactions);
   }
   $("msg-list").appendChild(el);
-  $("msg-list").scrollTop = $("msg-list").scrollHeight;
+  onMessageArrived();
   return body;
 }
 
@@ -2064,7 +2122,7 @@ function addToolCallMsg(toolCalls) {
     el.appendChild(card);
   });
   $("msg-list").appendChild(el);
-  $("msg-list").scrollTop = $("msg-list").scrollHeight;
+  onMessageArrived();
   return el;
 }
 
@@ -2083,7 +2141,7 @@ function updateToolCallResult(callId, result, isError) {
   resultDiv.className = "tool-card__result";
   var pre = document.createElement("pre");
   pre.className = "tool-card__output";
-  pre.textContent = result.length > 2000 ? result.slice(0, 2000) + "\n…(truncated)" : result;
+  pre.textContent = result.length > 2000 ? result.slice(0, 2000) + "\n…" + tr("req.truncated") : result;
   card.parentElement.appendChild(resultDiv);
   resultDiv.appendChild(pre);
 }
@@ -2115,6 +2173,52 @@ function truncateMessages(messages, budgetTokens) {
   }
   return head ? [head].concat(kept) : kept;
 }
+
+// The transcript turn a rendered bubble stands for, or null when it stands for
+// nothing the model should ever see. Two kinds of bubble are not turns: an error
+// line, which reports a failed request rather than something the model said
+// (saving it would put words in its mouth on the next send), and an empty shell
+// left over from a reply that produced nothing.
+// Both the request builder and the sidebar save read this one shape, so the
+// history the UI shows and the history that gets sent cannot drift apart.
+function msgFromBubble(b, fallbackTs) {
+  if (b.classList.contains("error")) return null;
+  var isUser = b.classList.contains("user");
+  var bodyEl = b.querySelector(".bubble-body");
+  // Raw text first: a rendered Markdown body loses the source the model must see.
+  var text = b._rawText || (bodyEl ? bodyEl.textContent : "");
+  var list = [];
+  if (isUser) {
+    (b._attachments || []).forEach(function (a) {
+      if (a.kind === "image" && a.url) list.push({ kind: "image", name: a.name, url: a.url });
+      else if (a.kind === "file" && a.text) list.push({ kind: "file", name: a.name, text: a.text });
+    });
+  }
+  if (!text && !list.length) return null;
+  var msg = { role: isUser ? "user" : "assistant", content: text, ts: b._ts || fallbackTs };
+  if (list.length) msg.attachments = list;
+  if (!isUser && b._thinkingText) msg.thinking = b._thinkingText;
+  return msg;
+}
+
+// localStorage caps out around 5 MB and an image attachment is a base64 data URL,
+// so saving a conversation can fail outright. This is what is kept in that case:
+// the whole transcript, minus the image payloads.
+function withoutImages(convs) {
+  return convs.map(function (c) {
+    var copy = Object.assign({}, c);
+    copy.messages = (c.messages || []).map(function (m) {
+      if (!m.attachments) return m;
+      var keep = m.attachments.filter(function (a) { return a.kind !== "image"; });
+      var t = Object.assign({}, m);
+      if (keep.length) t.attachments = keep;
+      else delete t.attachments;
+      return t;
+    });
+    return copy;
+  });
+}
+
 function collectMessages() {
   const messages = [];
   document.querySelectorAll("#msg-list .bubble").forEach(function (b) {
@@ -2142,16 +2246,14 @@ function collectMessages() {
       return;
     }
     // Normal user/assistant bubble
-    const role = b.classList.contains("user") ? "user" : "assistant";
-    // Use raw text (before Markdown rendering) if available, otherwise textContent
-    const bodyEl = b.querySelector(".bubble-body");
-    const txt = b._rawText || bodyEl.textContent;
-    const attachList = b._attachments || [];
-    const imageAttachments = attachList.filter(function (a) { return a.kind === "image" && a.url; });
-    const fileAttachments = attachList.filter(function (a) { return a.kind === "file" && a.text; });
+    const turn = msgFromBubble(b, null);
+    if (!turn) return;
+    const attachList = turn.attachments || [];
+    const imageAttachments = attachList.filter(function (a) { return a.kind === "image"; });
+    const fileAttachments = attachList.filter(function (a) { return a.kind === "file"; });
     if (imageAttachments.length) {
       var parts = [];
-      var fullText = txt;
+      var fullText = turn.content;
       fileAttachments.forEach(function (f) {
         fullText = "File: " + f.name + "\n```\n" + f.text + "\n```\n\n" + fullText;
       });
@@ -2159,22 +2261,50 @@ function collectMessages() {
       imageAttachments.forEach(function (a) {
         parts.push({ type: "image_url", image_url: { url: a.url } });
       });
-      messages.push({ role: role, content: parts });
+      messages.push({ role: turn.role, content: parts });
     } else {
-      var content = txt;
+      var content = turn.content;
       fileAttachments.forEach(function (f) {
         content = "File: " + f.name + "\n```\n" + f.text + "\n```\n\n" + content;
       });
-      if (content || role === "user") messages.push({ role: role, content: content });
+      messages.push({ role: turn.role, content: content });
     }
   });
   return messages;
 }
 
+// One button owns the composer's primary slot: Send when idle, Stop while a reply
+// runs. Two separate buttons for one decision made the stop control easy to miss
+// and easy to leave behind after the run ended.
+function syncSendButton() {
+  var send = $("btn-send");
+  if (!send) return;
+  send.disabled = false;              // while streaming it is the stop control
+  send.classList.toggle("st-btn--stop", !!streaming);
+  send.dataset.mode = streaming ? "stop" : "send";
+  send.setAttribute("aria-label", streaming ? tr("chat.stop") : tr("chat.send"));
+  var use = send.querySelector("use");
+  if (use) use.setAttribute("href", "/web/sprite.svg#" + (streaming ? "i-stop" : "i-send"));
+}
+
+// Swap an action's glyph for a moment to confirm the click landed.
+function flashAction(btn, icon) {
+  if (!btn || btn._flashing) return;
+  var use = btn.querySelector("use");
+  var prev = use ? use.getAttribute("href") : null;
+  btn._flashing = true;
+  btn.classList.add("active");
+  if (use) use.setAttribute("href", "/web/sprite.svg#" + icon);
+  setTimeout(function () {
+    btn.classList.remove("active");
+    if (use && prev) use.setAttribute("href", prev);
+    btn._flashing = false;
+  }, 1200);
+}
+
 function setStreaming(on) {
   streaming = on;
-  $("btn-send").disabled = on;
-  $("btn-stop").classList.toggle("hidden", !on);
+  syncSendButton();
 }
 
 // After a stop, offer to continue the reply on the same bubble. The partial text
@@ -2207,6 +2337,7 @@ async function sendChat() {
   attachments = [];
   renderAttachments();
   addMsg("user", text, currentAttachments);
+  scrollChatToEnd(true);   // sending is an explicit "show me the newest" move
   setStreaming(true);
   abortCtrl = new AbortController();
   setPill("reading", tr("chat.prefilling"));
@@ -2246,7 +2377,7 @@ async function sendChat() {
       toolBubble._toolCallId = tc.id;
       $("msg-list").appendChild(toolBubble);
     }
-    $("msg-list").scrollTop = $("msg-list").scrollHeight;
+    scrollChatToEnd(false);
     // Continue the loop — the next round will include tool results
   }
   if (streaming) {
@@ -2257,6 +2388,10 @@ async function sendChat() {
     QinferConv.saveCurrent();
     QinferConv.renderList();
   }
+  // Whatever ended the run — completion, an error, or a stop — the next queued
+  // message goes now, unless the queue is paused. "Interject" relies on this
+  // being the single exit path: it stops the run and lets this send the head.
+  queueAdvance();
 }
 
 // Execute a single chat round: send request, stream response, return result
@@ -2380,7 +2515,7 @@ async function doChatRound() {
         });
         setPill("generating", tr("tool.calling"));
       }
-      $("msg-list").scrollTop = $("msg-list").scrollHeight;
+      scrollChatToEnd(false);
     });
     if (waitRow.parentElement) waitRow.remove();
   } catch (e) {
@@ -2410,6 +2545,13 @@ async function doChatRound() {
   // Render Markdown for completed assistant messages
   if (out.textContent) renderMsgMarkdown(out);
   if (usageAcc) renderUsageMeta(out.parentElement, usageAcc);
+  // A reply cut off by the token limit reads like a finished answer, but the model
+  // stopped for budget, not because it was done — offer the same "continue"
+  // affordance a manual stop gets.
+  if (finishReason === "length") addContinueAction(out.parentElement);
+  // The final Markdown render can change the height in one go (plain text turning
+  // into a table, code blocks that grow). Re-settle the bottom if we are following.
+  scrollChatToEnd(false);
   return { text: out.textContent };
 }
 
@@ -2417,13 +2559,21 @@ function stopChat() {
   if (abortCtrl) abortCtrl.abort();
 }
 
+// Start a new conversation. The sidebar "New" button is the only caller, so the
+// dedupe rule lives here: an untouched empty conversation already is "new".
 function newChat() {
   if (streaming) return;
-  // Create a new conversation via the conversation system
-  var conv = QinferConv.create();
-  QinferConv.switchTo(conv.id);
+  var cur = QinferConv.getCurrent();
+  if (cur && !cur.messages.length && !document.querySelector("#msg-list .bubble")) {
+    QinferConv.switchTo(cur.id);
+  } else {
+    var conv = QinferConv.create();
+    QinferConv.switchTo(conv.id);
+  }
   setPill("idle", tr("chat.newChat"));
   showToast(tr("chat.newChat"), "info");
+  var ta = $("chat-input");
+  if (ta) ta.focus();
 }
 
 /* ---- Export chat as Markdown ---- */
@@ -2485,7 +2635,7 @@ async function pollMetrics() {
     if (chatState) chatState.textContent = (tr("mon.stateLine") + " " + trState(state) + " \u00b7 " + tr("mon.queued") + " " + queued + " \u00b7 " + tok + " " + tr("unit.tokS"));
     setStatusDot(true);
     if (state !== "idle" && state !== "?") {
-      setPill(state, tr("mon.stateLine") + " " + trState(state) + " \u00b7 " + tok + " " + tr("unit.tokS"));
+      setPill(state, pillText(state, tok));
     } else {
       setPill("idle", tr("state.idle"));
     }
@@ -2531,7 +2681,7 @@ function initCommon() {
 window.QinferRequests = {
   badge: function (state) {
     const cls = state === "completed" ? "ok" : state === "error" ? "err" : state === "queued" ? "busy" : "";
-    return '<span class="badge ' + cls + '">' + esc(state) + "</span>";
+    return '<span class="badge ' + cls + '">' + esc(trState(state)) + "</span>";
   },
   fmtSec: function (v) {
     if (v === null || v === undefined) return "—";
@@ -2597,7 +2747,7 @@ window.QinferRequests = {
       ["id", rec.id],
       ["path", rec.path],
       ["model", rec.model],
-      ["state", rec.state],
+      ["state", trState(rec.state)],
       ["created", QinferRequests.timeOf(rec.created)],
       ["stream", rec.stream ? tr("req.yes") : tr("req.no")],
       ["response_format", rec.response_format || "—"],
@@ -2691,7 +2841,7 @@ window.QinferRequests = {
       if (p !== null) { any++; if (p < min) min = p; if (p > max) max = p; }
     });
     if (!any || max === min) return;
-    const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#10b981";
+    const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#f2600c";
     ctx.strokeStyle = accent;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -2821,23 +2971,24 @@ function initChat() {
     });
     el.addEventListener("change", saveSampler);
   });
-  // Thinking: one chip + popover (no drawer select anymore).
-  var thinkChip = $("btn-thinking"), thinkPop = $("think-popover");
-  if (thinkChip && thinkPop) {
-    thinkChip.addEventListener("click", function (e) {
-      e.stopPropagation();
-      var willOpen = thinkPop.classList.contains("hidden");
-      thinkPop.classList.toggle("hidden", !willOpen);
-      thinkChip.setAttribute("aria-expanded", willOpen ? "true" : "false");
-    });
-    thinkPop.querySelectorAll(".st-popover__item").forEach(function (it) {
-      it.addEventListener("click", function (e) {
-        e.stopPropagation();
-        setThinkLevel(it.dataset.level);
-        closeThinkPopover();
+  // Thinking: a segmented radiogroup — every level is one click, and the current
+  // one is visible without opening anything. Arrow keys move between segments,
+  // which is what role=radio implies.
+  var thinkSeg = $("think-seg");
+  if (thinkSeg) {
+    var segOpts = Array.prototype.slice.call(thinkSeg.querySelectorAll(".think-seg__opt"));
+    segOpts.forEach(function (b, i) {
+      b.addEventListener("click", function () { setThinkLevel(b.dataset.level); });
+      b.addEventListener("keydown", function (e) {
+        var d = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1
+              : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+        if (!d) return;
+        e.preventDefault();
+        var next = segOpts[(i + d + segOpts.length) % segOpts.length];
+        setThinkLevel(next.dataset.level);
+        next.focus();
       });
     });
-    document.addEventListener("click", closeThinkPopover);
   }
   // Presets: one click sets the seven sampling fields.
   var chips = $("preset-chips");
@@ -2846,35 +2997,24 @@ function initChat() {
   });
   var btnReset = $("btn-reset-sampler");
   if (btnReset) btnReset.addEventListener("click", function () { resetSampler(); });
-  var btnClear = $("btn-clear-override");
-  if (btnClear) btnClear.addEventListener("click", function () {
-    var conv = QinferConv.currentId ? QinferConv.loadAll().find(function (c) { return c.id === QinferConv.currentId; }) : null;
-    if (!conv) return;
-    var g = QinferSampler.load() || {};
-    samplerApply({
-      "s-temp": g.temperature, "s-top-p": g.top_p, "s-top-k": g.top_k, "s-min-p": g.min_p,
-      "s-pres-pen": g.presence_penalty, "s-freq-pen": g.frequency_penalty, "s-rep-pen": g.repeat_penalty,
-      "s-seed": g.seed, "s-max-tokens": g.max_tokens, "s-ctx": g.ctx, "s-think": g.think,
-    });
-    conv.params = samplerSnapshot();
-    QinferConv.saveAll(QinferConv.loadAll().map(function (c) { return c.id === conv.id ? conv : c; }));
-    syncOverrideBadge();
-    showToast(tr("sampler.overrideCleared"));
-  });
+  var btnClear = $("s-override");
+  if (btnClear) btnClear.addEventListener("change", function () { setConvOverride(btnClear.checked); });
   setThinkLevel(thinkLevel, { silent: true });
   syncSliderOutputs();
   syncPresetChips();
-  syncOverrideBadge();
+  syncOverrideSwitch();
   initAttachmentHandlers();
-  $("btn-send").addEventListener("click", sendChat);
-  $("btn-stop").addEventListener("click", stopChat);
+  // The primary button sends, or stops what is running — never both at once.
+  $("btn-send").addEventListener("click", function (e) {
+    if (streaming) { e.preventDefault(); stopChat(); }
+  });
   $("btn-export").addEventListener("click", exportChat);
   const composer = $("composer");
-  if (composer) composer.addEventListener("submit", function (e) { e.preventDefault(); sendChat(); });
+  if (composer) composer.addEventListener("submit", function (e) { e.preventDefault(); submitOrQueue(); });
   $("chat-input").addEventListener("keydown", function (e) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      sendChat();
+      submitOrQueue();
     }
   });  // Global keyboard shortcuts: QinferKeys.match names the action, this runs it.
   document.addEventListener("keydown", function (e) {
@@ -2884,7 +3024,7 @@ function initChat() {
       // A modal (confirm dialog, shortcut help) owns its own Escape handler.
       if (document.querySelector(".st-modal")) return;
       const top = QinferKeys.firstOpen(overlayLayers());
-      if (top === "think") closeThinkPopover();
+      if (top === "outline") closeOutline();
       else if (top && top.indexOf("drawer:") === 0) setDrawer(top.slice(7), false);
       else if (streaming && abortCtrl) stopChat();
       return;
@@ -2894,8 +3034,7 @@ function initChat() {
       const ci = $("chat-input");
       if (ci) ci.focus();
     } else if (action === "newConv") {
-      const conv = QinferConv.create();
-      QinferConv.switchTo(conv.id);
+      newChat();
     } else if (action === "toggleSidebar") {
       toggleConvSidebar();
     } else if (action === "help") {
@@ -2966,7 +3105,11 @@ function initChat() {
     
     if (action === "copy") {
       navigator.clipboard.writeText(text).then(function() {
-        showToast(tr("toast.copied"), "success");
+        // Confirm on the button itself: a toast is easy to miss when the eyes are
+        // on the text that was just copied.
+        flashAction(btn, "i-check");
+      }).catch(function () {
+        showToast(tr("chat.error"), "warn", tr("chat.copyFailed"));
       });
     } else if (action === "regenerate") {
       // Remove this assistant message and resend the last user message
@@ -2975,13 +3118,17 @@ function initChat() {
         prevBubble = prevBubble.previousElementSibling;
       }
       if (prevBubble && prevBubble.classList.contains("user")) {
-        bubble.remove();
-        // Get the user message text
+        // Get the user message text and the files that turn carried
         var userText = prevBubble._rawText || prevBubble.querySelector(".bubble-body").textContent;
-        // Remove the user bubble too and resend
+        var userAttach = (prevBubble._attachments || []).slice();
+        bubble.remove();
         prevBubble.remove();
-        // Re-add user bubble and send
-        addMsg("user", userText);
+        // sendChat() reads the composer and adds the user bubble itself, so the
+        // prompt goes back there — adding a bubble by hand would leave the send
+        // with an empty composer and nothing would be regenerated.
+        attachments = userAttach;
+        renderAttachments();
+        $("chat-input").value = userText;
         sendChat();
       }
     } else if (action === "edit") {
@@ -2996,6 +3143,9 @@ function initChat() {
       var editTa = $("chat-input");
       editTa.value = editText;
       editTa.focus();
+      // The retraction is a real edit to the conversation, so persist it now —
+      // otherwise switching away and back would resurrect the removed turns.
+      QinferConv.saveCurrent();
       showToast(tr("chat.editHint"), "info");
     } else if (action === "continue") {
       continueChat();
@@ -3041,8 +3191,11 @@ function initChat() {
   });
   // Conversation history sidebar
   QinferConv.init();
-  // Scroll to bottom button
-  initScrollToBottom();
+  // The newest-turn follower and its jump button
+  initChatScroll();
+  // Outline, turn paging, and the message queue
+  initChatNav();
+  initQueue();
 }
 
 function initToolPanel() {
@@ -3104,21 +3257,514 @@ function updateToolCount() {
   count.textContent = n || "";
 }
 
-function initScrollToBottom() {
-  var scrollContainer = $("chat-scroll");
+/* ---- Message queue ----------------------------------------------------------
+   A reply can take a while, and the next thing to say often arrives before it
+   ends. Enter while generating now lines that text up instead of dropping it,
+   with the contract qwenpaw uses — the one the reader already knows:
+     · the queue advances only when nothing is running and it is not paused;
+     · Pause gates the queue alone: the running reply keeps going;
+     · Interject drops the running reply and sends the head immediately.
+   Items persist to localStorage so a reload does not lose them. */
+var QinferQueue = {
+  STORAGE_KEY: "qinfer.queue",
+  CAP: 50,
+  // Ids come from a counter, not from the array length: two messages lined up in
+  // the same millisecond used to get the same id, and removing one took both.
+  _seq: 0,
+  // Append. Returns the stored item, or null when the queue is full — a silently
+  // dropped message would be worse than being told no.
+  push: function (items, text, atts) {
+    var t = String(text == null ? "" : text).trim();
+    var a = (atts || []).slice();
+    if (!t && !a.length) return null;
+    if (items.length >= QinferQueue.CAP) return null;
+    QinferQueue._seq += 1;
+    var item = { id: "q" + Date.now() + "-" + QinferQueue._seq, text: t, attachments: a };
+    items.push(item);
+    return item;
+  },
+  removeId: function (items, id) {
+    return items.filter(function (i) { return i.id !== id; });
+  },
+  move: function (items, from, to) {
+    if (from === to || from < 0 || to < 0 || from >= items.length || to >= items.length) return items;
+    var out = items.slice();
+    var it = out.splice(from, 1)[0];
+    out.splice(to, 0, it);
+    return out;
+  },
+  // Pause is about the queue only: a paused queue never starts the next turn, and
+  // pausing must never interrupt the turn that is already running.
+  canAdvance: function (paused, streaming) {
+    return !paused && !streaming;
+  },
+  read: function () {
+    try {
+      var v = JSON.parse(localStorage.getItem(QinferQueue.STORAGE_KEY) || "null");
+      if (!v || !Array.isArray(v.items)) return { items: [], paused: false };
+      var items = v.items.filter(function (i) { return i && typeof i.text === "string"; });
+      return { items: items, paused: !!v.paused };
+    } catch (e) { return { items: [], paused: false }; }
+  },
+  write: function (items, paused) {
+    try {
+      localStorage.setItem(QinferQueue.STORAGE_KEY, JSON.stringify({ items: items, paused: !!paused }));
+    } catch (e) {}
+  },
+};
+
+var queueItems = [];
+var queuePaused = false;
+
+// The per-row actions, in the order they render. "Interject & send" is the whole
+// point of the queue: it cuts the running reply short so this message is next.
+var QUEUE_ACTIONS = [
+  {action: "interject", labelKey: "queue.interject", icon: "i-send"},
+  {action: "edit", labelKey: "queue.edit", icon: "i-edit"},
+  {action: "remove", labelKey: "queue.remove", icon: "i-trash"},
+];
+
+function queueFullMessage() {
+  return tr("queue.full").replace("{n}", String(QinferQueue.CAP));
+}
+
+function queueSync() {
+  QinferQueue.write(queueItems, queuePaused);
+  queueRender();
+}
+
+// One queued message: its place in line, what it says, and what can be done with
+// it. Rows are draggable — the order is the send order, so it has to be editable.
+function queueRow(item, index) {
+  var li = document.createElement("li");
+  li.className = "queue-item";
+  li.draggable = true;
+  li.dataset.index = String(index);
+
+  var grip = document.createElement("span");
+  grip.className = "queue-item__grip";
+  grip.title = tr("queue.reorder");
+  grip.innerHTML = '<svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-list"/></svg>';
+  li.appendChild(grip);
+
+  var idx = document.createElement("span");
+  idx.className = "queue-item__idx";
+  idx.textContent = String(index + 1) + ".";
+  li.appendChild(idx);
+
+  var text = document.createElement("span");
+  text.className = "queue-item__text";
+  text.textContent = item.text || tr("queue.attachment");
+  text.title = item.text || "";
+  li.appendChild(text);
+
+  var actions = document.createElement("span");
+  actions.className = "queue-item__actions";
+  // The keys live in a literal table so the i18n lint can see them (it scans
+  // labelKey: values); building them inline would hide them from that check.
+  QUEUE_ACTIONS.forEach(function (a) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "st-btn st-btn--icon st-btn--sm";
+    b.dataset.action = a.action;
+    b.title = tr(a.labelKey);
+    b.setAttribute("aria-label", tr(a.labelKey));
+    b.innerHTML = '<svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#' + a.icon + '"/></svg>';
+    actions.appendChild(b);
+  });
+  li.appendChild(actions);
+
+  li.addEventListener("dragstart", function (e) {
+    li.classList.add("dragging");
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", String(index));
+    }
+  });
+  li.addEventListener("dragend", function () { li.classList.remove("dragging"); });
+  li.addEventListener("dragover", function (e) {
+    e.preventDefault();
+    li.classList.add("queue-item--over");
+  });
+  li.addEventListener("dragleave", function () { li.classList.remove("queue-item--over"); });
+  li.addEventListener("drop", function (e) {
+    e.preventDefault();
+    li.classList.remove("queue-item--over");
+    var from = parseInt((e.dataTransfer || {}).getData ? e.dataTransfer.getData("text/plain") : "-1", 10);
+    var to = index;
+    if (isNaN(from) || from === to) return;
+    queueItems = QinferQueue.move(queueItems, from, to);
+    queueSync();
+  });
+
+  li.addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("[data-action]") : null;
+    if (!b) return;
+    var action = b.dataset.action;
+    if (action === "remove") {
+      queueItems = QinferQueue.removeId(queueItems, item.id);
+      queueSync();
+    } else if (action === "interject") {
+      queueSendNow(item.id);
+    } else if (action === "edit") {
+      queueEditRow(li, item);
+    }
+  });
+  return li;
+}
+
+// Swap a row for an input so the queued text can be corrected before it goes.
+function queueEditRow(li, item) {
+  var input = document.createElement("input");
+  input.type = "text";
+  input.className = "input queue-item__input";
+  input.value = item.text;
+  input.setAttribute("aria-label", tr("queue.edit"));
+  li.innerHTML = "";
+  li.appendChild(input);
+  input.focus();
+  input.select();
+  var commit = function (keep) {
+    if (keep) item.text = input.value.trim();
+    if (!item.text) queueItems = QinferQueue.removeId(queueItems, item.id);
+    queueSync();
+  };
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); commit(true); }
+    else if (e.key === "Escape") { e.preventDefault(); commit(false); }
+  });
+  input.addEventListener("blur", function () { commit(true); });
+}
+
+function queueRender() {
+  var panel = $("queue-panel"), list = $("queue-list");
+  if (!panel || !list) return;
+  panel.classList.toggle("hidden", queueItems.length === 0);
+  var count = $("queue-count");
+  if (count) count.textContent = String(queueItems.length);
+  var state = $("queue-state");
+  if (state) state.textContent = queuePaused ? tr("queue.paused") : tr("queue.waiting");
+  var label = $("queue-pause-label"), icon = $("queue-pause-icon");
+  if (label) label.textContent = queuePaused ? tr("queue.resume") : tr("queue.pause");
+  if (icon) icon.querySelector("use").setAttribute("href", "/web/sprite.svg#" + (queuePaused ? "i-play" : "i-pause"));
+  var btn = $("btn-queue-pause");
+  if (btn) {
+    btn.setAttribute("aria-label", queuePaused ? tr("queue.resume") : tr("queue.pause"));
+    btn.classList.toggle("is-paused", queuePaused);
+  }
+  list.innerHTML = "";
+  queueItems.forEach(function (item, i) { list.appendChild(queueRow(item, i)); });
+}
+
+function queueAdd(text, atts) {
+  var item = QinferQueue.push(queueItems, text, atts);
+  if (!item) { showToast(tr("chat.error"), "warn", queueFullMessage()); return false; }
+  queueSync();
+  showToast(tr("queue.queued"), "info");
+  return true;
+}
+
+// Pull the head and run it. sendChat() reads the composer, so the item goes back
+// through the composer rather than into the transcript directly.
+function queueAdvance() {
+  if (!QinferQueue.canAdvance(queuePaused, streaming)) return;
+  var item = queueItems.shift();
+  if (!item) { queueRender(); return; }
+  QinferQueue.write(queueItems, queuePaused);
+  queueRender();
+  var ta = $("chat-input");
+  if (ta) ta.value = item.text || "";
+  attachments = (item.attachments || []).slice();
+  renderAttachments();
+  sendChat();
+}
+
+// "Interject": the reader wants this answered next, so the running reply is cut
+// short — the queue head then goes out through the run's own exit path.
+function queueInterject() {
+  if (!queueItems.length) return;
+  queuePaused = false;      // an explicit interject overrides a paused queue
+  queueSync();
+  if (streaming) stopChat();
+  else queueAdvance();
+}
+
+// Send one specific queued message now, ahead of anything before it.
+function queueSendNow(id) {
+  var item = queueItems.filter(function (i) { return i.id === id; })[0];
+  if (!item) return;
+  queueItems = QinferQueue.removeId(queueItems, id);
+  queueItems.unshift(item);
+  queueSync();
+  queueInterject();
+}
+
+function queueDropAll() {
+  if (!queueItems.length) return;
+  queueItems = [];
+  queuePaused = false;
+  queueSync();
+  showToast(tr("queue.cleared"), "info");
+}
+
+function initQueue() {
+  var st = QinferQueue.read();
+  queueItems = st.items;
+  queuePaused = st.paused;
+  queueRender();
+  var pause = $("btn-queue-pause"), clear = $("btn-queue-clear");
+  if (pause) pause.addEventListener("click", function () { queuePaused = !queuePaused; queueSync(); if (!queuePaused) queueAdvance(); });
+  if (clear) clear.addEventListener("click", queueDropAll);
+}
+
+// The composer submits through here: with nothing running it is an ordinary send,
+// with a reply in flight the text lines up instead of being refused.
+function submitOrQueue() {
+  var ta = $("chat-input");
+  if (!ta) return;
+  var text = ta.value.trim();
+  if (!text && !attachments.length) return;
+  if (streaming) {
+    if (!queueAdd(text, attachments.slice())) return;
+    ta.value = "";
+    attachments = [];
+    renderAttachments();
+    return;
+  }
+  sendChat();
+}
+
+/* ---- Chat navigation: outline and turn paging -------------------------------
+   A turn is a user message; it anchors the reply under it, so paging between
+   turns is paging between exchanges. The outline lists the same turns by their
+   opening words, which is how a long conversation gets navigable again. */
+function chatTurns() {
+  return Array.prototype.slice.call(document.querySelectorAll("#msg-list .bubble.user"));
+}
+
+// The turn whose top is the last one at or above the viewport top.
+function currentTurnIndex() {
+  var el = chatScroller(), turns = chatTurns();
+  if (!el || !turns.length) return -1;
+  var top = el.scrollTop + 8;
+  var found = 0;
+  for (var i = 0; i < turns.length; i++) {
+    if (turns[i].offsetTop <= top) found = i; else break;
+  }
+  return found;
+}
+
+function gotoTurn(i) {
+  var el = chatScroller(), turns = chatTurns();
+  if (!el || !turns.length) return;
+  var idx = Math.max(0, Math.min(turns.length - 1, i));
+  el.scrollTo({ top: Math.max(0, turns[idx].offsetTop - 8), behavior: "smooth" });
+  turns[idx].classList.add("turn-flash");
+  setTimeout(function () { turns[idx].classList.remove("turn-flash"); }, 900);
+}
+
+function stepTurn(delta) {
+  var turns = chatTurns();
+  if (!turns.length) return;
+  var cur = currentTurnIndex();
+  gotoTurn((cur < 0 ? 0 : cur) + delta);
+}
+
+function outlineLabel(bubble) {
+  var raw = bubble._rawText || (bubble.querySelector(".bubble-body") || bubble).textContent || "";
+  var one = raw.replace(/\s+/g, " ").trim();
+  return one.length > 60 ? one.slice(0, 60) + "…" : one;
+}
+
+function renderOutline() {
+  var list = $("outline-list");
+  if (!list) return;
+  var turns = chatTurns();
+  list.innerHTML = "";
+  if (!turns.length) {
+    var p = document.createElement("p");
+    p.className = "muted small outline-pop__empty";
+    p.textContent = tr("chat.outlineEmpty");
+    list.appendChild(p);
+    return;
+  }
+  var active = currentTurnIndex();
+  turns.forEach(function (b, i) {
+    var item = document.createElement("button");
+    item.type = "button";
+    item.className = "outline-item" + (i === active ? " active" : "");
+    item.setAttribute("role", "menuitem");
+    var n = document.createElement("span");
+    n.className = "outline-item__idx";
+    n.textContent = String(i + 1);
+    item.appendChild(n);
+    item.appendChild(document.createTextNode(outlineLabel(b)));
+    item.addEventListener("click", function () { gotoTurn(i); closeOutline(); });
+    list.appendChild(item);
+  });
+}
+
+function closeOutline() {
+  var pop = $("outline-pop"), btn = $("btn-outline");
+  if (pop) pop.classList.add("hidden");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+}
+
+function toggleOutline(force) {
+  var pop = $("outline-pop"), btn = $("btn-outline");
+  if (!pop) return;
+  var open = force == null ? pop.classList.contains("hidden") : force;
+  if (open) renderOutline();
+  pop.classList.toggle("hidden", !open);
+  if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function initChatNav() {
+  var out = $("btn-outline"), prev = $("btn-prev-turn"), next = $("btn-next-turn");
+  if (out) out.addEventListener("click", function (e) { e.stopPropagation(); toggleOutline(); });
+  if (prev) prev.addEventListener("click", function () { stepTurn(-1); });
+  if (next) next.addEventListener("click", function () { stepTurn(1); });
+  document.addEventListener("click", function (e) {
+    var pop = $("outline-pop");
+    if (!pop || pop.classList.contains("hidden")) return;
+    if (pop.contains(e.target) || e.target.closest("#btn-outline")) return;
+    closeOutline();
+  });
+}
+
+/* ---- Chat scrolling --------------------------------------------------------
+   The scroller is #chat-scroll; the message list inside it has no overflow of
+   its own, which is why the old `#msg-list.scrollTop = …` lines moved nothing
+   and a reply could stream on below the fold.
+
+   Following is a *decision*, not a per-call measurement. Measuring on every
+   stream chunk looked equivalent but was not: one frame where the geometry
+   lagged (a smooth scroll still animating, a layout that had not settled) read
+   as "the reader scrolled away", the follower gave up for the rest of the run,
+   and every chunk after that counted as an unread turn. So the reader's intent
+   is held in chatFollow, only the reader's own scroll changes it, and the unread
+   count rises once per message that lands — not once per chunk. */
+function chatScroller() {
+  return $("chat-scroll");
+}
+
+// Pure: is the viewport within `slack` px of the end? A missing scroller counts
+// as at-the-end, so callers stay one line long.
+function nearBottom(m, slack) {
+  if (!m) return true;
+  var s = slack == null ? 80 : slack;
+  return m.scrollHeight - m.scrollTop - m.clientHeight <= s;
+}
+
+var chatFollow = true;             // is the reader watching the newest turn?
+var chatUnread = 0;                // messages that landed while they were not
+var chatWrittenTop = -1;           // the scrollTop our own write produced
+
+function updateJumpButton() {
   var btn = $("btn-scroll-bottom");
-  if (!scrollContainer || !btn) return;
-  
-  // Show/hide button based on scroll position
-  scrollContainer.addEventListener("scroll", function() {
-    var isAtBottom = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight < 100;
-    btn.classList.toggle("hidden", isAtBottom);
+  if (!btn) return;
+  btn.classList.toggle("hidden", chatFollow);
+  var n = $("scroll-count");
+  if (n) {
+    n.textContent = chatUnread > 99 ? "99+" : String(chatUnread);
+    n.classList.toggle("hidden", chatUnread === 0);
+  }
+}
+
+// Put the newest turn in view and remember the position the browser accepted, so
+// the scroll event this raises can be told apart from the reader scrolling.
+var followPending = false;
+function followNewest() {
+  var el = chatScroller();
+  chatUnread = 0;
+  if (el) {
+    el.scrollTop = el.scrollHeight;
+    chatWrittenTop = el.scrollTop;
+    // Text appended immediately before this call may not be laid out yet, in
+    // which case scrollTop stops short of the real end and the gap only grows as
+    // the reply streams. Settle it again once the frame has been laid out.
+    if (!followPending) {
+      followPending = true;
+      requestAnimationFrame(function () {
+        followPending = false;
+        if (!chatFollow) return;
+        var e2 = chatScroller();
+        if (e2) {
+          e2.scrollTop = e2.scrollHeight;
+          chatWrittenTop = e2.scrollTop;
+        }
+        updateJumpButton();
+      });
+    }
+  }
+  updateJumpButton();
+}
+
+// A message landed. Follow it if the reader is watching; otherwise count it.
+function onMessageArrived() {
+  if (chatFollow) followNewest();
+  else { chatUnread++; updateJumpButton(); }
+}
+
+// Follow the end when the reader is there, or when the caller knows the move is
+// wanted (they just sent something, switched conversation, opened the chat).
+function scrollChatToEnd(force) {
+  if (force) { chatFollow = true; followNewest(); return; }
+  if (chatFollow) followNewest();
+}
+
+// Jump to the end from the button: always shows the newest turn.
+function updateChatNavState() {
+  updateJumpButton();
+}
+
+function jumpToEnd() {
+  var el = chatScroller();
+  chatFollow = true;
+  chatUnread = 0;
+  if (el) {
+    // The smooth scroll passes through positions far from the bottom, and every
+    // one of them would look like the reader scrolling; ignore that window.
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    chatWrittenTop = el.scrollHeight;
+  }
+  updateJumpButton();
+}
+
+function initChatScroll() {
+  var el = chatScroller(), btn = $("btn-scroll-bottom");
+  if (!el) return;
+  // The reader's intent is an input, not a scroll position. A scroll event cannot
+  // be attributed — our own writes raise them too, and in a tight stream race the
+  // write lands first — but a wheel, a touch, or a paging key is unambiguously
+  // someone at the machine. Registering it here means the reader wins the moment
+  // they reach for the view, before the next chunk can pull it back.
+  var readerTookOver = function () {
+    if (!chatFollow) return;
+    chatFollow = false;
+    updateJumpButton();
+  };
+  ["wheel", "touchmove"].forEach(function (ev) {
+    el.addEventListener(ev, readerTookOver, { passive: true });
   });
-  
-  // Scroll to bottom on click
-  btn.addEventListener("click", function() {
-    scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior: "smooth" });
+  el.addEventListener("keydown", function (e) {
+    if (["PageUp", "PageDown", "ArrowUp", "ArrowDown", "Home", "End", " "].indexOf(e.key) >= 0) readerTookOver();
   });
+  el.addEventListener("scroll", function () {
+    // Our own write lands exactly on chatWrittenTop (bar layout rounding), so a
+    // scroll anywhere else — a dragged scrollbar, a programmatic jump — is what
+    // decides: back at the bottom resumes following, away from it stops.
+    if (Math.abs(el.scrollTop - chatWrittenTop) <= 4) return;
+    if (nearBottom(el)) {
+      chatFollow = true;
+      chatUnread = 0;
+    } else if (chatFollow) {
+      chatFollow = false;
+    }
+    updateChatNavState();
+  });
+  if (btn) btn.addEventListener("click", jumpToEnd);
+  updateJumpButton();
 }
 
 /* ---- Per-conversation system prompt --------------------------------------
@@ -3147,13 +3793,27 @@ var QinferConv = {
   // Load all conversations from localStorage
   loadAll: function() {
     try {
-      return JSON.parse(localStorage.getItem(this.STORAGE_KEY) || "[]");
+      var convs = JSON.parse(localStorage.getItem(this.STORAGE_KEY) || "[]");
+      // Older builds stored the translated placeholder as the title. Migrate it
+      // back to the empty "untitled" marker so the label follows the language.
+      var untitled = [I18N.zh["conv.untitled"], I18N.en["conv.untitled"]];
+      var migrated = false;
+      convs.forEach(function (c) {
+        if (c && untitled.indexOf(c.title) >= 0) { c.title = ""; migrated = true; }
+      });
+      if (migrated) this.saveAll(convs);
+      return convs;
     } catch (e) { return []; }
   },
 
   // Save all conversations to localStorage
   saveAll: function(convs) {
-    try { localStorage.setItem(this.STORAGE_KEY, JSON.stringify(convs)); } catch (e) {}
+    try { localStorage.setItem(this.STORAGE_KEY, JSON.stringify(convs)); return; } catch (e) {}
+    // An image attachment is a base64 data URL and localStorage caps out around
+    // 5 MB. Rather than lose the whole write, keep every conversation's text and
+    // drop only the image payloads.
+    try { localStorage.setItem(this.STORAGE_KEY, JSON.stringify(withoutImages(convs))); } catch (e2) {}
+    showToast(tr("chat.error"), "warn", tr("toast.storageFull"));
   },
 
   // Persist only the instruction: typing must not rewrite the message list.
@@ -3176,7 +3836,7 @@ var QinferConv = {
   create: function() {
     var convs = this.loadAll();
     var id = "conv_" + Date.now();
-    var conv = { id: id, title: tr("conv.untitled"), messages: [], system: "", created: Date.now(), updated: Date.now() };
+    var conv = { id: id, title: "", messages: [], system: "", created: Date.now(), updated: Date.now() };
     convs.unshift(conv);
     this.saveAll(convs);
     this.renderList();
@@ -3192,10 +3852,8 @@ var QinferConv = {
     for (var i = 0; i < all.length; i++) {
       var b = all[i];
       if (b.classList.contains("tool-call") || b.classList.contains("tool-result")) continue;
-      var role = b.classList.contains("user") ? "user" : "assistant";
-      var bodyEl = b.querySelector(".bubble-body");
-      var text = b._rawText || (bodyEl ? bodyEl.textContent : "");
-      if (text) msgs.push({ role: role, content: text, ts: b._ts });
+      var msg = msgFromBubble(b, null);
+      if (msg) msgs.push(msg);
       if (b === bubble) break;
     }
     var nid = "conv_" + Date.now();
@@ -3224,7 +3882,7 @@ var QinferConv = {
     if (!conv) return;
     // Restore this conversation's parameter overrides (absent = keep current).
     samplerApply(conv.params);
-    if (typeof syncOverrideBadge === "function") syncOverrideBadge();
+    if (typeof syncOverrideSwitch === "function") syncOverrideSwitch();
     // Restore the conversation's own system prompt.
     sysApplyToConv(conv);
     $("msg-list").innerHTML = "";
@@ -3236,7 +3894,7 @@ var QinferConv = {
       if (empty) empty.style.display = "none";
       conv.messages.forEach(function(msg) {
         if (msg.role === "user") {
-          addMsg("user", msg.content, null, msg.ts);
+          addMsg("user", msg.content, msg.attachments || null, msg.ts);
         } else if (msg.role === "assistant") {
           var body = addMsg("assistant", "", null, msg.ts);
           // Parse thinking content from saved data
@@ -3258,39 +3916,44 @@ var QinferConv = {
           }
         }
       });
+      // Opening a conversation always shows its newest turn, not wherever the
+      // previous conversation happened to be scrolled.
+      scrollChatToEnd(true);
     }
     this.renderList();
   },
 
   // Save current conversation state
   saveCurrent: function() {
-    if (!this.currentId) return;
     var convs = this.loadAll();
-    var conv = convs.find(function(c) { return c.id === QinferConv.currentId; });
-    if (!conv) return;
+    var conv = this.currentId
+      ? convs.find(function(c) { return c.id === QinferConv.currentId; })
+      : null;
+    if (!conv) {
+      // A draft shown on an unbound screen becomes a conversation only once it
+      // holds a message — otherwise merely switching away would store empty rows.
+      if (!document.querySelector("#msg-list .bubble")) return;
+      var draft = this.create();
+      this.currentId = draft.id;
+      convs = this.loadAll();
+      conv = convs.find(function(c) { return c.id === QinferConv.currentId; });
+      if (!conv) return;
+      this.renderList();  // the adopted conversation is the active one
+    }
     // Collect messages from the UI
     var messages = [];
     document.querySelectorAll("#msg-list .bubble").forEach(function(b) {
       if (b.classList.contains("tool-call") || b.classList.contains("tool-result")) return;
-      var role = b.classList.contains("user") ? "user" : "assistant";
-      var text = b._rawText || b.querySelector(".bubble-body").textContent;
-      if (text) {
-        var msg = { role: role, content: text, ts: b._ts || conv.updated };
-        // Save thinking content separately for assistant messages
-        if (role === "assistant") {
-          var thinkingText = b._thinkingText || "";
-          if (thinkingText) msg.thinking = thinkingText;
-        }
-        messages.push(msg);
-      }
+      var msg = msgFromBubble(b, conv.updated);
+      if (msg) messages.push(msg);
     });
     conv.messages = messages;
     conv.system = convSystemText();
     if (conv.params) conv.params = samplerSnapshot();
-    if (typeof syncOverrideBadge === "function") syncOverrideBadge();
+    if (typeof syncOverrideSwitch === "function") syncOverrideSwitch();
     conv.updated = Date.now();
-    // Auto-generate title from first user message
-    if (conv.title === tr("conv.untitled") && messages.length > 0) {
+    // Auto-generate title from first user message (empty title == untitled)
+    if (!conv.title && messages.length > 0) {
       var firstUser = messages.find(function(m) { return m.role === "user"; });
       if (firstUser) {
         conv.title = firstUser.content.slice(0, 40) + (firstUser.content.length > 40 ? "…" : "");
@@ -3331,6 +3994,9 @@ var QinferConv = {
     input.type = "text";
     input.className = "input conv-item__edit";
     input.value = conv.title;
+    // The placeholder hints what the empty entry means, but never becomes the
+    // stored title — that keeps "untitled" language-independent.
+    input.placeholder = convTitle(conv);
     input.setAttribute("aria-label", tr("conv.rename"));
     nameEl.style.display = "none";
     nameEl.parentNode.insertBefore(input, nameEl);
@@ -3401,7 +4067,7 @@ var QinferConv = {
         existing[id] = true;
         convs.push({
           id: id,
-          title: String(c.title || tr("conv.untitled")).slice(0, 80),
+          title: String(c.title || "").slice(0, 80),
           messages: c.messages,
           params: c.params || undefined,
           system: typeof c.system === "string" ? c.system : "",
@@ -3460,7 +4126,7 @@ var QinferConv = {
         var item = document.createElement("div");
         item.className = "conv-item" + (conv.id === QinferConv.currentId ? " active" : "");
         item.dataset.id = conv.id;
-        item.innerHTML = '<span class="conv-item__title"><span class="conv-item__name">' + esc(conv.title) +
+        item.innerHTML = '<span class="conv-item__title"><span class="conv-item__name">' + esc(convTitle(conv)) +
           '</span><span class="conv-item__time">' + relTime(conv.updated) + '</span></span>' +
           '<span class="conv-item__actions">' +
           '<button class="conv-item__btn" data-action="pin" title="' + esc(conv.pinned ? tr("conv.unpin") : tr("conv.pin")) + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-pin"/></svg></button>' +
@@ -3503,10 +4169,7 @@ var QinferConv = {
       });
     }
     if (btnNew) {
-      btnNew.addEventListener("click", function() {
-        var conv = QinferConv.create();
-        QinferConv.switchTo(conv.id);
-      });
+      btnNew.addEventListener("click", newChat);
     }
     // Sidebar footer: export all conversations as JSON, import back in.
     var btnExport = $("btn-export-conv");
@@ -3519,13 +4182,11 @@ var QinferConv = {
         if (importFile.files && importFile.files[0]) QinferConv.importAll(importFile.files[0]);
       });
     }
-    // Load or create initial conversation
+    // Load the most recent conversation. An empty screen is deliberately NOT a
+    // conversation yet — saveCurrent() adopts one on the first message, so the
+    // sidebar can show its empty state instead of a phantom "Untitled" entry.
     var convs = this.loadAll();
-    if (convs.length > 0) {
-      this.switchTo(convs[0].id);
-    } else {
-      this.create();
-    }
+    if (convs.length > 0) this.switchTo(convs[0].id);
     this.renderList();
   }
 };
@@ -3629,25 +4290,12 @@ var QinferSystem = {
 };
 
 // ---- Monitor speed: the decode rate is a per-request number ------------------
-// The server's live.tok_s is the *last request's* rate, so sampling it once a
-// second draws a flat line between requests and leaves the card blank while idle.
-// Both readings come from here instead: one chart point per request (with the
-// live rate appended while a request runs), and a card that falls back through
-// session mean → last request before giving up.
+// The server's live.tok_s is the *last request's* rate, so it goes stale the
+// moment a run ends and leaves the card blank while idle. The card reads the
+// session mean instead (live.tok_s_mean), and the line under it plots the
+// server's history of that same mean — one 1 Hz sample window, exactly like the
+// prefill card, so the two rate charts cannot drift apart.
 var QinferSpeed = {
-  WINDOW: 60,
-  // `requests` is the ring newest-first, as /api/returns it; liveTokS is the
-  // in-flight rate or null. Returns oldest-first numbers for the sparkline.
-  series: function (requests, liveTokS) {
-    var out = [];
-    (requests || []).forEach(function (r) {
-      var v = r && r.decode_tok_s;
-      if (typeof v === "number" && v > 0) out.unshift(v);
-    });
-    if (typeof liveTokS === "number" && liveTokS > 0) out.push(liveTokS);
-    if (out.length > QinferSpeed.WINDOW) out = out.slice(out.length - QinferSpeed.WINDOW);
-    return out;
-  },
   card: function (live) {
     var l = live || {};
     if (l.state === "generating" && l.tok_s != null) return { value: l.tok_s, labelKey: "mon.decodeNow" };
@@ -3684,10 +4332,10 @@ var QinferActivity = {
 };
 
 // Metric card definitions for the 4-column grid. `series` is the key of the
-// server-side 60-sample history block in /metrics; speed is the exception — it
-// plots per-request rates (QinferSpeed.series), not a 1 Hz sample.
+// server-side 60-sample history block in /metrics; every card plots one of those
+// windows, including speed, whose series is the session decode mean (tok_s_mean).
 var MON_METRICS = [
-  {key: "speed", labelKey: "metric.speed", icon: "i-gauge", unit: "t/s", series: "tok_s"},
+  {key: "speed", labelKey: "metric.speed", icon: "i-gauge", unit: "t/s", series: "tok_s_mean"},
   {key: "prefill", labelKey: "metric.prefill", icon: "i-bolt", unit: "t/s", series: "prefill_tok_s_mean"},
   {key: "gpu", labelKey: "metric.gpuLoad", icon: "i-gpu", unit: "%", series: "gpu_util", max: 100},
   {key: "vram", labelKey: "metric.vram", icon: "i-layers", unit: "GB", series: "gpu_mem_used", bytes: true, maxFrom: "gpu_mem_total"},
@@ -3930,7 +4578,7 @@ function renderMonitorTab(m) {
       detail = fmtNum(live.prompt_tokens) + " " + tr("unit.tokens");
     }
   } else if (live.state === "generating") {
-    label = live.phase ? live.phase[0].toUpperCase() + live.phase.slice(1) : tr("state.generating");
+    label = live.phase === "prefill" ? tr("act.prefill") : live.phase === "decode" ? tr("act.decode") : tr("state.generating");
     if (prog) delete prog.dataset.tone;
     pct = live.max_tokens ? Math.min(100, (100 * live.generated) / live.max_tokens) : 0;
     detail = fmtNum(live.generated) + " " + tr("unit.tokens") + " \u00b7 " + fmtNum(live.tok_s, 1) + " " + tr("unit.tokS");
@@ -3971,9 +4619,7 @@ function renderMonitorTab(m) {
   setMetricValue("igpu", hw.igpu_freq_mhz == null ? null : fmtNum(hw.igpu_freq_mhz), "MHz", igpuSub);
 
   MON_METRICS.forEach(function (m) {
-    var series = m.key === "speed"
-      ? QinferSpeed.series(reqCache_, live.state === "generating" ? live.tok_s : null)
-      : (h[m.series] || []);
+    var series = h[m.series] || [];
     var mx = m.max != null ? m.max : (m.maxFrom ? hw[m.maxFrom] : null);
     sparkline("sp-" + m.key, series, mx, m.bytes ? GB : 1);
   });
@@ -4035,7 +4681,7 @@ function renderRequestsTab(m) {
       body.innerHTML = requests.slice(0, 10).map(function (r) {
         var badge = {stop: ["", tr("req.done")], length: ["", tr("req.maxTokens")], cancel: ["st-badge--queued", tr("req.stoppedBadge")],
                      disconnect: ["st-badge--queued", tr("req.closed")], error: ["st-badge--error", tr("chat.error")]};
-        var bInfo = badge[r.finish] || ["", r.finish || "\u2013"];
+        var bInfo = badge[r.finish] || ["", r.finish || tr("req.none")];
         var t = r.time ? new Date(r.time * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"}) : "\u2013";
         return '<tr><td>' + esc(t) + '</td>' +
           '<td><span class="st-badge ' + bInfo[0] + '">' + esc(bInfo[1]) + '</span></td>' +
@@ -4138,7 +4784,7 @@ async function refreshMonitor() {
     // Update the header pill from metrics
     var live = d.live || {};
     var tok = live.tok_s != null ? fmtNum(live.tok_s, 1) : "\u2014";
-    if (live.state !== "idle" && live.state !== "?") setPill(live.state, tr("mon.stateLine") + " " + trState(live.state) + " \u00b7 " + tok + " " + tr("unit.tokS"));
+    if (live.state !== "idle" && live.state !== "?") setPill(live.state, pillText(live.state, tok));
   } catch (e) {
     setStatusDot(false);
     var stateLabel = $("state-label");

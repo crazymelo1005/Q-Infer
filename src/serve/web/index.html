@@ -88,15 +88,34 @@
         <div class="chat-scroll" id="chat-scroll">
           <div class="chat" id="chat">
             <div class="chat-empty" id="chat-empty">
-              <div class="chat-empty__title" data-i18n="chat.title">Ask the engine anything</div>
-              <div class="chat-empty__sub" data-i18n="chat.sub">The model runs on this PC; nothing leaves it. Set the API key in the About tab.</div>
+              <div class="chat-empty__title" data-i18n="chat.title">Local inference engine</div>
+              <div class="chat-empty__sub" data-i18n="chat.sub">The model runs locally — your data never leaves this device. Set the API key in the About tab.</div>
             </div>
             <div id="msg-list" class="msg-list"></div>
           </div>
         </div>
-        <button class="scroll-bottom-btn hidden" id="btn-scroll-bottom" title="Scroll to bottom" data-i18n-title="chat.scrollBottom">
-          <svg class="st-icon"><use href="/web/sprite.svg#i-chevron"/></svg>
-        </button>
+        <!-- Chat navigation: outline of this conversation, turn-by-turn paging, and
+             a jump-to-newest button that carries the count of turns that arrived
+             while the reader was scrolled up. -->
+        <div class="chat-floatbar" id="chat-floatbar">
+          <div class="outline-pop hidden" id="outline-pop" role="menu" aria-labelledby="btn-outline">
+            <div class="outline-pop__head" data-i18n="chat.outline">Outline</div>
+            <div class="outline-pop__list" id="outline-list"></div>
+          </div>
+          <button type="button" class="float-btn" id="btn-outline" aria-haspopup="true" aria-expanded="false" title="Conversation outline" data-i18n-title="chat.outline">
+            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-list"/></svg>
+          </button>
+          <button type="button" class="float-btn" id="btn-prev-turn" title="Previous turn" data-i18n-title="chat.prevTurn">
+            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-arrow-up"/></svg>
+          </button>
+          <button type="button" class="float-btn" id="btn-next-turn" title="Next turn" data-i18n-title="chat.nextTurn">
+            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-arrow-down"/></svg>
+          </button>
+          <button type="button" class="float-btn hidden" id="btn-scroll-bottom" title="Jump to newest" data-i18n-title="chat.scrollBottom">
+            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-arrow-down"/></svg>
+            <span class="float-badge hidden" id="scroll-count">0</span>
+          </button>
+        </div>
         <div class="composer-wrap">
           <div class="chat-foot">
         <details class="drawer" id="sys-drawer">
@@ -180,11 +199,36 @@
             </div>
             <div class="drawer-foot">
               <button type="button" class="st-btn st-btn--secondary st-btn--sm" id="btn-reset-sampler" data-i18n="sampler.reset">Reset to defaults</button>
-              <span class="override-badge hidden" id="sampler-override" data-i18n-title="sampler.overrideTip"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-pin"/></svg><span data-i18n="sampler.overrideBadge">This conversation</span></span>
-              <button type="button" class="st-btn st-btn--secondary st-btn--sm hidden" id="btn-clear-override" data-i18n="sampler.clearOverride">Sync from global</button>
+              <label class="st-switch-row" data-i18n-title="sampler.overrideTip">
+                <input type="checkbox" id="s-override" class="st-switch">
+                <span data-i18n="sampler.overrideSwitch">This conversation only</span>
+              </label>
             </div>
           </div>
         </details>
+        <!-- Message queue: what the reader lined up while a reply is still
+             running. Pause gates the queue only (the running reply continues);
+             Interject drops the running reply and sends the head immediately. -->
+        <div class="queue-panel hidden" id="queue-panel">
+          <div class="queue-panel__head">
+            <span class="queue-panel__title">
+              <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-list"/></svg>
+              <span data-i18n="queue.title">Message queue</span>
+              <span class="queue-panel__count" id="queue-count">0</span>
+            </span>
+            <span class="queue-panel__state" id="queue-state"></span>
+            <span class="spacer"></span>
+            <button type="button" class="st-btn st-btn--secondary st-btn--sm" id="btn-queue-pause">
+              <svg class="st-icon st-icon--sm" id="queue-pause-icon"><use href="/web/sprite.svg#i-pause"/></svg>
+              <span id="queue-pause-label" data-i18n="queue.pause">Pause</span>
+            </button>
+            <button type="button" class="st-btn st-btn--secondary st-btn--sm" id="btn-queue-clear">
+              <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-trash"/></svg>
+              <span data-i18n="queue.clear">Clear</span>
+            </button>
+          </div>
+          <ul class="queue-list" id="queue-list"></ul>
+        </div>
         <form class="st-composer" id="composer">
           <div class="st-attachments" id="attachments"></div>
           <textarea id="chat-input" class="input chat-input" rows="2"
@@ -192,19 +236,16 @@
           <div class="st-composer__bar">
             <button type="button" class="st-btn st-btn--icon" id="btn-export" data-i18n-title="chat.exportTitleLong">
               <svg class="st-icon"><use href="/web/sprite.svg#i-download"/></svg></button>
-            <div class="think-wrap">
-              <button type="button" class="st-btn thinking-toggle" id="btn-thinking" aria-haspopup="listbox" aria-expanded="false" data-i18n-title="chat.thinkingToggle" data-i18n-aria="chat.thinkLevelAria">
-                <svg class="st-icon"><use href="/web/sprite.svg#i-thinking"/></svg><span class="think-level" id="think-level">xHigh</span></button>
-              <div class="st-popover hidden" id="think-popover" role="listbox" data-i18n-aria="chat.thinkMode">
-                <button type="button" class="st-popover__item" role="option" data-level="off" data-i18n="chat.thinkOff">Off</button>
-                <button type="button" class="st-popover__item" role="option" data-level="low" data-i18n="chat.thinkLow">Low</button>
-                <button type="button" class="st-popover__item" role="option" data-level="medium" data-i18n="chat.thinkMedium">Medium</button>
-                <button type="button" class="st-popover__item" role="option" data-level="xhigh" data-i18n="chat.thinkXhigh">xHigh</button>
-              </div>
+            <!-- Thinking level: a segmented control rather than a popover, so the
+                 current level is visible at a glance and any level is one click. -->
+            <div class="think-seg" id="think-seg" role="radiogroup" data-i18n-aria="chat.thinkMode" data-i18n-title="chat.thinkMode">
+              <svg class="st-icon st-icon--sm think-seg__icon"><use href="/web/sprite.svg#i-thinking"/></svg>
+              <button type="button" class="think-seg__opt" role="radio" aria-checked="false" data-level="off" data-i18n="chat.thinkOff">Off</button>
+              <button type="button" class="think-seg__opt" role="radio" aria-checked="false" data-level="low" data-i18n="chat.thinkLow">Low</button>
+              <button type="button" class="think-seg__opt" role="radio" aria-checked="false" data-level="medium" data-i18n="chat.thinkMedium">Medium</button>
+              <button type="button" class="think-seg__opt" role="radio" aria-checked="false" data-level="xhigh" data-i18n="chat.thinkXhigh">xHigh</button>
             </div>
             <span class="spacer"></span>
-            <button type="button" class="st-btn st-btn--secondary" id="btn-stop" hidden>
-              <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-stop"/></svg><span data-i18n="chat.stop">Stop</span></button>
             <button type="submit" class="st-btn st-btn--primary st-btn--send" id="btn-send" data-i18n-aria="chat.send">
               <svg class="st-icon"><use href="/web/sprite.svg#i-send"/></svg></button>
           </div>
@@ -379,7 +420,7 @@
             <button id="btn-key-toggle" class="btn ghost" type="button" data-i18n="about.show">Show</button>
           </div>
         </div>
-        <p class="dim small" data-i18n="about.apiKeyNote">The key stays in this browser only (localStorage, shared across tabs; never uploaded).</p>
+        <p class="dim small" data-i18n="about.apiKeyNote">The key lives only in this browser’s local storage, shared across tabs; it is never uploaded.</p>
       </div>
 
       <hr class="about-sep">
@@ -410,7 +451,7 @@
       <div class="st-card" id="about-hardware">
         <div class="about-section__head">
           <svg class="st-icon"><use href="/web/sprite.svg#i-layers"/></svg>
-          <span class="card-title" data-i18n="about.hw">This PC</span>
+          <span class="card-title" data-i18n="about.hw">Hardware</span>
         </div>
         <dl class="facts" id="facts-hw"></dl>
       </div>
@@ -423,7 +464,7 @@
           <svg class="st-icon"><use href="/web/sprite.svg#i-link"/></svg>
           <span class="card-title" data-i18n="about.svc">Service and protocols</span>
         </div>
-        <p class="dim"><span data-i18n="about.clientDesc">Any OpenAI- or Anthropic-compatible client works with these addresses. Base URL:</span> <span class="mono" id="about-ports"></span>.</p>
+        <p class="dim"><span data-i18n="about.clientDesc">Any OpenAI- or Anthropic-compatible client can use these addresses. Base URL:</span> <span class="mono" id="about-ports"></span>.</p>
         <dl class="facts" id="facts-api"></dl>
         <details class="st-collapse">
           <summary data-i18n="about.endpointPaths">Endpoint paths</summary>
