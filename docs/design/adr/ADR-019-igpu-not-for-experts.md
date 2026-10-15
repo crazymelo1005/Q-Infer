@@ -1,6 +1,6 @@
 # ADR-019：核显不参与未命中专家计算（P3b 不做）
 
-**状态**：Accepted（2026-10-14）
+状态：Accepted（2026-10-14）
 
 ---
 
@@ -45,7 +45,7 @@
 | 臂 | 耗时 | 相对 CPU |
 |------|---------|----------|
 | CPU（单线程，库函数 `iq4xs_gemv_q8k`） | 6.39 ms | 1.00× |
-| iGPU（Intel Arc ARL，160 个 workgroup × 64 线程，权重常驻） | 1.64 ms | **3.9× 加速** |
+| iGPU（Intel Arc ARL，160 个 workgroup × 64 线程，权重常驻） | 1.64 ms | 3.9× 加速 |
 
 数值误差：0（逐位一致，max abs/rel error = 0）。
 
