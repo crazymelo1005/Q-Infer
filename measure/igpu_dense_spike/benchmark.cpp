@@ -2,7 +2,7 @@
 // Compares CPU vs iGPU for IQ4_XS × Q8_K GEMV at attn_qkv shape (10240 × 2560).
 //
 // Build:
-//   g++ -O3 -std=c++20 -Isrc -Ithird_party/strata/include \
+//   g++ -O3 -std=c++20 -Isrc -Istrata/include \
 //       measure/igpu_dense_spike/benchmark.cpp \
 //       src/experts/igpu/vulkan_runtime.cpp \
 //       src/kernels/iq4xs.cpp src/kernels/fp16.cpp \

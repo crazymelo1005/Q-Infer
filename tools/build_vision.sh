@@ -9,7 +9,7 @@
 # This repository takes heavy third-party sources from a local checkout at build time: never
 # downloaded, never a second copy in git (tools/build_engine.sh does the same for ggml through
 # STRATA_GGML_DIR). The commit is the one the vendored engine pins in
-# third_party/strata/third_party/ggml/VERSION.txt, so the encoder's ggml and the engine's are the
+# strata/third_party/ggml/VERSION.txt, so the encoder's ggml and the engine's are the
 # same code. measure/vision_oracle.py builds upstream's encoder from THIS tree, which is what makes
 # a byte-for-byte comparison between the port and upstream mean something: same sources, same flags,
 # same machine, and the only difference left is our port.

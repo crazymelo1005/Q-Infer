@@ -9,7 +9,7 @@
 // expert_pool_dispatch at the call site.
 //
 // Architectural note (Ruling F2): developed in Q-Infer's src/experts/igpu/,
-// will be copied to third_party/strata/src/kernels/igpu/ at Task 5 integration.
+// will be copied to strata/src/kernels/igpu/ at Task 5 integration.
 #pragma once
 
 #include <cstdint>

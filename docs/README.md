@@ -81,3 +81,15 @@
 | 机器画像的并发分池一项 | QSA 侧已能算，GDN 侧按并发增长、需要 SSM 几何（未取到） |
 | 引擎接口的实现细节 | 随实现阶段确定 |
 | 服务层 M2 首刀：/metrics 的 Prometheus text 端口 | 契约对照 `ref_repos/strata` 的 `serve/prometheus.py`：Accept 含 text/plain\|openmetrics 或 `?format=prometheus` → text；vLLM 家族名（running/waiting、kv_cache_usage_perc、token 计数、request_success、prefix_cache 查询/命中、ttft/itl/e2e 三直方图 22 桶）+ `qinfer:` 前缀家族（live_state、totals_*_seconds_total、conversation_cache_*、gpu*/ram）；totals.requests 计数随补；text 与 JSON 同一快照渲染 |
+
+## 3. 顶层目录（关键路径）
+
+| 路径 | 内容 |
+|------|------|
+| `src/` | Q-Infer 服务/引擎自研代码（`serve/`、`engine/`、`dense/`、`kernels/` …） |
+| `strata/` | 纳入本仓库的 Strata 引擎源码（MIT © 2026 Niko1221 and the Strata contributors）；由 `tools/build_engine.sh` 编成 `build-engine/strata`。**2026-10-15 起由 `third_party/strata/` 移到此路径** |
+| `third_party/httplib/` | 仅存的第三方单头文件依赖（cpp-httplib） |
+| `tools/` | 构建脚本（`build_engine.sh`、`build_vision.sh`） |
+| `tests/` | `unit` 级源文件 + `integration/serve/` + `frontend/` + `data/`（夹具/oracle） |
+
+> 历史 ADR（如 ADR-016/019/020）中出现的 `third_party/strata/` 为当时的路径记录，未逐条改写；当前权威路径以本节为准。

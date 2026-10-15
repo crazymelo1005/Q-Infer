@@ -9,7 +9,7 @@
 // This test does NOT require a Vulkan-capable iGPU. On machines without Vulkan,
 // the pool gracefully falls back to CPU via the hybrid dispatcher.
 //
-// The Strata integration (Task 5) copies this code to third_party/strata/ with
+// The Strata integration (Task 5) copies this code to strata/ with
 // namespace updates (qinfer::experts::igpu -> strata::kernels::igpu). This test
 // verifies the logic against Q-Infer's build; the Strata build verifies the
 // namespace-migrated version.

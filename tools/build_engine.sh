@@ -7,7 +7,7 @@
 # intact (docs/design/adr/ADR-016-*).
 #
 # WHY THE TREE IS COPIED BEFORE CONFIGURING
-# third_party/strata/ is vendored WITHOUT upstream's tests/ and bench/ (see NOTICE) and is
+# strata/ is vendored WITHOUT upstream's tests/ and bench/ (see NOTICE) and is
 # frozen byte-for-byte at v0.1.43.1, so nothing here ever edits it. But its CUDA section
 # registers the target `dma_batch_parity` from `tests/core/dma_batch_parity.cu` with no
 # STRATA_BUILD_TESTS guard, and CMake resolves every add_executable at configure time — so a
@@ -29,7 +29,7 @@ set -euo pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 : "${STRATA_GGML_DIR:?set STRATA_GGML_DIR to a llama.cpp checkout}"
 
-VENDOR="$REPO/third_party/strata"
+VENDOR="$REPO/strata"
 BUILD="$REPO/build-engine"
 SRC="$BUILD/src"
 
@@ -38,7 +38,7 @@ if [ ! -d "$VENDOR" ]; then
   exit 1
 fi
 
-# A cache generated from a different source dir (e.g. third_party/strata configured directly) makes
+# A cache generated from a different source dir (e.g. strata configured directly) makes
 # cmake refuse to run. Dropping only the cache reconfigures cleanly and keeps the object files.
 rm -f "$BUILD/CMakeCache.txt"
 
@@ -51,7 +51,7 @@ PLACEHOLDER="$SRC/tests/core/dma_batch_parity.cu"
 mkdir -p "$(dirname "$PLACEHOLDER")"
 cat > "$PLACEHOLDER" <<'EOF'
 // Configure-time placeholder, created by tools/build_engine.sh — NOT part of the vendored tree.
-// third_party/strata/CMakeLists.txt registers the `dma_batch_parity` target from this path in a
+// strata/CMakeLists.txt registers the `dma_batch_parity` target from this path in a
 // section that has no STRATA_BUILD_TESTS guard, so the file has to exist for CMake to configure a
 // partial source tree. We vendor the engine without upstream's tests/ and build only `strata`, so
 // nothing should ever compile it; the #error below makes that loud instead of silent.
@@ -75,6 +75,6 @@ if [ ! -x "$OUT" ]; then
   exit 1
 fi
 echo "engine binary: $OUT ($(du -h "$OUT" | cut -f1))"
-git -C "$REPO" diff --quiet -- third_party/strata \
+git -C "$REPO" diff --quiet -- strata \
   && echo "vendored tree: unmodified (as committed)" \
-  || echo "WARNING: third_party/strata differs from the committed tree" >&2
+  || echo "WARNING: strata differs from the committed tree" >&2
