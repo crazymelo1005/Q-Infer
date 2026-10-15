@@ -262,6 +262,8 @@ const I18N = {
     "chat.usageMeta": "上下文 {p} · 生成 {c} · 合计 {t} tokens",
     "chat.edit": "编辑",
     "chat.editHint": "已撤回该轮，改好后发送",
+    "chat.continueTitle": "继续生成",
+    "chat.continueWord": "继续",
     "chat.thinkMode": "思考模式",
     "chat.thinkOff": "关",
     "chat.contextLen": "上下文长度",
@@ -534,6 +536,8 @@ const I18N = {
     "chat.usageMeta": "prompt {p} · completion {c} · total {t} tokens",
     "chat.edit": "Edit",
     "chat.editHint": "Turn retracted — edit and send again",
+    "chat.continueTitle": "Continue",
+    "chat.continueWord": "continue",
     "chat.thinkMode": "Thinking mode",
     "chat.thinkOff": "Off",
     "chat.contextLen": "Context length",
@@ -1863,6 +1867,27 @@ function setStreaming(on) {
   $("btn-stop").classList.toggle("hidden", !on);
 }
 
+// After a stop, offer to continue the reply on the same bubble. The partial text
+// stays in the conversation, so continuing sends a short "continue" turn and the
+// model picks the run back up.
+function addContinueAction(bubble) {
+  if (!bubble) return;
+  var actions = bubble.querySelector(".bubble-actions");
+  if (!actions || actions.querySelector('[data-action="continue"]')) return;
+  var btn = document.createElement("button");
+  btn.className = "bubble-action";
+  btn.dataset.action = "continue";
+  btn.title = tr("chat.continueTitle");
+  btn.setAttribute("aria-label", tr("chat.continueTitle"));
+  btn.innerHTML = '<svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-send"/></svg>';
+  actions.appendChild(btn);
+}
+function continueChat() {
+  if (streaming) return;
+  var ta = $("chat-input");
+  ta.value = tr("chat.continueWord");
+  sendChat();
+}
 async function sendChat() {
   const ta = $("chat-input");
   const text = ta.value.trim();
@@ -2052,6 +2077,7 @@ async function doChatRound() {
     waitRow.remove();
     if (e.name === "AbortError") {
       out.textContent += tr("chat.stoppedSuffix");
+      addContinueAction(out.parentElement);
       return { aborted: true };
     } else {
       out.textContent = tr("chat.failedPrefix") + e.message;
@@ -2604,6 +2630,8 @@ function initChat() {
       editTa.value = editText;
       editTa.focus();
       showToast(tr("chat.editHint"), "info");
+    } else if (action === "continue") {
+      continueChat();
     } else if (action === "branch") {
       QinferConv.branchFrom(bubble);
     } else if (action === "thumbup" || action === "thumbdown") {
