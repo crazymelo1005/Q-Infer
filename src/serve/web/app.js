@@ -191,6 +191,7 @@ const I18N = {
     "chat.bad": "踩",
     "chat.codeCopy": "复制",
     "chat.codeCopied": "已复制",
+    "chat.usageMeta": "上下文 {p} · 生成 {c} · 合计 {t} tokens",
     "chat.scrollBottom": "回到底部",
     "conv.closeSidebar": "收起侧栏",
     "chat.error": "错误",
@@ -445,6 +446,7 @@ const I18N = {
     "chat.bad": "Bad",
     "chat.codeCopy": "Copy",
     "chat.codeCopied": "Copied!",
+    "chat.usageMeta": "prompt {p} · completion {c} · total {t} tokens",
     "chat.scrollBottom": "Scroll to bottom",
     "conv.closeSidebar": "Close sidebar",
     "chat.error": "Error",
@@ -1485,6 +1487,19 @@ function ensureThinkStream(plain) {
     },
   };
 }
+// Append the per-reply token usage under an assistant bubble (prompt/completion/total).
+function renderUsageMeta(bubble, usage) {
+  if (!bubble || !usage) return;
+  var p = usage.prompt_tokens, c = usage.completion_tokens, t = usage.total_tokens;
+  if (p == null && c == null && t == null) return;
+  var el = document.createElement("div");
+  el.className = "bubble-meta";
+  el.textContent = tr("chat.usageMeta")
+    .replace("{p}", p != null ? p : "-")
+    .replace("{c}", c != null ? c : "-")
+    .replace("{t}", t != null ? t : "-");
+  bubble.appendChild(el);
+}
 // Render Markdown in an assistant message body (called after streaming completes)
 function renderMsgMarkdown(bodyEl) {
   if (!bodyEl || !bodyEl.textContent) return;
@@ -1732,6 +1747,7 @@ async function doChatRound() {
     model: modelId,
     messages: collectMessages(),
     stream: true,
+    stream_options: { include_usage: true },   // ask for the final usage frame
     max_tokens: parseInt($("s-max-tokens").value, 10) || 2048,
     temperature: parseFloat($("s-temp").value),
     top_p: parseFloat($("s-top-p").value),
@@ -1757,6 +1773,7 @@ async function doChatRound() {
   // Accumulate tool calls from streaming deltas
   var toolCallAccum = {}; // index → { id, function: { name, arguments } }
   var finishReason = null;
+  var usageAcc = null;    // final usage frame (prompt/completion/total tokens)
   // Incremental think-tag router. In nothinking mode there is nothing to hold
   // back: the engine emits the opening tag itself and the template swallows it,
   // so the reply is plain text. Declared at function scope because the finalizer
@@ -1792,6 +1809,9 @@ async function doChatRound() {
     }
     // Incremental think-tag router and paint helper are declared above the try.
     await readSSE(res, function (ev) {
+      // The usage frame arrives last with an empty choices array; capture it
+      // before the choices guard drops the frame.
+      if (ev.usage) usageAcc = ev.usage;
       if (ev.error) {
         waitRow.remove();
         out.textContent = ev.error.message || tr("chat.failed");
@@ -1862,6 +1882,7 @@ async function doChatRound() {
   out.textContent = think.answer;
   // Render Markdown for completed assistant messages
   if (out.textContent) renderMsgMarkdown(out);
+  if (usageAcc) renderUsageMeta(out.parentElement, usageAcc);
   return { text: out.textContent };
 }
 

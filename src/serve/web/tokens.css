@@ -186,3 +186,10 @@
 .thinking-toggle:not(.active):hover {
   opacity: 0.8;
 }
+/* Per-reply token usage line under an assistant bubble */
+.bubble-meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--st-text-dim, var(--muted));
+  opacity: 0.75;
+}
