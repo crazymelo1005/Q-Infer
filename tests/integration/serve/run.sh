@@ -783,5 +783,27 @@ else
   bad "33 /v1/models input_modalities: $(head -c 200 "$R")"
 fi
 
+# 34. reasoning_effort: an unsupported value is rejected with invalid_request_error.
+code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
+  -X POST "http://$HOST:$PORT/v1/chat/completions" \
+  -d '{"messages":[{"role":"user","content":"x"}],"max_tokens":4,"reasoning_effort":"bogus"}')
+if [ "$code" = "400" ] && [ "$(jget "$R" "d['error']['param']")" = "reasoning_effort" ]; then
+  ok "34 reasoning_effort rejects an unknown value (400, param=reasoning_effort)"
+else
+  bad "34 reasoning_effort invalid value: HTTP $code $(head -c 200 "$R")"
+fi
+
+# 35. reasoning_effort: 'high' aliases xhigh, so validation accepts it. The tiny
+#     fixture vocabulary cannot tokenize the reasoning system block, so assert on
+#     acceptance (no reasoning_effort validation error) rather than a 200 body.
+code=$(curl -s -o "$R" -w '%{http_code}' -H "$H" -H 'Content-Type: application/json' \
+  -X POST "http://$HOST:$PORT/v1/chat/completions" \
+  -d '{"messages":[{"role":"user","content":"x"}],"max_tokens":4,"reasoning_effort":"high"}')
+if [ "$code" = "400" ] && [ "$(jget "$R" "d['error']['param']")" = "reasoning_effort" ]; then
+  bad "35 reasoning_effort rejected 'high': $(head -c 200 "$R")"
+else
+  ok "35 reasoning_effort accepts 'high' (aliases xhigh)"
+fi
+
 echo "serve integration: passed $PASS, failed $FAIL"
 [ "$FAIL" = 0 ]
