@@ -1250,6 +1250,10 @@ function addMsg(role, text, attachList) {
     thinkingSection.style.display = "none";
     var thinkingHeader = document.createElement("div");
     thinkingHeader.className = "thinking-header";
+    thinkingHeader.setAttribute("role", "button");
+    thinkingHeader.setAttribute("tabindex", "0");
+    thinkingHeader.setAttribute("aria-expanded", "false");
+    thinkingHeader.setAttribute("aria-label", tr("chat.thinking"));
     thinkingHeader.innerHTML = '<svg class="st-icon st-icon--sm thinking-icon"><use href="/web/sprite.svg#i-thinking"/></svg><span>' + tr("chat.thinking") + '</span><svg class="st-icon st-icon--sm thinking-chevron"><use href="/web/sprite.svg#i-chevron"/></svg>';
     thinkingHeader.style.cursor = "pointer";
     var thinkingBody = document.createElement("div");
@@ -1259,11 +1263,20 @@ function addMsg(role, text, attachList) {
     el.appendChild(thinkingSection);
     el._thinkingSection = thinkingSection;
     el._thinkingBody = thinkingBody;
-    // Toggle thinking section on header click
-    thinkingHeader.addEventListener("click", function() {
+    // Toggle the thinking section: click, or Enter/Space when focused (it is a
+    // role=button so it must answer the keyboard).
+    var toggleThinking = function() {
       var isHidden = thinkingBody.style.display === "none" || !thinkingBody.style.display;
       thinkingBody.style.display = isHidden ? "block" : "none";
       thinkingHeader.classList.toggle("expanded", isHidden);
+      thinkingHeader.setAttribute("aria-expanded", isHidden ? "true" : "false");
+    };
+    thinkingHeader.addEventListener("click", toggleThinking);
+    thinkingHeader.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+        e.preventDefault();
+        toggleThinking();
+      }
     });
   }
   // Show attached images as thumbnails above the text
