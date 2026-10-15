@@ -298,6 +298,10 @@ Serve::Serve(ServeConfig cfg, std::shared_ptr<Backend> eng)
         engine::ProcessConfig pcfg;
         pcfg.exe = cfg_.vision_binary.empty() ? "build-vision/bin/qinfer-vision" : cfg_.vision_binary;
         pcfg.args = {"--mmproj", cfg_.mmproj_path, "--model", cfg_.model_path};
+        if (cfg_.vision_gpu) pcfg.args.push_back("--gpu");
+        // Same convention as the engine child: its stderr lands in the server's own log, so a
+        // failed or slow encoder start names its cause instead of vanishing into /dev/null.
+        pcfg.stderr_path = "/dev/stderr";
         std::string verr;
         if (!engine::VisionProcess::start(pcfg, *vision_, verr)) {
             // Log but don't fail: vision is optional, the server can still serve text.

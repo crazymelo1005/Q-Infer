@@ -84,6 +84,12 @@ struct ServeConfig {
     std::string mmproj_path;           // --mmproj: path to mmproj.gguf
     std::string vision_binary;         // --vision-binary: path to qinfer-vision (default: build-vision/bin/qinfer-vision)
     std::string media_root;            // --media-root: allowed prefix for file:// URLs
+    // --vision-gpu on|off: pass --gpu to the encoder child. With the ggml-vulkan build
+    // (tools/build_vision.sh STRATA_VISION_VULKAN=ON) that runs the encoder on Vulkan device 0,
+    // which on this box is the Intel iGPU: 192 ms against 1375 ms on 8 CPU threads, in system
+    // memory, so it costs the engine no VRAM. Off by default; the reading is distribution-level
+    // (ADR-009) -- the encoder's output is not byte-identical across devices.
+    bool vision_gpu = false;
 };
 
 class Serve {

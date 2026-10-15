@@ -24,9 +24,14 @@ bool VisionProcess::start(const ProcessConfig& cfg, VisionProcess& out, std::str
     err.clear();
     if (!EngineProcess::start(cfg, out.proc_, err)) return false;
 
-    // Wait for the READY handshake (bounded: 30s should be plenty for model load).
+    // Wait for the READY handshake. 30s is plenty for the CPU encoder (it reaches READY in ~0.75s
+    // on a warm cache), but a ggml-vulkan encoder needs far longer to come up: measured on the
+    // iGPU, ~49s to READY with only the Intel ICD visible, ~80s when the two RTX cards are also
+    // enumerated (ggml-vulkan probes every device). The encoder is resident, so this is paid once
+    // per process, not per image -- but the handshake has to wait it out or vision silently
+    // disables itself. Env knobs that help: VK_ICD_FILENAMES=<intel_icd.json> skips the RTX probe.
     std::string line;
-    if (!out.proc_.read_line_timeout(line, err, 30000)) {
+    if (!out.proc_.read_line_timeout(line, err, 240000)) {
         out.proc_.kill();
         if (err.empty()) err = "vision encoder: EOF before READY";
         return false;

@@ -165,6 +165,12 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     // and accepts image_url parts in chat requests).
     if (a.count("--mmproj")) c.mmproj_path = a["--mmproj"];
     if (a.count("--vision-binary")) c.vision_binary = a["--vision-binary"];
+    // --vision-gpu on|off: pass --gpu to the vision child (ggml-vulkan build -> the Intel iGPU).
+    if (a.count("--vision-gpu")) {
+        const std::string v = a["--vision-gpu"];
+        if (v != "on" && v != "off") { err = "--vision-gpu needs on or off, got \"" + v + "\""; return {}; }
+        c.vision_gpu = v == "on";
+    }
     if (a.count("--media-root")) c.media_root = a["--media-root"];
     // --igpu off|dense|pool: the vendored engine reads its iGPU switches from the
     // environment, and the engine child inherits ours. Default off. iGPU dense looked like
