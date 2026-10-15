@@ -1220,7 +1220,8 @@ function addMsg(role, text, attachList) {
   } else if (role === "user") {
     var uactions = document.createElement("div");
     uactions.className = "bubble-actions";
-    uactions.innerHTML = '<button class="bubble-action" data-action="edit" title="' + tr("chat.edit") + '" aria-label="' + tr("chat.edit") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-settings"/></svg></button>';
+    uactions.innerHTML = '<button class="bubble-action" data-action="copy" title="' + tr("chat.copy") + '" aria-label="' + tr("chat.copy") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-copy"/></svg></button>' +
+      '<button class="bubble-action" data-action="edit" title="' + tr("chat.edit") + '" aria-label="' + tr("chat.edit") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-settings"/></svg></button>';
     el.appendChild(uactions);
   }
   $("msg-list").appendChild(el);
@@ -2386,8 +2387,7 @@ function initChat() {
       e.preventDefault();
       sendChat();
     }
-  });
-  // Global keyboard shortcuts
+  });  // Global keyboard shortcuts
   document.addEventListener("keydown", function (e) {
     // Escape to stop generation
     if (e.key === "Escape" && streaming && abortCtrl) {
