@@ -1172,6 +1172,26 @@ function loadSampler() {
   } catch (e) { return false; }
 }
 
+// Reflect the Generation selector's thinking mode on the composer toggle.
+function syncThinkBtn() {
+  var b = $("btn-thinking"), s = $("s-think");
+  if (b && s) b.classList.toggle("active", s.value !== "off");
+}
+// The sampler + generation fields as a plain object, for per-conversation overrides.
+function samplerSnapshot() {
+  var s = {};
+  ["s-temp", "s-top-p", "s-top-k", "s-min-p", "s-pres-pen", "s-freq-pen", "s-rep-pen", "s-seed", "s-max-tokens", "s-think", "s-ctx"].forEach(function (id) {
+    if ($(id)) s[id] = $(id).value;
+  });
+  return s;
+}
+// Apply a saved override set to the fields (no-op for a missing/empty set).
+function samplerApply(s) {
+  if (!s) return;
+  Object.keys(s).forEach(function (id) { if ($(id)) $(id).value = s[id]; });
+  syncThinkBtn();
+}
+
 /* ---- Chat ---- */
 let modelId = "x";
 let streaming = false;
@@ -2404,10 +2424,6 @@ function initChat() {
   // (Off <-> last non-off level).
   var thinkBtn = $("btn-thinking");
   var lastThink = "xhigh";
-  function syncThinkBtn() {
-    var sel = $("s-think");
-    if (thinkBtn && sel) thinkBtn.classList.toggle("active", sel.value !== "off");
-  }
   if ($("s-think")) {
     $("s-think").addEventListener("change", function () {
       if ($("s-think").value !== "off") lastThink = $("s-think").value;
@@ -2667,6 +2683,8 @@ var QinferConv = {
     // Load messages into the UI
     var conv = this.getCurrent();
     if (!conv) return;
+    // Restore this conversation's parameter overrides (absent = keep current).
+    samplerApply(conv.params);
     $("msg-list").innerHTML = "";
     if (conv.messages.length === 0) {
       var empty = $("chat-empty");
@@ -2725,6 +2743,7 @@ var QinferConv = {
       }
     });
     conv.messages = messages;
+    conv.params = samplerSnapshot();
     conv.updated = Date.now();
     // Auto-generate title from first user message
     if (conv.title === tr("conv.untitled") && messages.length > 0) {
