@@ -31,10 +31,32 @@
     } catch (e) { /* retry on the next poll */ }
   }
 
+  // Reply feedback captured from the chat (/api/feedback), newest first.
+  async function refreshFeedback() {
+    try {
+      const res = await api("/api/feedback");
+      if (!res.ok) return;
+      const d = await res.json();
+      const el = $("feedback-list");
+      if (!el) return;
+      const items = d.data || [];
+      if (!items.length) {
+        el.innerHTML = '<div class="note">' + esc(tr("mon.noFeedback")) + "</div>";
+        return;
+      }
+      el.innerHTML = items.map(function (f) {
+        const when = f.at ? new Date(f.at * 1000).toLocaleTimeString() : "";
+        return '<div class="feedback-item"><span class="badge">' + esc(f.rating || "") + "</span> " +
+          esc(f.excerpt || "") + ' <span class="muted small">' + esc(when) + "</span></div>";
+      }).join("");
+    } catch (e) { /* retry on the next poll */ }
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     $("req-search").addEventListener("input", renderFiltered);
     $("req-filter").addEventListener("change", renderFiltered);
     refresh();
-    window.setInterval(refresh, 2000);
+    refreshFeedback();
+    window.setInterval(function () { refresh(); refreshFeedback(); }, 2000);
   });
 })();
