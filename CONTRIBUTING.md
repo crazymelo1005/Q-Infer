@@ -203,7 +203,7 @@ S-<n> | 等级 | 复核状态 | 来源（URL 或文档路径） | 引用日期
 
 - 语言 C++20，构建 CMake（≥3.28），不引包管理器；依赖面为零（第三方内核以裁剪后的子集入库，文件头登记上游路径、提交号与许可，见 [research/references.md](docs/research/references.md)）。
 - GPU 侧用 CUDA，但主机侧代码不得依赖它：CI 在没有 GPU 的 runner 上编译并跑测试。CUDA 部分单独标注、在本机跑。
-- 测试不引第三方框架：`tests/` 下的可执行文件用 [`tests/check.hpp`](tests/check.hpp) 的 `CHECK`，`ctest` 驱动，CI 与本地同一条命令——`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --test-dir build --output-on-failure`。**不要用 `<cassert>` 的 `assert`**：Release 构建定义 `NDEBUG`，它会把这些检查整个编译掉，测试于是变成空跑，「全绿」不再意味着任何事。
+- 测试不引第三方框架：`tests/` 下的可执行文件用 [`tests/unit/check.hpp`](tests/unit/check.hpp) 的 `CHECK`，`ctest` 驱动，CI 与本地同一条命令——`cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --test-dir build --output-on-failure`。**不要用 `<cassert>` 的 `assert`**：Release 构建定义 `NDEBUG`，它会把这些检查整个编译掉，测试于是变成空跑，「全绿」不再意味着任何事。
 - 测试范围：主机侧的不变量与确定性算术优先（页表不变量、预算仲裁、标定推导）。涉及 GPU 内核的回归走 [ADR-009](docs/design/adr/ADR-009-correctness-acceptance-criteria.md) 的两档口径（固定开关下逐位；默认真实配置用分布级）。
 - 需要真实模型文件才能跑的验收不进 CI：CI 用现场生成的最小合成夹具（如 `test_gguf_table` 自造一个只含一张表的小 GGUF）。要用真文件验收时走该测试的手工入口，例如 `./build/test_gguf_table --model <分片2.gguf> --row 0`，其输出与 `measure/ple_row_oracle.py` 对照。
 

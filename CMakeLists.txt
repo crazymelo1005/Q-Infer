@@ -147,28 +147,28 @@ target_include_directories(qinfer_kernels PUBLIC src)
 
 # 第一片骨架不含 CUDA：三层存储与页表是主机侧代码，CI 在没有 GPU 的 runner 上也能编译并跑测试。
 # CUDA 内核与图捕获在序 3 之后引入（见 docs/design/adr/ADR-008）。
-add_executable(test_page_table tests/test_page_table.cpp)
+add_executable(test_page_table tests/unit/test_page_table.cpp)
 target_link_libraries(test_page_table PRIVATE qinfer_storage)
 
-add_executable(test_budget_arbiter tests/test_budget_arbiter.cpp)
+add_executable(test_budget_arbiter tests/unit/test_budget_arbiter.cpp)
 target_link_libraries(test_budget_arbiter PRIVATE qinfer_scheduling)
 
-add_executable(test_step_budget tests/test_step_budget.cpp)
+add_executable(test_step_budget tests/unit/test_step_budget.cpp)
 target_link_libraries(test_step_budget PRIVATE qinfer_scheduling)
 
-add_executable(test_memory_plan tests/test_memory_plan.cpp)
+add_executable(test_memory_plan tests/unit/test_memory_plan.cpp)
 target_link_libraries(test_memory_plan PRIVATE qinfer_scheduling)
 
-add_executable(test_tokenizer tests/test_tokenizer.cpp)
+add_executable(test_tokenizer tests/unit/test_tokenizer.cpp)
 target_link_libraries(test_tokenizer PRIVATE qinfer_text)
 
-add_executable(test_sampler tests/test_sampler.cpp)
+add_executable(test_sampler tests/unit/test_sampler.cpp)
 target_link_libraries(test_sampler PRIVATE qinfer_serve)
 
-add_executable(test_prompt tests/test_prompt.cpp)
+add_executable(test_prompt tests/unit/test_prompt.cpp)
 target_link_libraries(test_prompt PRIVATE qinfer_serve)
 
-add_executable(test_facade tests/test_facade.cpp)
+add_executable(test_facade tests/unit/test_facade.cpp)
 target_link_libraries(test_facade PRIVATE qinfer_serve)
 
 # 集成测试的合成 GGUF 发生器：确定性写出 qinfer-serve-fixture.gguf（T9 起集成脚本调用）。
@@ -176,74 +176,74 @@ target_link_libraries(test_facade PRIVATE qinfer_serve)
 add_executable(serve_fixture_gen tests/serve_fixture_gen.cpp)
 target_link_libraries(serve_fixture_gen PRIVATE qinfer_dense qinfer_artifact)
 
-add_executable(test_json tests/test_json.cpp)
+add_executable(test_json tests/unit/test_json.cpp)
 target_link_libraries(test_json PRIVATE qinfer_serve)
 
-add_executable(test_scheduler tests/test_scheduler.cpp)
+add_executable(test_scheduler tests/unit/test_scheduler.cpp)
 target_link_libraries(test_scheduler PRIVATE qinfer_serve)
 
-add_executable(test_telemetry tests/test_telemetry.cpp)
+add_executable(test_telemetry tests/unit/test_telemetry.cpp)
 target_link_libraries(test_telemetry PRIVATE qinfer_serve)
 
 # 请求记录环（T14）：/metrics 的 requests/totals 与 /api/requests 的数据源。
-add_executable(test_records tests/test_records.cpp)
+add_executable(test_records tests/unit/test_records.cpp)
 target_link_libraries(test_records PRIVATE qinfer_serve)
 
 # token 前缀缓存（conversation_cache 数据源）：全串精确匹配的 LRU，/metrics 实读其统计。
-add_executable(test_prompt_cache tests/test_prompt_cache.cpp)
+add_executable(test_prompt_cache tests/unit/test_prompt_cache.cpp)
 target_link_libraries(test_prompt_cache PRIVATE qinfer_serve)
 
 # /metrics 的 Prometheus text 端口（M2 监控）：内容协商 + 三直方图 + vLLM/qinfer 家族映射。
-add_executable(test_prometheus tests/test_prometheus.cpp)
+add_executable(test_prometheus tests/unit/test_prometheus.cpp)
 target_link_libraries(test_prometheus PRIVATE qinfer_serve)
 
 # 工具调用域（T18）：输出标记解析、OpenAI/Anthropic 工具形状、tools 归一化与生成拆分。
-add_executable(test_toolcall tests/test_toolcall.cpp)
+add_executable(test_toolcall tests/unit/test_toolcall.cpp)
 target_link_libraries(test_toolcall PRIVATE qinfer_serve)
 add_test(NAME toolcall COMMAND test_toolcall)
 
 # M5b: media fetch (data:/http(s)/file:// URL normalization to temp files).
-add_executable(test_media_fetch tests/test_media_fetch.cpp)
+add_executable(test_media_fetch tests/unit/test_media_fetch.cpp)
 target_link_libraries(test_media_fetch PRIVATE qinfer_serve)
 add_test(NAME media_fetch COMMAND test_media_fetch)
 
-add_executable(test_iq4nl tests/test_iq4nl.cpp)
+add_executable(test_iq4nl tests/unit/test_iq4nl.cpp)
 target_link_libraries(test_iq4nl PRIVATE qinfer_kernels)
 
-add_executable(test_iq2xs tests/test_iq2xs.cpp)
+add_executable(test_iq2xs tests/unit/test_iq2xs.cpp)
 target_link_libraries(test_iq2xs PRIVATE qinfer_kernels)
 
-add_executable(test_q8k tests/test_q8k.cpp)
+add_executable(test_q8k tests/unit/test_q8k.cpp)
 target_link_libraries(test_q8k PRIVATE qinfer_kernels)
 
-add_executable(test_iq2xs_dot tests/test_iq2xs_dot.cpp)
+add_executable(test_iq2xs_dot tests/unit/test_iq2xs_dot.cpp)
 target_link_libraries(test_iq2xs_dot PRIVATE qinfer_kernels)
 
-add_executable(test_q2_0 tests/test_q2_0.cpp)
+add_executable(test_q2_0 tests/unit/test_q2_0.cpp)
 target_link_libraries(test_q2_0 PRIVATE qinfer_kernels)
 
-add_executable(test_q6k tests/test_q6k.cpp)
+add_executable(test_q6k tests/unit/test_q6k.cpp)
 target_link_libraries(test_q6k PRIVATE qinfer_kernels)
 
-add_executable(test_q8_0 tests/test_q8_0.cpp)
+add_executable(test_q8_0 tests/unit/test_q8_0.cpp)
 target_link_libraries(test_q8_0 PRIVATE qinfer_kernels)
 
-add_executable(test_iq2s tests/test_iq2s.cpp)
+add_executable(test_iq2s tests/unit/test_iq2s.cpp)
 target_link_libraries(test_iq2s PRIVATE qinfer_kernels)
 
-add_executable(test_iq2xxs tests/test_iq2xxs.cpp)
+add_executable(test_iq2xxs tests/unit/test_iq2xxs.cpp)
 target_link_libraries(test_iq2xxs PRIVATE qinfer_kernels)
 
-add_executable(test_iq1m tests/test_iq1m.cpp)
+add_executable(test_iq1m tests/unit/test_iq1m.cpp)
 target_link_libraries(test_iq1m PRIVATE qinfer_kernels)
 
-add_executable(test_iq3s tests/test_iq3s.cpp)
+add_executable(test_iq3s tests/unit/test_iq3s.cpp)
 target_link_libraries(test_iq3s PRIVATE qinfer_kernels)
 
-add_executable(test_iq4xs tests/test_iq4xs.cpp)
+add_executable(test_iq4xs tests/unit/test_iq4xs.cpp)
 target_link_libraries(test_iq4xs PRIVATE qinfer_kernels)
 
-add_executable(test_iq3xxs tests/test_iq3xxs.cpp)
+add_executable(test_iq3xxs tests/unit/test_iq3xxs.cpp)
 target_link_libraries(test_iq3xxs PRIVATE qinfer_kernels)
 
 add_library(qinfer_kv
@@ -251,16 +251,16 @@ add_library(qinfer_kv
 )
 target_include_directories(qinfer_kv PUBLIC src)
 
-add_executable(test_kv_pool tests/test_kv_pool.cpp)
+add_executable(test_kv_pool tests/unit/test_kv_pool.cpp)
 target_link_libraries(test_kv_pool PRIVATE qinfer_kv)
 
-add_executable(test_ngram tests/test_ngram.cpp)
+add_executable(test_ngram tests/unit/test_ngram.cpp)
 target_link_libraries(test_ngram PRIVATE qinfer_kernels)
 
-add_executable(test_row_cache tests/test_row_cache.cpp)
+add_executable(test_row_cache tests/unit/test_row_cache.cpp)
 target_link_libraries(test_row_cache PRIVATE qinfer_storage)
 
-add_executable(test_expert_cache tests/test_expert_cache.cpp)
+add_executable(test_expert_cache tests/unit/test_expert_cache.cpp)
 target_link_libraries(test_expert_cache PRIVATE qinfer_storage)
 
 # 专家缓存的离线重放工具：读参考引擎 --dump-routing 的轨迹，比较三种替换策略的命中率。
@@ -281,167 +281,167 @@ target_link_libraries(igpu_gemv_bench PRIVATE qinfer_experts)
 add_executable(thread_pool_bench measure/thread_pool_bench.cpp)
 target_link_libraries(thread_pool_bench PRIVATE qinfer_experts qinfer_scheduling)
 
-add_executable(test_ple_read_path tests/test_ple_read_path.cpp)
+add_executable(test_ple_read_path tests/unit/test_ple_read_path.cpp)
 target_link_libraries(test_ple_read_path PRIVATE qinfer_ple)
 
-add_executable(test_ple_block tests/test_ple_block.cpp)
+add_executable(test_ple_block tests/unit/test_ple_block.cpp)
 target_link_libraries(test_ple_block PRIVATE qinfer_ple)
 
-add_executable(test_gguf_table tests/test_gguf_table.cpp)
+add_executable(test_gguf_table tests/unit/test_gguf_table.cpp)
 target_link_libraries(test_gguf_table PRIVATE qinfer_artifact qinfer_kernels)
 
-add_executable(test_expert_formats tests/test_expert_formats.cpp)
+add_executable(test_expert_formats tests/unit/test_expert_formats.cpp)
 target_link_libraries(test_expert_formats PRIVATE qinfer_experts)
 
-add_executable(test_ffn tests/test_ffn.cpp)
+add_executable(test_ffn tests/unit/test_ffn.cpp)
 target_link_libraries(test_ffn PRIVATE qinfer_experts)
 
-add_executable(test_router tests/test_router.cpp)
+add_executable(test_router tests/unit/test_router.cpp)
 target_link_libraries(test_router PRIVATE qinfer_experts)
 
-add_executable(test_moe_layer tests/test_moe_layer.cpp)
+add_executable(test_moe_layer tests/unit/test_moe_layer.cpp)
 target_link_libraries(test_moe_layer PRIVATE qinfer_experts)
 
-add_executable(test_bus_share tests/test_bus_share.cpp)
+add_executable(test_bus_share tests/unit/test_bus_share.cpp)
 target_link_libraries(test_bus_share PRIVATE qinfer_scheduling)
 
-add_executable(test_expert_worker tests/test_expert_worker.cpp)
+add_executable(test_expert_worker tests/unit/test_expert_worker.cpp)
 target_link_libraries(test_expert_worker PRIVATE qinfer_experts)
 
 # Stage C: the iGPU Vulkan runtime (dlopen + hand-written ABI). Runs on every
 # machine: without a GPU it asserts the unavailable+reason contract.
-add_executable(test_igpu_runtime tests/test_igpu_runtime.cpp)
+add_executable(test_igpu_runtime tests/unit/test_igpu_runtime.cpp)
 target_link_libraries(test_igpu_runtime PRIVATE qinfer_experts)
 add_test(NAME igpu_runtime COMMAND test_igpu_runtime)
 
-add_executable(test_igpu_gemv tests/test_igpu_gemv.cpp)
+add_executable(test_igpu_gemv tests/unit/test_igpu_gemv.cpp)
 target_link_libraries(test_igpu_gemv PRIVATE qinfer_experts)
 add_test(NAME igpu_gemv COMMAND test_igpu_gemv)
 
-add_executable(test_igpu_iq2s tests/test_igpu_iq2s.cpp)
+add_executable(test_igpu_iq2s tests/unit/test_igpu_iq2s.cpp)
 target_link_libraries(test_igpu_iq2s PRIVATE qinfer_experts)
 add_test(NAME igpu_iq2s COMMAND test_igpu_iq2s)
 
 # P3a step 3: IQ2_XXS x Q8_K on the iGPU vs the host kernel.
-add_executable(test_igpu_iq2xxs tests/test_igpu_iq2xxs.cpp)
+add_executable(test_igpu_iq2xxs tests/unit/test_igpu_iq2xxs.cpp)
 target_link_libraries(test_igpu_iq2xxs PRIVATE qinfer_experts)
 add_test(NAME igpu_iq2xxs COMMAND test_igpu_iq2xxs)
 
 # P3a step 4: IQ1_M x Q8_K on the iGPU vs the host kernel.
-add_executable(test_igpu_iq1m tests/test_igpu_iq1m.cpp)
+add_executable(test_igpu_iq1m tests/unit/test_igpu_iq1m.cpp)
 target_link_libraries(test_igpu_iq1m PRIVATE qinfer_experts)
 add_test(NAME igpu_iq1m COMMAND test_igpu_iq1m)
 
-add_executable(test_igpu_expert tests/test_igpu_expert.cpp)
+add_executable(test_igpu_expert tests/unit/test_igpu_expert.cpp)
 target_link_libraries(test_igpu_expert PRIVATE qinfer_experts)
 add_test(NAME igpu_expert COMMAND test_igpu_expert)
 
 # Strata iGPU pool: pack format adapter unit test (planar blob -> per-row view).
-add_executable(test_strata_pack_adapter tests/test_strata_pack_adapter.cpp)
+add_executable(test_strata_pack_adapter tests/unit/test_strata_pack_adapter.cpp)
 target_link_libraries(test_strata_pack_adapter PRIVATE qinfer_experts)
 add_test(NAME strata_pack_adapter COMMAND test_strata_pack_adapter)
 
 # Strata iGPU pool: pool init, hybrid routing, and ActQ quantization tests.
-add_executable(test_igpu_expert_pool tests/test_igpu_expert_pool.cpp)
+add_executable(test_igpu_expert_pool tests/unit/test_igpu_expert_pool.cpp)
 target_link_libraries(test_igpu_expert_pool PRIVATE qinfer_experts)
 add_test(NAME igpu_expert_pool COMMAND test_igpu_expert_pool)
 
 # Strata iGPU pool: end-to-end integration test (act_quant, pack adapter, hybrid fallback).
-add_executable(test_strata_igpu_e2e tests/test_strata_igpu_e2e.cpp)
+add_executable(test_strata_igpu_e2e tests/unit/test_strata_igpu_e2e.cpp)
 target_link_libraries(test_strata_igpu_e2e PRIVATE qinfer_experts)
 add_test(NAME strata_igpu_e2e COMMAND test_strata_igpu_e2e)
 
-add_executable(test_thread_pool tests/test_thread_pool.cpp)
+add_executable(test_thread_pool tests/unit/test_thread_pool.cpp)
 target_link_libraries(test_thread_pool PRIVATE qinfer_experts)
 
-add_executable(test_compute_group tests/test_compute_group.cpp)
+add_executable(test_compute_group tests/unit/test_compute_group.cpp)
 target_link_libraries(test_compute_group PRIVATE qinfer_experts)
 
-add_executable(test_layer_dispatch tests/test_layer_dispatch.cpp)
+add_executable(test_layer_dispatch tests/unit/test_layer_dispatch.cpp)
 target_link_libraries(test_layer_dispatch PRIVATE qinfer_experts)
 
-add_executable(test_bf16_gemv tests/test_bf16_gemv.cpp)
+add_executable(test_bf16_gemv tests/unit/test_bf16_gemv.cpp)
 target_link_libraries(test_bf16_gemv PRIVATE qinfer_experts qinfer_scheduling)
 
-add_executable(test_model_head tests/test_model_head.cpp)
+add_executable(test_model_head tests/unit/test_model_head.cpp)
 target_link_libraries(test_model_head PRIVATE qinfer_dense qinfer_artifact)
 
-add_executable(test_layer_map tests/test_layer_map.cpp)
+add_executable(test_layer_map tests/unit/test_layer_map.cpp)
 target_link_libraries(test_layer_map PRIVATE qinfer_dense qinfer_artifact)
 
-add_executable(test_qsa_layer tests/test_qsa_layer.cpp)
+add_executable(test_qsa_layer tests/unit/test_qsa_layer.cpp)
 target_link_libraries(test_qsa_layer PRIVATE qinfer_dense qinfer_artifact)
 
-add_executable(test_qsa_qk_prep tests/test_qsa_qk_prep.cpp)
+add_executable(test_qsa_qk_prep tests/unit/test_qsa_qk_prep.cpp)
 target_link_libraries(test_qsa_qk_prep PRIVATE qinfer_dense)
 
-add_executable(test_kv_page_cache tests/test_kv_page_cache.cpp)
+add_executable(test_kv_page_cache tests/unit/test_kv_page_cache.cpp)
 target_link_libraries(test_kv_page_cache PRIVATE qinfer_dense)
 
-add_executable(test_norm tests/test_norm.cpp)
+add_executable(test_norm tests/unit/test_norm.cpp)
 target_link_libraries(test_norm PRIVATE qinfer_dense)
 
-add_executable(test_qsa_indexer tests/test_qsa_indexer.cpp)
+add_executable(test_qsa_indexer tests/unit/test_qsa_indexer.cpp)
 target_link_libraries(test_qsa_indexer PRIVATE qinfer_dense)
 
-add_executable(test_qsa_index tests/test_qsa_index.cpp)
+add_executable(test_qsa_index tests/unit/test_qsa_index.cpp)
 target_link_libraries(test_qsa_index PRIVATE qinfer_dense)
 
-add_executable(test_rope tests/test_rope.cpp)
+add_executable(test_rope tests/unit/test_rope.cpp)
 target_link_libraries(test_rope PRIVATE qinfer_dense)
 
-add_executable(test_qsa_attend tests/test_qsa_attend.cpp)
+add_executable(test_qsa_attend tests/unit/test_qsa_attend.cpp)
 target_link_libraries(test_qsa_attend PRIVATE qinfer_dense)
 
-add_executable(test_qsa_select tests/test_qsa_select.cpp)
+add_executable(test_qsa_select tests/unit/test_qsa_select.cpp)
 target_link_libraries(test_qsa_select PRIVATE qinfer_dense)
 
-add_executable(test_gdn_layer tests/test_gdn_layer.cpp)
+add_executable(test_gdn_layer tests/unit/test_gdn_layer.cpp)
 target_link_libraries(test_gdn_layer PRIVATE qinfer_dense)
 
-add_executable(test_gdn_recurrence tests/test_gdn_recurrence.cpp)
+add_executable(test_gdn_recurrence tests/unit/test_gdn_recurrence.cpp)
 target_link_libraries(test_gdn_recurrence PRIVATE qinfer_dense)
 
-add_executable(test_gdn_preprocess tests/test_gdn_preprocess.cpp)
+add_executable(test_gdn_preprocess tests/unit/test_gdn_preprocess.cpp)
 target_link_libraries(test_gdn_preprocess PRIVATE qinfer_dense)
 
-add_executable(test_gated_residual tests/test_gated_residual.cpp)
+add_executable(test_gated_residual tests/unit/test_gated_residual.cpp)
 target_link_libraries(test_gated_residual PRIVATE qinfer_dense qinfer_artifact)
 
-add_executable(test_block_layer tests/test_block_layer.cpp)
+add_executable(test_block_layer tests/unit/test_block_layer.cpp)
 target_link_libraries(test_block_layer PRIVATE qinfer_dense qinfer_artifact)
 
-add_executable(test_step_loop tests/test_step_loop.cpp)
+add_executable(test_step_loop tests/unit/test_step_loop.cpp)
 target_link_libraries(test_step_loop PRIVATE qinfer_dense qinfer_artifact)
 
-add_executable(test_token_embed tests/test_token_embed.cpp)
+add_executable(test_token_embed tests/unit/test_token_embed.cpp)
 target_link_libraries(test_token_embed PRIVATE qinfer_dense qinfer_artifact)
 
-add_executable(test_mtp_pack tests/test_mtp_pack.cpp)
+add_executable(test_mtp_pack tests/unit/test_mtp_pack.cpp)
 target_link_libraries(test_mtp_pack PRIVATE qinfer_dense qinfer_artifact)
 
-add_executable(test_mtp_entry tests/test_mtp_entry.cpp)
+add_executable(test_mtp_entry tests/unit/test_mtp_entry.cpp)
 target_link_libraries(test_mtp_entry PRIVATE qinfer_dense qinfer_artifact)
 
-add_executable(test_kv_window tests/test_kv_window.cpp)
+add_executable(test_kv_window tests/unit/test_kv_window.cpp)
 target_link_libraries(test_kv_window PRIVATE qinfer_dense qinfer_artifact)
 
-add_executable(test_step_record tests/test_step_record.cpp)
+add_executable(test_step_record tests/unit/test_step_record.cpp)
 target_link_libraries(test_step_record PRIVATE qinfer_experts)
 
-add_executable(test_native_session tests/test_native_session.cpp)
+add_executable(test_native_session tests/unit/test_native_session.cpp)
 target_link_libraries(test_native_session PRIVATE qinfer_serve qinfer_dense qinfer_artifact)
 
-add_executable(test_native_backend tests/test_native_backend.cpp)
+add_executable(test_native_backend tests/unit/test_native_backend.cpp)
 target_link_libraries(test_native_backend PRIVATE qinfer_serve)
 
-add_executable(test_native_parity tests/test_native_parity.cpp)
+add_executable(test_native_parity tests/unit/test_native_parity.cpp)
 target_link_libraries(test_native_parity PRIVATE qinfer_serve)
 
-add_executable(test_native_session_p2 tests/test_native_session_p2.cpp)
+add_executable(test_native_session_p2 tests/unit/test_native_session_p2.cpp)
 target_link_libraries(test_native_session_p2 PRIVATE qinfer_serve qinfer_dense qinfer_artifact)
 
-add_executable(test_native_backend_p2 tests/test_native_backend_p2.cpp)
+add_executable(test_native_backend_p2 tests/unit/test_native_backend_p2.cpp)
 target_link_libraries(test_native_backend_p2 PRIVATE qinfer_serve)
 
 enable_testing()
@@ -523,7 +523,7 @@ add_test(NAME native_backend_p2 COMMAND test_native_backend_p2)
 add_library(qinfer_engine src/engine/engine_protocol.cpp)
 target_include_directories(qinfer_engine PUBLIC src)
 
-add_executable(test_engine_protocol tests/test_engine_protocol.cpp)
+add_executable(test_engine_protocol tests/unit/test_engine_protocol.cpp)
 target_link_libraries(test_engine_protocol PRIVATE qinfer_engine)
 add_test(NAME engine_protocol COMMAND test_engine_protocol)
 # The same binary re-run with the recorded transcript: parses every line and checks the
@@ -532,12 +532,12 @@ add_test(NAME engine_protocol_transcript COMMAND test_engine_protocol
          ${CMAKE_CURRENT_SOURCE_DIR}/tests/data/strata_transcript_gen.txt)
 
 target_sources(qinfer_engine PRIVATE src/engine/engine_process.cpp)
-add_executable(test_engine_process tests/test_engine_process.cpp)
+add_executable(test_engine_process tests/unit/test_engine_process.cpp)
 target_link_libraries(test_engine_process PRIVATE qinfer_engine)
 add_test(NAME engine_process COMMAND test_engine_process)
 
 target_sources(qinfer_engine PRIVATE src/engine/vision_process.cpp)
-add_executable(test_vision_process tests/test_vision_process.cpp)
+add_executable(test_vision_process tests/unit/test_vision_process.cpp)
 target_link_libraries(test_vision_process PRIVATE qinfer_engine)
 add_test(NAME vision_process COMMAND test_vision_process)
 
@@ -547,19 +547,19 @@ add_executable(mock_strata_engine tests/mock_strata_engine.cpp)
 target_link_libraries(mock_strata_engine PRIVATE qinfer_engine)
 
 # The service-layer backend that wraps the driver; unit-tested against the mock engine (no GPU).
-add_executable(test_backend_strata tests/test_backend_strata.cpp)
+add_executable(test_backend_strata tests/unit/test_backend_strata.cpp)
 target_link_libraries(test_backend_strata PRIVATE qinfer_serve)
 target_compile_definitions(test_backend_strata PRIVATE
                            MOCK_ENGINE_PATH="$<TARGET_FILE:mock_strata_engine>")
 add_test(NAME backend_strata COMMAND test_backend_strata)
 
 # Byte-parity of the chat renderer against the reference engine's golden (data only, no weights).
-add_executable(test_chat_golden tests/test_chat_golden.cpp)
+add_executable(test_chat_golden tests/unit/test_chat_golden.cpp)
 target_link_libraries(test_chat_golden PRIVATE qinfer_serve)
 add_test(NAME chat_golden COMMAND test_chat_golden ${CMAKE_CURRENT_SOURCE_DIR}/tests/data)
 
 target_sources(qinfer_engine PRIVATE src/engine/engine_driver.cpp)
-add_executable(test_engine_driver tests/test_engine_driver.cpp)
+add_executable(test_engine_driver tests/unit/test_engine_driver.cpp)
 target_link_libraries(test_engine_driver PRIVATE qinfer_engine)
 target_compile_definitions(test_engine_driver PRIVATE
                            MOCK_ENGINE_PATH="$<TARGET_FILE:mock_strata_engine>")
@@ -595,27 +595,27 @@ if(QINFER_ENABLE_CUDA)
   target_include_directories(qinfer_kernels_cuda PUBLIC src)
   target_link_libraries(qinfer_kernels_cuda PUBLIC qinfer_kernels CUDA::cudart)
 
-  add_executable(test_q2_0_cuda tests/test_q2_0_cuda.cpp)
+  add_executable(test_q2_0_cuda tests/unit/test_q2_0_cuda.cpp)
   target_link_libraries(test_q2_0_cuda PRIVATE qinfer_kernels_cuda)
   add_test(NAME q2_0_cuda COMMAND test_q2_0_cuda)
 
-  add_executable(test_iq2s_cuda tests/test_iq2s_cuda.cpp)
+  add_executable(test_iq2s_cuda tests/unit/test_iq2s_cuda.cpp)
   target_link_libraries(test_iq2s_cuda PRIVATE qinfer_kernels_cuda)
   add_test(NAME iq2s_cuda COMMAND test_iq2s_cuda)
 
-  add_executable(test_iq_gemv_cuda tests/test_iq_gemv_cuda.cpp)
+  add_executable(test_iq_gemv_cuda tests/unit/test_iq_gemv_cuda.cpp)
   target_link_libraries(test_iq_gemv_cuda PRIVATE qinfer_kernels_cuda)
   add_test(NAME iq_gemv_cuda COMMAND test_iq_gemv_cuda)
 
   # 阶段 A：GDN/QSA 稠密段设备路径的对照载体（真字节夹具 + 各内核判据）。
   # 链 qinfer_experts（非 CUDA 版）：对照要用主机 quantize_input / run_gemv / format_name。
   # 链 qinfer_dense_cuda：GDN 前段等 dense 设备实现；qinfer_dense 提供主机 gdn_preprocess 对照。
-  add_executable(test_gdn_qsa_cuda tests/test_gdn_qsa_cuda.cpp)
+  add_executable(test_gdn_qsa_cuda tests/unit/test_gdn_qsa_cuda.cpp)
   target_link_libraries(test_gdn_qsa_cuda PRIVATE qinfer_kernels_cuda qinfer_dense_cuda qinfer_experts)
   add_test(NAME gdn_qsa_cuda COMMAND test_gdn_qsa_cuda)
 
   # 阶段 B：设备 KV 池（对照主机 KvPageCache 字节；8K 夹具在 task 5 扩展）。
-  add_executable(test_kv_device_cuda tests/test_kv_device_cuda.cpp)
+  add_executable(test_kv_device_cuda tests/unit/test_kv_device_cuda.cpp)
   target_link_libraries(test_kv_device_cuda PRIVATE qinfer_kernels_cuda qinfer_dense_cuda)
   add_test(NAME kv_device_cuda COMMAND test_kv_device_cuda)
 
@@ -646,7 +646,7 @@ if(QINFER_ENABLE_CUDA)
   # 只有 CUDA 构建才链这一支（主机构建不引用任何 CUDA 符号）。
   target_link_libraries(qinfer-server PRIVATE qinfer_dense_cuda)
 
-  add_executable(test_expert_ffn_cuda tests/test_expert_ffn_cuda.cpp)
+  add_executable(test_expert_ffn_cuda tests/unit/test_expert_ffn_cuda.cpp)
   # 这个入口还要跑整模型一步（`run_step_model`），故另连 dense 与 artifact。
   target_link_libraries(test_expert_ffn_cuda PRIVATE qinfer_experts_cuda qinfer_dense qinfer_artifact)
   add_test(NAME expert_ffn_cuda COMMAND test_expert_ffn_cuda)

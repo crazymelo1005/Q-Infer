@@ -1,4 +1,4 @@
-# Strata --serve stdout, captured verbatim (protocol oracle for tests/test_engine_protocol.cpp).
+# Strata --serve stdout, captured verbatim (protocol oracle for tests/unit/test_engine_protocol.cpp).
 # Binary: build-engine/strata == vendored strata v0.1.43.1 (engine=0.1.43.1).
 # Command sent: GEN 8 temperature=0 top_k=1 9419,13,9419,13,9419,13   (ids: "Hello" '.' repeated)
 # Context: --pack iq2_xs, gsq-rco-iq2_xs GGUF pair 00001/00002, --expert-profile, --mtp mtp/rt,
