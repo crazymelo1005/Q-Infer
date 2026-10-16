@@ -1,20 +1,21 @@
 NOTICE
 ======
 
-This repository vendors part of **Strata**, an MIT-licensed MoE inference engine.
+This repository carries a subset of **Strata**, an MIT-licensed MoE inference engine, under `strata/`.
 
     Copyright (c) 2026 Niko1221 and the Strata contributors
     Upstream: https://github.com/Niko1221/Strata
-    License:  MIT (full text at third_party/strata/LICENSE)
+    License:  MIT (full text at strata/LICENSE)
 
 Provenance
 ----------
 
 - Tag: `v0.1.44.1`
 - Commit: `9791ea335ba2`
-- Vendored: 2026-10-16（原 v0.1.43.1 入库于 2026-10-13，见 [ADR-023](docs/adr/ADR-023-strata-engine-upgrade-01441.md)）
+- Checked in: 2026-10-16 (first taken in as v0.1.43.1 on 2026-10-13; the upgrade is recorded
+  in docs/adr/ADR-023-strata-engine-upgrade-01441.md)
 - Location: `strata/`
-- The vendored tree is **unmodified**. Any future edit is a deliberate divergence and
+- The tree under `strata/` is **unmodified**. Any future edit is a deliberate divergence and
   must be recorded here and in the decision record below.
 
 What was taken
@@ -50,12 +51,12 @@ What was deliberately left out, and why
 How it is used
 --------------
 
-The vendored engine is configured and built by `tools/build_engine.sh` into
+The engine sources are configured and built by `tools/build_engine.sh` into
 `build-engine/strata`, a separate binary with its own heavy CUDA toolchain
 dependency. Q-Infer's serving binary never links it; it talks to the engine as a
-subprocess. That process boundary is what keeps our "zero runtime dependencies"
-rule intact — see `docs/adr/[ADR-016](docs/adr/ADR-016-vendored-strata-backend.md)-vendored-strata-backend.md`, and
-`docs/adr/[ADR-008](docs/adr/ADR-008-implementation-stack-and-kernel-reuse.md)-*` for the dependency rule itself.
+subprocess. That process boundary is what keeps the "zero runtime dependencies"
+rule intact — see docs/adr/ADR-016-vendored-strata-backend.md, and
+ADR-008-implementation-stack-and-kernel-reuse.md for the dependency rule itself.
 
 Q-Infer's own code is MIT (c) 2026 crazymelo1005, which is compatible with the
 upstream terms above.
@@ -63,15 +64,15 @@ upstream terms above.
 Build note
 ----------
 
-`tools/build_engine.sh` does not configure `third_party/strata/` in place. It copies the tree to
+`tools/build_engine.sh` does not configure `strata/` in place. It copies the tree to
 `build-engine/src/` and configures from there, because the CUDA section of the upstream
 CMakeLists.txt registers one target (`dma_batch_parity`, line 807) from `tests/core/` without a
 `STRATA_BUILD_TESTS` guard, and CMake resolves every `add_executable` while configuring — so a
 partial source tree cannot be configured as it stands. Upstream guards eight other partial-tree
 cases the same way with `AND EXISTS` (lines 482, 492, 499, 526, 534, 544, 549, 554); line 807 reads
 as an oversight. The copy receives a placeholder at that path which fails loudly if anything ever
-tries to compile it, so the vendored tree itself is never edited and stays byte-identical to
-`a0116b27`. The script prints a confirmation of that at the end of every build.
+tries to compile it, so the tree under `strata/` is never edited and stays byte-identical to
+the upstream tag recorded above. The script prints that confirmation at the end of every build.
 
 ----------
 
@@ -89,12 +90,12 @@ allowed divergence; the stdout line protocol and the SVE1 byte layout are upstre
 That encoder links llama.cpp, which is NOT in this repository. `tools/build_vision.sh` extracts
 commit 3cf03257f219afbe7334045ff7c6a06ac68c627d (llama.cpp, MIT) from a local checkout with
 `git archive` into the git-ignored `build-vision/llama.cpp/`. It is never downloaded and never
-vendored, and the built encoder is spawned by the serving layer rather than linked into
-`qinfer-server`, so the zero-runtime-dependency rule still holds ([ADR-013](docs/adr/ADR-013-vision-port-and-dependency-boundary.md), [ADR-008](docs/adr/ADR-008-implementation-stack-and-kernel-reuse.md)).
+checked in, and the built encoder is spawned by the serving layer rather than linked into
+`qinfer-server`, so the zero-runtime-dependency rule still holds (docs/adr/ADR-013, docs/adr/ADR-008).
 
 ----------
 
-iGPU Expert Pool Shaders ([ADR-020](docs/adr/ADR-020-strata-igpu-pool.md))
+iGPU expert pool shaders (docs/adr/ADR-020, closed by docs/adr/ADR-019 and docs/adr/ADR-023)
 -----------------------------------
 
 The Vulkan compute shaders for the Strata iGPU expert pool (`strata_q2_0_gemv.comp`,
@@ -104,4 +105,6 @@ using the Vulkan 1.0 compute API.
 
 These shaders are compiled offline with glslangValidator and embedded as byte arrays
 in `spv_data.hpp`. The Vulkan runtime is loaded via dlopen at runtime, requiring no
-link-time dependency on libvulkan ([ADR-008](docs/adr/ADR-008-implementation-stack-and-kernel-reuse.md), [ADR-020](docs/adr/ADR-020-strata-igpu-pool.md)).
+link-time dependency on libvulkan (docs/adr/ADR-008). The expert pool these shaders were
+written for is closed by ADR-019 and withdrawn by ADR-023; the sources stay in the tree at
+`src/experts/igpu/shaders/` as the record of that measurement.

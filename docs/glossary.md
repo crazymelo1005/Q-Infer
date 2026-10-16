@@ -67,7 +67,7 @@
 | llama.cpp / KTransformers | 卸载派引擎：承认权重装不下，做层级/专家级 offload |
 | KVMem | llama.cpp 的 fork：把 KV/工作区做三层虚拟化，同款 5060 Ti 16GB 上做到 256K 近无损 |
 | LMCache | 把 KV 当作独立缓存层的库，常配 vLLM/SGLang |
-| Q-Infer（擎） | 本项目的引擎工作名。「Q」兼指 Qwen（主案例） Quantized（量化）；「擎」取「擎起」——用 16GB 擎起 125B。GitHub 仓库名与本地目录名均为 `Q-Infer`。（旧工作名 `Kestrel` 已弃用，原因：与微软 ASP.NET Core 的 Kestrel Web 服务器撞名） |
+| Q-Infer（擎） | 本项目的引擎工作名。「Q」兼指 Qwen（主案例）与 Quantized（量化）；「擎」取「擎起」——用 16GB 擎起 125B。GitHub 仓库名与本地目录名均为 `Q-Infer`。（旧工作名 `Kestrel` 已弃用，原因：与微软 ASP.NET Core 的 Kestrel Web 服务器撞名） |
 | offload（卸载） | 把权重/KV 放到显存之外（主存 / SSD），用时再取 |
 | 专家缓存 / 命中率（hit_rate） | 常驻显存的专家占「本步需要的专家」的比例。上游定义里它不保证与速度同向 |
 | expert_slots | 显存里能放下多少个专家的槽位数 |
@@ -75,13 +75,13 @@
 | machine profile | 自动标定产出的机器画像（PCIe 带宽、内存带宽、内核吞吐等落盘参数） |
 | 预测性预取 | 在数据被需要之前主动把它搬到位（如提前 1 步算表行索引） |
 | 双缓冲（double buffering） | 用两块缓冲轮流：一块服务当前步，另一块在后台被填充 |
-| 行缓存（row cache） | 有界缓存，按行号哈希定组、组内轮转替换，保留最近读过的表行。吃下长距离复现，不吃顺序性（见 G-04）。默认 1,048,576 行（IQ4_NL 约 90 MB） |
+| 行缓存（row cache） | 有界缓存，按行号哈希定组、组内轮转替换，保留最近读过的表行。吃下长距离复现，不吃顺序性（[ADR-007](adr/ADR-007-ngram-table-on-demand-read.md)）。默认 1,048,576 行（IQ4_NL 约 90 MB） |
 | lookahead / `STRATA_LOOKAHEAD` | Strata 的跨层预测性预取开关；深度由 `STRATA_LOOKAHEAD_K` 定 |
-| `STRATA_IO_PREFETCH` / `STRATA_IO_PF_STAGE` | Strata 的文件层整块预取与「暂存式」预取变体。后者在 16GB 内存 lane 实测 −32.6%、32GB lane +25.7%，故默认关闭（见 的 G-10） |
-| 共现图 / co-occurrence | 维护「同一 token 或同一会话内被一起激活」的专家对统计，作为专家替换策略的输入。属概率性预测， §4 的确定性表行索引不同级 |
+| `STRATA_IO_PREFETCH` / `STRATA_IO_PF_STAGE` | Strata 的文件层整块预取与「暂存式」预取变体。后者在 16GB 内存 lane 实测 −32.6%、32GB lane +25.7%，故默认关闭 |
+| 共现图 / co-occurrence | 维护「同一 token 或同一会话内被一起激活」的专家对统计，作为专家替换策略的输入。属概率性预测，与确定性的表行索引不同级 |
 | 计算组（compute group） | 后端接入的最小单位：设备 + 队列 + 内存池 + 能力表 + 它争用的那一种资源（过 PCIe 的字节或共享 DDR 的份额）。CPU、核显、每张 CUDA 卡各是一组（[ADR-011](adr/ADR-011-compute-group-abstraction.md)） |
-| 三类流量 | 过 PCIe 的三类搬运：专家权重、n-gram 表行、KV。区别于「四条数据流」——「专家流（RAM→CPU）」走内存总线，不过 PCIe。§4.1 的字节预算仲裁的对象就是这三类 |
-| scatter-add | 把 CPU GPU 各自算出的专家结果按专家 slot 累加合并到同一输出缓冲区（engine.md §6） |
+| 三类流量 | 过 PCIe 的三类搬运：专家权重、n-gram 表行、KV。区别于「四条数据流」——「专家流（RAM→CPU）」走内存总线，不过 PCIe。字节预算仲裁的对象就是这三类 |
+| scatter-add | 把 CPU 与 GPU 各自算出的专家结果按专家 slot 累加合并到同一输出缓冲区（[ADR-002](adr/ADR-002-compute-unhit-experts-in-place.md)） |
 | prompt lookup / suffix | 一种投机起草：从上下文已有文本里抄若干 token 当草稿（最多 5）。代码改写类提速 6–11%，其它文本基本不变 |
 | Mooncake / FlexGen | 对照系统：Mooncake 把 KV 当独立一层做跨请求复用；FlexGen 做带宽约束下的规划。二者都没有「专家 + 表行 + KV 三类流量的同步预算」 |
 | 投机解码 | 先由小模型/头草拟 N 个 token，再由主模型一次前向验证；被拒则回退。数学上不改变输出分布 |
@@ -108,7 +108,7 @@
 | CUDA Graph | 把一串 kernel 调用捕获成图一次提交，消除小 batch 下的 launch 开销 |
 | AVX2 / AVX-512 / AMX | CPU SIMD 指令集。两套环境均为 Arrow Lake，只有 AVX2，无 AVX-512/AMX → CPU 侧是明确上限 |
 | P-core / E-core | 性能核 / 能效核。环境2 的 285K 为 8 P + 16 E（环境1 的 265K 为 8 P + 12 E），内核需按核型分池 |
-| iGPU / 核显 | CPU 集成的显卡（Intel Xe）。 CPU 共享内存总线 → 不增加带宽，但可分担算力 |
+| iGPU / 核显 | CPU 集成的显卡（Intel Xe）。与 CPU 共享内存总线 → 不增加带宽，但可分担算力 |
 | NPU / Intel AI Boost | 低功耗神经网络加速器（≈13 TOPS INT8）。只用于视觉/小模型，不参与专家计算 |
 | XMX / DP4a | Intel 核显的矩阵/整数点积指令（`DP4a` 是低精度点积） |
 | oneAPI / SYCL / Level Zero | 调用核显的软件接口（本项目倾向这套） |
@@ -119,13 +119,10 @@
 
 | 记号 | 含义 |
 |------|------|
-| [环境2实测] / [环境1实测] / [硬件规格] / [官方] / [他卡实测] / [推算] | 六级来源等级，定义见 第 1 节 |
-| [已确认] / [摘要级] / [存疑] | 三级复核状态，定义见 第 2 节 |
-| `S-n` | 仓库外来源编号，登记于 |
-| `ADR-NNN` | 架构决策记录，位于 ``；不可修订，改变决策须新开一条 |
-| `G-NN` | 门禁与待测项，登记于 ；六条门禁为 G-04、G-07、G-08、G-09、G-10、G-11 |
-| `R-NN` | 风险，登记于 |
-| `P-NN` | 候选方向，登记于 |
+| [环境2实测] / [环境1实测] / [硬件规格] / [官方] / [他卡实测] / [推算] | 六级来源等级，定义见 [../CONTRIBUTING.md](../CONTRIBUTING.md) 第 3 节 |
+| [已确认] / [摘要级] / [存疑] | 三级复核状态，定义见 [../CONTRIBUTING.md](../CONTRIBUTING.md) 第 3 节 |
+| `ADR-NNN` | 架构决策与实测结论记录，位于 [`adr/`](adr/README.md)；不可修订，改变决策须新开一条并标注取代关系 |
+| `S-N`、`G-NN`、`R-NN`、`P-NN` | 设计台账时期的来源、门禁、风险、候选方向编号。随台账退役，只出现在既有记录里，不再新增 |
 | 基线（分母） | 在环境2 上实测的参考引擎性能，作为全部倍数指标的分母 |
 | 评测口径（尺子） | 固定任务集与随机种子、每配置重复不少于 5 次、报中位数与区间 |
 | 负结果 | 被实测证伪的假设，必须在 [ADR](adr/) 留下负结果记录，不得删除 |
