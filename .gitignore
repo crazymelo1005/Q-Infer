@@ -46,3 +46,6 @@ docs/superpowers/
 
 # CTest scratch (generated in the source root when ctest runs from there)
 Testing/
+
+# 带时间戳的原始读数不入库（用法见 CONTRIBUTING 第 7 节）
+measure/results/
