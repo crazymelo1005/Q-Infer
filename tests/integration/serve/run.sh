@@ -349,8 +349,8 @@ grep -q 'renderRequestsTab' "$R" && grep -q 'QinferActivity' "$R" \
 # 16c. Frontend part four: the chat surface carries per-message times, keyboard
 #      shortcuts with a help dialog, and a per-conversation system prompt.
 curl -s "http://$HOST:$PORT/" > "$R"
-grep -q 'id="sys-drawer"' "$R" && grep -q 'id="sys-prompt"' "$R" && grep -q 'id="btn-help"' "$R" \
-  && ok "/ chat extras skeleton (sys-drawer/sys-prompt/btn-help)" || bad "/ chat extras: $(head -c 200 "$R")"
+grep -q 'id="sys-panel"' "$R" && grep -q 'id="sys-prompt"' "$R" && grep -q 'id="btn-help"' "$R" \
+  && ok "/ chat extras skeleton (sys-panel/sys-prompt/btn-help)" || bad "/ chat extras: $(head -c 200 "$R")"
 curl -s "http://$HOST:$PORT/web/app.js" > "$R"
 grep -q 'QinferTime' "$R" && grep -q 'QinferKeys' "$R" && grep -q 'QinferSystem' "$R" \
   && grep -q 'showHelpDialog' "$R" && grep -q 'bubble-time' "$R" \
@@ -596,8 +596,8 @@ grep -q 'st-header' "$R" && grep -q 'st-pill' "$R" && grep -q 'btn-theme' "$R" \
 #     app.js contains the qinfer.lang dictionary and the language-switching function.
 curl -s "http://$HOST:$PORT/" > "$R"
 grep -q 'id="btn-lang"' "$R" && grep -q 'data-i18n' "$R" \
-  && grep -q 'id="api-key"' "$R" && grep -q 'data-i18n="about.apiKey"' "$R" \
-  && ok "26 i18n markers + key consolidation (btn-lang/data-i18n/api-key in About)" \
+  && grep -q 'id="api-key"' "$R" && grep -q 'data-i18n="settings.connection"' "$R" \
+  && ok "26 i18n markers + key consolidation (btn-lang/data-i18n/api-key in the Connection card)" \
   || bad "26 i18n/key consolidation: $(head -c 200 "$R")"
 curl -s "http://$HOST:$PORT/web/app.js" > "$R"
 grep -q 'qinfer.lang' "$R" && grep -q 'applyLang' "$R" && grep -q 'data-i18n' "$R" \
