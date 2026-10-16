@@ -4,7 +4,7 @@
 # The engine is a SEPARATE artifact with its own heavy toolchain (nvcc + a llama.cpp checkout
 # for ggml). Q-Infer's serving binary never links any of it; it spawns the produced executable
 # and talks to it over stdin/stdout, which is what keeps our zero-runtime-dependency rule
-# intact (docs/design/adr/ADR-016-*).
+# intact (docs/adr/ADR-016-*).
 #
 # WHY THE TREE IS COPIED BEFORE CONFIGURING
 # strata/ is vendored WITHOUT upstream's tests/ and bench/ (see NOTICE) and is

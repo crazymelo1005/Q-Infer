@@ -32,7 +32,7 @@ bool build_token_embed(const artifact::GgufFile& gguf, std::uint64_t n_embd, Tok
 bool read_token_embedding(const artifact::GgufFile& gguf, const TokenEmbed& e, std::uint64_t token,
                           float* out, std::string& err);
 
-// 贪心取最大值的下标（并列取小索引）。基线口径就是贪心（[01-strata-engine.md] §10.3）。
+// 贪心取最大值的下标（并列取小索引）。基线口径就是贪心（tag design-v0.1 的 docs/research/01 §10.3）。
 std::size_t greedy_argmax(const float* v, std::size_t n);
 
 }  // namespace qinfer::dense

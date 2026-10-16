@@ -24,7 +24,7 @@ const char* kXhigh =
     "clarity in the final answer.";
 
 // 主案例 GGUF 的 tokenizer.chat_template 原文（170 行 8953 字节，逐字嵌入；
-// 字节以 .superpowers/sdd/2026-10-12-serve-layer/task-18a-template.txt 为准）。
+// 字节以 tests/data/chat_template.jinja 为准，对拍见 test_chat_golden）。
 const char* kMainCaseTemplate = R"TPL({%- set image_count = namespace(value=0) %}
 {%- set video_count = namespace(value=0) %}
 {%- macro render_content(content, do_vision_count, is_system_content=false) %}

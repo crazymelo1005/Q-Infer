@@ -49,7 +49,7 @@ private:
 // 设备侧内核覆盖的档（位掩码）：gate/up 的 IQ2_S / IQ2_XXS / IQ1_M 与 down 的 Q2_0。
 std::uint32_t device_format_mask();
 
-// 按 [ADR-004](../../docs/design/adr/ADR-004-consumer-dual-gpu-no-tensor-parallel.md) 的层切分把
+// 按 [ADR-004](../../../docs/adr/ADR-004-consumer-dual-gpu-no-tensor-parallel.md) 的层切分把
 // 层连续地分给各卡：`n_layers` 层切成 `device_count` 段，前 `n_layers % device_count` 段各多一层。
 // 连续切分而不是轮流（layer % device_count）：层间只传残差栈，切口越少越好。`layer` 越界时按最后一段算。
 int cuda_owner_of(int device_count, int n_layers, int layer);
