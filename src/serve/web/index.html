@@ -4,18 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Q-Infer</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='4' fill='%2310b981'/><text x='12' y='17' font-family='Arial' font-size='14' font-weight='bold' text-anchor='middle' fill='white'>Q</text></svg>">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='4' fill='%23615CED'/><text x='12' y='17' font-family='Arial' font-size='14' font-weight='bold' text-anchor='middle' fill='white'>Q</text></svg>">
 <link rel="stylesheet" href="/web/tokens.css">
 <link rel="stylesheet" href="/web/components.css">
 <link rel="stylesheet" href="/web/app.css">
 <script>
-  // First-frame theme: saved choice wins, otherwise follow the system.
+  // First-frame theme: settings preference wins, then legacy key, then system.
   // First-frame language: explicit choice wins, otherwise the browser language
   // (zh prefix -> Chinese, anything else -> English). app.js applies the
   // dictionaries on top of these.
   try {
-    var t = localStorage.getItem("qinfer.theme") ||
-      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    var settings = {};
+    try { var raw = localStorage.getItem("qinfer.settings"); if (raw) settings = JSON.parse(raw); } catch(e) {}
+    var themePref = settings.theme || "system";
+    var t;
+    if (themePref === "system") {
+      t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    } else {
+      t = themePref;
+    }
+    // Legacy override: if qinfer.theme exists and is not "system", it wins
+    var legacyTheme = localStorage.getItem("qinfer.theme");
+    if (legacyTheme && legacyTheme !== "system") t = legacyTheme;
     document.documentElement.dataset.theme = t;
     var ql = localStorage.getItem("qinfer.lang");
     var nav = (navigator.language || "").toLowerCase();
@@ -36,6 +46,8 @@
       <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-list"/></svg><span data-i18n="tab.requests">Requests</span></button>
     <button class="st-tab tab-btn" role="tab" data-tab="about" type="button" aria-selected="false">
       <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-info"/></svg><span data-i18n="tab.about">About</span></button>
+    <button class="st-tab tab-btn" role="tab" data-tab="settings" type="button" aria-selected="false">
+      <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-settings"/></svg><span data-i18n="tab.settings">Settings</span></button>
   </nav>
   <span class="st-header__spacer"></span>
   <span class="st-pill" id="pill" data-state="idle" role="status" aria-live="polite">
@@ -65,7 +77,7 @@
           </button>
         </div>
         <div class="conv-sidebar__search">
-          <input id="conv-search" class="input conv-search" type="search" data-i18n-ph="conv.searchPh" placeholder="Search conversations">
+          <input id="conv-search" class="input conv-search" type="search" data-i18n-ph="conv.searchPh" placeholder="Search conversations" aria-label="Search conversations">
         </div>
         <div class="conv-sidebar__list" id="conv-list">
           <p class="muted small" data-i18n="conv.empty">No conversations yet</p>
@@ -77,7 +89,7 @@
           <button class="st-btn st-btn--secondary conv-foot-btn" id="btn-export-conv" type="button" data-i18n-title="conv.exportAll">
             <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-download"/></svg><span data-i18n="conv.exportBtn">Export</span>
           </button>
-          <input type="file" id="conv-import-file" accept="application/json,.json" hidden>
+          <input type="file" id="conv-import-file" accept="application/json,.json" hidden aria-label="Import conversations from file">
         </div>
       </aside>
       <!-- Chat main area -->
@@ -88,8 +100,15 @@
         <div class="chat-scroll" id="chat-scroll">
           <div class="chat" id="chat">
             <div class="chat-empty" id="chat-empty">
-              <div class="chat-empty__title" data-i18n="chat.title">Local inference engine</div>
-              <div class="chat-empty__sub" data-i18n="chat.sub">The model runs locally — your data never leaves this device. Set the API key in the About tab.</div>
+              <div class="chat-empty__mark" aria-hidden="true">Q</div>
+              <div class="chat-empty__title" data-i18n="chat.title">Ask anything, locally.</div>
+              <div class="chat-empty__sub" data-i18n="chat.sub">It runs entirely on this machine — what you type never leaves it.</div>
+              <div class="chat-empty__chips" id="chat-empty-chips" role="group" data-i18n-aria="chat.suggestions">
+                <button type="button" class="st-chip chat-empty__chip" data-i18n="chat.sug1">Explain this code</button>
+                <button type="button" class="st-chip chat-empty__chip" data-i18n="chat.sug2">Write unit tests</button>
+                <button type="button" class="st-chip chat-empty__chip" data-i18n="chat.sug3">Summarize this text</button>
+                <button type="button" class="st-chip chat-empty__chip" data-i18n="chat.sug4">Translate to Chinese</button>
+              </div>
             </div>
             <div id="msg-list" class="msg-list"></div>
           </div>
@@ -118,19 +137,17 @@
         </div>
         <div class="composer-wrap">
           <div class="chat-foot">
-        <details class="drawer" id="sys-drawer">
-          <summary>
-            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-edit"/></svg><span data-i18n="chat.system">System prompt</span><span class="drawer-flag hidden" id="sys-flag">&bull;</span></summary>
-          <div class="drawer-body">
-            <textarea id="sys-prompt" class="input sys-input" rows="3"
-                      placeholder="Instruction just for this conversation (optional)" data-i18n-ph="chat.systemPh"></textarea>
-            <p class="muted small" data-i18n="chat.systemHint">Sent as this conversation's leading system message; other conversations are untouched.</p>
+        <!-- Inline sampler panel (toggled from composer bar) -->
+        <div class="inline-panel hidden" id="sampler-panel">
+          <div class="inline-panel__head">
+            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-sliders"/></svg>
+            <span class="card-title" data-i18n="chat.sampler">Sampler</span>
+            <span class="spacer"></span>
+            <button type="button" class="st-btn st-btn--icon st-btn--sm" id="btn-close-sampler" aria-label="Close">
+              <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-x"/></svg>
+            </button>
           </div>
-        </details>
-        <details class="drawer" id="sampler-drawer">
-          <summary>
-            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-settings"/></svg><span data-i18n="chat.sampler">Sampler</span></summary>
-          <div class="drawer-body">
+          <div class="inline-panel__body">
             <div class="drawer-section">
               <span class="drawer-label" data-i18n="sampler.preset">Preset</span>
               <div class="preset-chips" id="preset-chips" role="group" data-i18n-aria="sampler.preset">
@@ -145,11 +162,11 @@
               <div class="drawer-grid">
                 <div class="field field--slider">
                   <label for="s-temp" data-i18n="chat.temperature">Temperature</label>
-                  <div class="slider-row"><input id="s-temp" class="slider" type="range" min="0" max="2" step="0.05" value="0.8" data-i18n-title="sampler.tipTemp"><output id="s-temp-out" for="s-temp">0.80</output></div>
+                  <div class="slider-row"><input id="s-temp" class="slider" type="range" min="0" max="2" step="0.05" value="0.8" data-i18n-title="sampler.tipTemp"><input id="s-temp-num" class="slider-num input" type="number" min="0" max="2" step="0.05" value="0.8"></div>
                 </div>
                 <div class="field field--slider">
                   <label for="s-top-p" data-i18n="chat.topP">top_p</label>
-                  <div class="slider-row"><input id="s-top-p" class="slider" type="range" min="0.05" max="1" step="0.01" value="0.95" data-i18n-title="sampler.tipTopP"><output id="s-top-p-out" for="s-top-p">0.95</output></div>
+                  <div class="slider-row"><input id="s-top-p" class="slider" type="range" min="0.05" max="1" step="0.01" value="0.95" data-i18n-title="sampler.tipTopP"><input id="s-top-p-num" class="slider-num input" type="number" min="0.05" max="1" step="0.01" value="0.95"></div>
                 </div>
                 <div class="field">
                   <label for="s-top-k" data-i18n="chat.topK">top_k</label>
@@ -157,19 +174,19 @@
                 </div>
                 <div class="field field--slider">
                   <label for="s-min-p" data-i18n="chat.minP">min_p</label>
-                  <div class="slider-row"><input id="s-min-p" class="slider" type="range" min="0" max="1" step="0.01" value="0.05" data-i18n-title="sampler.tipMinP"><output id="s-min-p-out" for="s-min-p">0.05</output></div>
+                  <div class="slider-row"><input id="s-min-p" class="slider" type="range" min="0" max="1" step="0.01" value="0.05" data-i18n-title="sampler.tipMinP"><input id="s-min-p-num" class="slider-num input" type="number" min="0" max="1" step="0.01" value="0.05"></div>
                 </div>
                 <div class="field field--slider">
                   <label for="s-pres-pen" data-i18n="chat.presPen">presence_penalty</label>
-                  <div class="slider-row"><input id="s-pres-pen" class="slider" type="range" min="0" max="2" step="0.1" value="0" data-i18n-title="sampler.tipPresPen"><output id="s-pres-pen-out" for="s-pres-pen">0.0</output></div>
+                  <div class="slider-row"><input id="s-pres-pen" class="slider" type="range" min="0" max="2" step="0.1" value="0" data-i18n-title="sampler.tipPresPen"><input id="s-pres-pen-num" class="slider-num input" type="number" min="0" max="2" step="0.1" value="0"></div>
                 </div>
                 <div class="field field--slider">
                   <label for="s-freq-pen" data-i18n="chat.freqPen">frequency_penalty</label>
-                  <div class="slider-row"><input id="s-freq-pen" class="slider" type="range" min="0" max="2" step="0.1" value="0" data-i18n-title="sampler.tipFreqPen"><output id="s-freq-pen-out" for="s-freq-pen">0.0</output></div>
+                  <div class="slider-row"><input id="s-freq-pen" class="slider" type="range" min="0" max="2" step="0.1" value="0" data-i18n-title="sampler.tipFreqPen"><input id="s-freq-pen-num" class="slider-num input" type="number" min="0" max="2" step="0.1" value="0"></div>
                 </div>
                 <div class="field field--slider">
                   <label for="s-rep-pen" data-i18n="chat.repPen">repeat_penalty</label>
-                  <div class="slider-row"><input id="s-rep-pen" class="slider" type="range" min="1" max="2" step="0.05" value="1" data-i18n-title="sampler.tipRepPen"><output id="s-rep-pen-out" for="s-rep-pen">1.00</output></div>
+                  <div class="slider-row"><input id="s-rep-pen" class="slider" type="range" min="1" max="2" step="0.05" value="1" data-i18n-title="sampler.tipRepPen"><input id="s-rep-pen-num" class="slider-num input" type="number" min="1" max="2" step="0.05" value="1"></div>
                 </div>
               </div>
             </div>
@@ -193,6 +210,8 @@
                     <option value="16384">16K</option>
                     <option value="32768">32K</option>
                     <option value="65536">64K</option>
+                    <option value="131072">128K</option>
+                    <option value="262144">256K</option>
                   </select>
                 </div>
               </div>
@@ -205,7 +224,24 @@
               </label>
             </div>
           </div>
-        </details>
+        </div>
+        <!-- Inline system prompt panel (toggled from composer bar) -->
+        <div class="inline-panel hidden" id="sys-panel">
+          <div class="inline-panel__head">
+            <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-edit"/></svg>
+            <span class="card-title" data-i18n="chat.system">System prompt</span>
+            <span class="drawer-flag hidden" id="sys-flag">&bull;</span>
+            <span class="spacer"></span>
+            <button type="button" class="st-btn st-btn--icon st-btn--sm" id="btn-close-sys" aria-label="Close">
+              <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-x"/></svg>
+            </button>
+          </div>
+          <div class="inline-panel__body">
+            <textarea id="sys-prompt" class="input sys-input" rows="3"
+                      placeholder="Instruction just for this conversation (optional)" data-i18n-ph="chat.systemPh" aria-label="System prompt for this conversation"></textarea>
+            <p class="muted small" data-i18n="chat.systemHint">Sent as this conversation's leading system message; other conversations are untouched.</p>
+          </div>
+        </div>
         <!-- Message queue: what the reader lined up while a reply is still
              running. Pause gates the queue only (the running reply continues);
              Interject drops the running reply and sends the head immediately. -->
@@ -232,10 +268,14 @@
         <form class="st-composer" id="composer">
           <div class="st-attachments" id="attachments"></div>
           <textarea id="chat-input" class="input chat-input" rows="2"
-                    placeholder="Type a message; Enter to send, Shift+Enter for a new line" data-i18n-ph="chat.inputPh"></textarea>
+                    placeholder="Type a message; Enter to send, Shift+Enter for a new line" data-i18n-ph="chat.inputPh" aria-label="Chat message input"></textarea>
           <div class="st-composer__bar">
             <button type="button" class="st-btn st-btn--icon" id="btn-export" data-i18n-title="chat.exportTitleLong">
               <svg class="st-icon"><use href="/web/sprite.svg#i-download"/></svg></button>
+            <button type="button" class="st-btn st-btn--icon composer-tool-btn" id="btn-toggle-sys" data-i18n-title="chat.system">
+              <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-edit"/></svg></button>
+            <button type="button" class="st-btn st-btn--icon composer-tool-btn" id="btn-toggle-sampler" data-i18n-title="chat.sampler">
+              <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-sliders"/></svg></button>
             <!-- Thinking level: a segmented control rather than a popover, so the
                  current level is visible at a glance and any level is one click. -->
             <div class="think-seg" id="think-seg" role="radiogroup" data-i18n-aria="chat.thinkMode" data-i18n-title="chat.thinkMode">
@@ -388,7 +428,7 @@
         <div class="req-layout">
           <div class="req-list-pane">
             <div class="req-toolbar">
-              <input id="req-search" class="input" type="search" data-i18n-ph="mon.searchPh" placeholder="Search path / model / state">
+              <input id="req-search" class="input" type="search" data-i18n-ph="mon.searchPh" placeholder="Search path / model / state" aria-label="Search requests">
               <select id="req-filter" class="input" data-i18n-title="mon.filterTitle">
                 <option value="" data-i18n="mon.all">All states</option>
                 <option value="queued" data-i18n="filter.queued">queued</option>
@@ -407,24 +447,6 @@
   <!-- ============================ About ============================ -->
   <section class="view panel hidden" id="panel-about" role="tabpanel">
     <div class="about-body">
-      <!-- API key (prominent, accent border) -->
-      <div class="st-card about-key-card">
-        <div class="about-section__head">
-          <svg class="st-icon"><use href="/web/sprite.svg#i-settings"/></svg>
-          <span class="card-title" data-i18n="about.apiKey">Connection settings</span>
-        </div>
-        <div class="st-field">
-          <label class="st-label" for="api-key"><span data-i18n="about.apiKeyLabel">API key</span> <output data-i18n="about.apiKeyHint">Only needed if the server was started with --api-key</output></label>
-          <div class="key-row">
-            <input id="api-key" class="st-input key-input" type="password" autocomplete="off" data-i18n-ph="about.apiKeyPh" placeholder="Not needed">
-            <button id="btn-key-toggle" class="btn ghost" type="button" data-i18n="about.show">Show</button>
-          </div>
-        </div>
-        <p class="dim small" data-i18n="about.apiKeyNote">The key lives only in this browser’s local storage, shared across tabs; it is never uploaded.</p>
-      </div>
-
-      <hr class="about-sep">
-
       <!-- Model and engine -->
       <div class="st-card" id="about-engine">
         <div class="about-section__head">
@@ -474,6 +496,140 @@
             <p><span data-i18n="about.monitoringLabel">Monitoring</span>: <code class="mono">/metrics</code>, <code class="mono">/api/requests</code></p>
           </div>
         </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ Settings ============================ -->
+  <section class="view panel hidden" id="panel-settings" role="tabpanel">
+    <div class="about-body">
+      <!-- Appearance -->
+      <div class="st-card">
+        <div class="about-section__head">
+          <svg class="st-icon"><use href="/web/sprite.svg#i-sun"/></svg>
+          <span class="card-title" data-i18n="settings.appearance">Appearance</span>
+        </div>
+        <div class="settings-group">
+          <div class="settings-row">
+            <label data-i18n="settings.theme">Theme</label>
+            <div class="st-chip-group" id="setting-theme" role="radiogroup">
+              <button class="st-chip" data-value="light" role="radio" data-i18n="settings.themeLight">Light</button>
+              <button class="st-chip" data-value="dark" role="radio" data-i18n="settings.themeDark">Dark</button>
+              <button class="st-chip" data-value="system" role="radio" data-i18n="settings.themeSystem">System</button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label data-i18n="settings.accentColor">Accent color</label>
+            <div class="st-chip-group" id="setting-accent" role="radiogroup">
+              <button class="st-chip accent-chip" data-value="qwen" role="radio"><span class="accent-swatch" style="background:#615CED"></span><span data-i18n="settings.accentQwen">Qwen</span></button>
+              <button class="st-chip accent-chip" data-value="vibrant" role="radio"><span class="accent-swatch" style="background:#ff6b1a"></span><span data-i18n="settings.accentVibrant">Vibrant</span></button>
+              <button class="st-chip accent-chip" data-value="blue" role="radio"><span class="accent-swatch" style="background:#3b82f6"></span><span data-i18n="settings.accentBlue">Blue</span></button>
+              <button class="st-chip accent-chip" data-value="purple" role="radio"><span class="accent-swatch" style="background:#8b5cf6"></span><span data-i18n="settings.accentPurple">Purple</span></button>
+              <button class="st-chip accent-chip" data-value="green" role="radio"><span class="accent-swatch" style="background:#10b981"></span><span data-i18n="settings.accentGreen">Green</span></button>
+              <button class="st-chip accent-chip" data-value="rose" role="radio"><span class="accent-swatch" style="background:#f43f5e"></span><span data-i18n="settings.accentRose">Rose</span></button>
+              <button class="st-chip accent-chip" data-value="teal" role="radio"><span class="accent-swatch" style="background:#14b8a6"></span><span data-i18n="settings.accentTeal">Teal</span></button>
+              <button class="st-chip accent-chip" data-value="amber" role="radio"><span class="accent-swatch" style="background:#f59e0b"></span><span data-i18n="settings.accentAmber">Amber</span></button>
+              <button class="st-chip accent-chip" data-value="indigo" role="radio"><span class="accent-swatch" style="background:#6366f1"></span><span data-i18n="settings.accentIndigo">Indigo</span></button>
+              <button class="st-chip accent-chip" data-value="cyan" role="radio"><span class="accent-swatch" style="background:#06b6d4"></span><span data-i18n="settings.accentCyan">Cyan</span></button>
+              <label class="st-chip accent-chip accent-custom" data-i18n-title="settings.customColor">
+                <input type="color" id="custom-accent-picker" value="#615CED">
+                <span class="accent-swatch" id="custom-accent-swatch" style="background:#615CED"></span>
+                <span data-i18n="settings.accentCustom">Custom</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <hr class="about-sep">
+
+      <!-- Connection -->
+      <div class="st-card">
+        <div class="about-section__head">
+          <svg class="st-icon"><use href="/web/sprite.svg#i-link"/></svg>
+          <span class="card-title" data-i18n="settings.connection">Connection</span>
+        </div>
+        <div class="st-field">
+          <label class="st-label" for="api-key"><span data-i18n="about.apiKeyLabel">API key</span> <output data-i18n="about.apiKeyHint">Only needed if the server was started with --api-key</output></label>
+          <div class="key-row">
+            <input id="api-key" class="st-input key-input" type="password" autocomplete="off" data-i18n-ph="about.apiKeyPh" placeholder="Not needed">
+            <button id="btn-key-toggle" class="btn ghost" type="button" data-i18n="about.show">Show</button>
+          </div>
+        </div>
+        <p class="dim small" data-i18n="about.apiKeyNote">The key lives only in this browser's local storage, shared across tabs; it is never uploaded.</p>
+      </div>
+
+      <hr class="about-sep">
+
+      <!-- Defaults -->
+      <div class="st-card">
+        <div class="about-section__head">
+          <svg class="st-icon"><use href="/web/sprite.svg#i-sliders"/></svg>
+          <span class="card-title" data-i18n="settings.defaults">Default generation parameters</span>
+        </div>
+        <p class="dim small" data-i18n="settings.defaultsHint">These values are used when you start a new conversation or click Reset.</p>
+        <div class="settings-group">
+          <div class="settings-row">
+            <label data-i18n="settings.defaultSystemPrompt">Default system prompt</label>
+            <textarea id="sd-system-prompt" class="input sys-input" rows="3"
+                      placeholder="Default instruction for all new conversations (optional)" data-i18n-ph="settings.systemPromptPh"></textarea>
+          </div>
+        </div>
+        <div class="drawer-grid" id="settings-defaults-grid">
+          <div class="field field--slider">
+            <label class="st-label" for="sd-temp"><span data-i18n="chat.temperature">Temperature</span> <output id="sd-temp-out">0.80</output></label>
+            <input id="sd-temp" class="slider" type="range" min="0" max="2" step="0.05" value="0.8">
+          </div>
+          <div class="field field--slider">
+            <label class="st-label" for="sd-top-p"><span data-i18n="chat.topP">Top-p</span> <output id="sd-top-p-out">0.95</output></label>
+            <input id="sd-top-p" class="slider" type="range" min="0.05" max="1" step="0.01" value="0.95">
+          </div>
+          <div class="field">
+            <label class="st-label" for="sd-top-k"><span data-i18n="chat.topK">Top-k</span></label>
+            <input id="sd-top-k" class="input" type="number" min="0" max="1000" step="1" value="40">
+          </div>
+          <div class="field field--slider">
+            <label class="st-label" for="sd-min-p"><span data-i18n="chat.minP">Min-p</span> <output id="sd-min-p-out">0.05</output></label>
+            <input id="sd-min-p" class="slider" type="range" min="0" max="1" step="0.01" value="0.05">
+          </div>
+          <div class="field field--slider">
+            <label class="st-label" for="sd-pres-pen"><span data-i18n="chat.presPen">Presence pen.</span> <output id="sd-pres-pen-out">0.00</output></label>
+            <input id="sd-pres-pen" class="slider" type="range" min="0" max="2" step="0.1" value="0">
+          </div>
+          <div class="field field--slider">
+            <label class="st-label" for="sd-freq-pen"><span data-i18n="chat.freqPen">Frequency pen.</span> <output id="sd-freq-pen-out">0.00</output></label>
+            <input id="sd-freq-pen" class="slider" type="range" min="0" max="2" step="0.1" value="0">
+          </div>
+          <div class="field field--slider">
+            <label class="st-label" for="sd-rep-pen"><span data-i18n="chat.repPen">Repeat pen.</span> <output id="sd-rep-pen-out">1.00</output></label>
+            <input id="sd-rep-pen" class="slider" type="range" min="1" max="2" step="0.05" value="1">
+          </div>
+          <div class="field">
+            <label class="st-label" for="sd-max-tokens"><span data-i18n="chat.maxTokens">Max tokens</span></label>
+            <input id="sd-max-tokens" class="input" type="number" min="1" max="32768" step="1" value="2048">
+          </div>
+          <div class="field">
+            <label class="st-label" for="sd-seed"><span data-i18n="chat.seedLabel">Seed</span></label>
+            <input id="sd-seed" class="input" type="number" step="1" value="-1">
+          </div>
+          <div class="field">
+            <label class="st-label" for="sd-ctx"><span data-i18n="chat.contextLen">Context length</span></label>
+            <select id="sd-ctx" class="input">
+              <option value="0" data-i18n="chat.ctxAuto">Auto</option>
+              <option value="4096">4K</option>
+              <option value="8192">8K</option>
+              <option value="16384">16K</option>
+              <option value="32768">32K</option>
+              <option value="65536">64K</option>
+              <option value="131072">128K</option>
+              <option value="262144">256K</option>
+            </select>
+          </div>
+        </div>
+        <div class="settings-actions">
+          <button class="st-btn st-btn--secondary st-btn--sm" id="btn-apply-defaults" type="button" data-i18n="settings.applyDefaults">Apply to current conversation</button>
+          <button class="st-btn st-btn--secondary st-btn--sm" id="btn-reset-defaults" type="button" data-i18n="settings.resetDefaults">Reset to factory defaults</button>
+        </div>
       </div>
     </div>
   </section>

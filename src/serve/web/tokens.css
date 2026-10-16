@@ -1,6 +1,6 @@
 /* Q-Infer 前端设计令牌（对标 Strata UI 的设计体系：Outfit 可变字体、4pt 间距网格、
    大圆角、层次阴影、浅深双主题；深色默认跟随系统，或由 <html data-theme="dark"> 显式覆盖）。
-   主色为橙（--st-accent，主操作/选中/进行中），信息与数据用蓝（--st-info，链接/图表/连接态），
+   主色为紫（--st-accent，主操作/选中/进行中），信息与数据用蓝（--st-info，链接/图表/连接态），
    两者之外只保留警示橙黄与危险红——不引入第三种品牌色。
    Outfit 字体为 SIL Open Font License 1.1（随附 web/fonts/OFL.txt），字重 100-900。 */
 
@@ -11,17 +11,17 @@
   /* 字体与字号 */
   --st-font:"Outfit",system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
   --st-font-mono:ui-monospace,"SF Mono","Cascadia Code",Consolas,"Liberation Mono",monospace;
-  --st-fs-xs:12px; --st-fs-sm:13px; --st-fs-md:14px; --st-fs-base:16px;
+  --st-fs-3xs:10px; --st-fs-2xs:11px; --st-fs-xs:12px; --st-fs-sm:13px; --st-fs-md:14px; --st-fs-base:16px;
   --st-fs-lg:18px; --st-fs-xl:24px; --st-fs-stat:32px; --st-fs-display:40px;
   --st-fw-regular:400; --st-fw-medium:500; --st-fw-bold:700; --st-fw-black:900;
   --st-lh-tight:1.1; --st-lh-body:1.55;
 
   /* 间距（4pt 网格） */
-  --st-s-1:4px; --st-s-2:8px; --st-s-3:12px; --st-s-4:16px; --st-s-5:20px;
+  --st-s-1h:6px; --st-s-1:4px; --st-s-2:8px; --st-s-2h:10px; --st-s-3:12px; --st-s-3h:14px; --st-s-4:16px; --st-s-5:20px;
   --st-s-6:24px; --st-s-8:32px; --st-s-10:40px; --st-s-12:48px; --st-s-16:64px;
 
   /* 圆角 */
-  --st-r-sm:8px; --st-r-md:14px; --st-r-lg:20px; --st-r-xl:24px; --st-r-pill:9999px;
+  --st-r-corner:6px; --st-r-sm:8px; --st-r-md:14px; --st-r-lg:20px; --st-r-xl:24px; --st-r-pill:9999px;
 
   /* 动效 */
   --st-ease:cubic-bezier(.2,.7,.2,1); --st-dur:160ms;
@@ -37,16 +37,16 @@
   --st-ink-muted:#6f6f6f;
   --st-icon:#2F384C;
 
-  /* 品牌橙：填充色（白字按钮、选中态、进行中）与作为文字的两个梯度分开取值，
-     因为同一支橙做底色要够亮、做正文要够深，一个值两边都合规不了。 */
-  --st-accent:#f2600c;
-  --st-accent-strong:#c94a02;
-  --st-accent-hover:#d94f05;
+  /* 品牌紫（通义千问紫）：填充色（白字按钮、选中态、进行中）与作为文字的两个梯度分开取值，
+     因为同一支紫做底色要够亮、做正文要够深，一个值两边都合规不了。 */
+  --st-accent:#615CED;
+  --st-accent-strong:#4f45d6;
+  --st-accent-hover:#564ee2;
   --st-accent-ink:#ffffff;
-  --st-accent-tint:#fff2e8;
-  --st-accent-tint-hover:#ffe3d0;
-  --st-accent-text:#c2410c;
-  --st-accent-glow:rgba(242,96,12,.26);
+  --st-accent-tint:#f1f0ff;
+  --st-accent-tint-hover:#e4e2ff;
+  --st-accent-text:#4a3fd0;
+  --st-accent-glow:rgba(97,92,237,.30);
   --st-focus:#1d6fe0;
 
   --st-info:#1d6fe0; --st-info-tint:#e9f1fe; --st-info-text:#1557b0;
@@ -58,6 +58,9 @@
   --st-sh-card:0 18px 7px rgba(0,0,0,.01),0 10px 6px rgba(0,0,0,.02),0 4px 4px rgba(0,0,0,.03),0 1px 2px rgba(0,0,0,.04);
   --st-sh-bar:0 54px 21px rgba(0,0,0,.01),0 30px 18px rgba(0,0,0,.03),0 13px 13px rgba(0,0,0,.05),0 3px 7px rgba(0,0,0,.06);
   --st-sh-pop:0 10px 40px rgba(15,23,42,.08),0 1px 3px rgba(15,23,42,.06);
+  --st-sh-lg:0 12px 32px rgba(15,23,42,.24);
+  --st-scrim:rgba(15,23,42,.18);
+  --st-r-badge:9px;
   color-scheme:light;
 
   /* 兼容旧令牌（T15/T16 的 app.js 仍引用）：映射进新体系 */
@@ -77,9 +80,9 @@
     --st-bg:#0e1113; --st-surface:#161a1d; --st-surface-2:#1d2226;
     --st-line:#2a3036; --st-line-soft:#22272c;
     --st-ink:#eef1f3; --st-ink-soft:#c7cdd3; --st-ink-muted:#8e979f; --st-icon:#c7cdd3;
-    --st-accent:#ff8a3d; --st-accent-strong:#ff8a3d; --st-accent-hover:#ffa361; --st-accent-ink:#2b1200;
-    --st-accent-tint:rgba(255,138,61,.14); --st-accent-tint-hover:rgba(255,138,61,.22);
-    --st-accent-text:#ffb887; --st-accent-glow:rgba(255,138,61,.30); --st-focus:#5b9bff;
+    --st-accent:#8b88f7; --st-accent-strong:#8b88f7; --st-accent-hover:#a5a3fb; --st-accent-ink:#16112e;
+    --st-accent-tint:rgba(139,135,245,.14); --st-accent-tint-hover:rgba(139,135,245,.22);
+    --st-accent-text:#b3b0fa; --st-accent-glow:rgba(139,135,245,.30); --st-focus:#5b9bff;
     --st-info:#5b9bff; --st-info-tint:rgba(91,155,255,.14); --st-info-text:#8dbcff;
     --st-warn:#f5b53d; --st-warn-tint:rgba(245,181,61,.12); --st-warn-text:#f8c96a;
     --st-danger:#ff5a6e; --st-danger-tint:rgba(255,90,110,.12); --st-danger-text:#ff8a98;
@@ -87,6 +90,9 @@
     --st-sh-card:0 1px 2px rgba(0,0,0,.4);
     --st-sh-bar:0 12px 32px rgba(0,0,0,.45),0 2px 6px rgba(0,0,0,.35);
     --st-sh-pop:0 16px 48px rgba(0,0,0,.55),0 1px 3px rgba(0,0,0,.4);
+    --st-sh-lg:0 16px 48px rgba(0,0,0,.55);
+    --st-scrim:rgba(0,0,0,.45);
+    --st-r-badge:9px;
     color-scheme:dark;
     --bg:var(--st-bg); --panel:var(--st-surface); --panel-2:var(--st-surface-2);
     --border:var(--st-line); --text:var(--st-ink); --dim:var(--st-ink-muted);
@@ -101,9 +107,9 @@
   --st-bg:#0e1113; --st-surface:#161a1d; --st-surface-2:#1d2226;
   --st-line:#2a3036; --st-line-soft:#22272c;
   --st-ink:#eef1f3; --st-ink-soft:#c7cdd3; --st-ink-muted:#8e979f; --st-icon:#c7cdd3;
-  --st-accent:#ff8a3d; --st-accent-strong:#ff8a3d; --st-accent-hover:#ffa361; --st-accent-ink:#2b1200;
-  --st-accent-tint:rgba(255,138,61,.14); --st-accent-tint-hover:rgba(255,138,61,.22);
-  --st-accent-text:#ffb887; --st-accent-glow:rgba(255,138,61,.30); --st-focus:#5b9bff;
+  --st-accent:#8b88f7; --st-accent-strong:#8b88f7; --st-accent-hover:#a5a3fb; --st-accent-ink:#16112e;
+  --st-accent-tint:rgba(139,135,245,.14); --st-accent-tint-hover:rgba(139,135,245,.22);
+  --st-accent-text:#b3b0fa; --st-accent-glow:rgba(139,135,245,.30); --st-focus:#5b9bff;
   --st-info:#5b9bff; --st-info-tint:rgba(91,155,255,.14); --st-info-text:#8dbcff;
   --st-warn:#f5b53d; --st-warn-tint:rgba(245,181,61,.12); --st-warn-text:#f8c96a;
   --st-danger:#ff5a6e; --st-danger-tint:rgba(255,90,110,.12); --st-danger-text:#ff8a98;
@@ -111,6 +117,9 @@
   --st-sh-card:0 1px 2px rgba(0,0,0,.4);
   --st-sh-bar:0 12px 32px rgba(0,0,0,.45),0 2px 6px rgba(0,0,0,.35);
   --st-sh-pop:0 16px 48px rgba(0,0,0,.55),0 1px 3px rgba(0,0,0,.4);
+  --st-sh-lg:0 16px 48px rgba(0,0,0,.55);
+  --st-scrim:rgba(0,0,0,.45);
+  --st-r-badge:9px;
   color-scheme:dark;
   --bg:var(--st-bg); --panel:var(--st-surface); --panel-2:var(--st-surface-2);
   --border:var(--st-line); --text:var(--st-ink); --dim:var(--st-ink-muted);
@@ -175,45 +184,45 @@
 
 /* Per-reply token usage line under an assistant bubble */
 .bubble-meta {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--st-text-dim, var(--muted));
+  margin-top: var(--st-s-1h);
+  font-size: var(--st-fs-xs);
+  color: var(--st-ink-muted);
   opacity: 0.75;
 }
 
 /* Markdown tables */
 .md-table {
   border-collapse: collapse;
-  margin: 8px 0;
-  font-size: 13px;
+  margin: var(--st-s-2) 0;
+  font-size: var(--st-fs-sm);
 }
 .md-table th, .md-table td {
-  border: 1px solid var(--st-border, rgba(127,127,127,.3));
-  padding: 4px 10px;
+  border: 1px solid var(--st-line, rgba(127,127,127,.3));
+  padding: var(--st-s-1) var(--st-s-2h);
   text-align: left;
 }
 .md-table thead th { font-weight: 600; }
 
 /* Conversation history search */
-.conv-sidebar__search { padding: 0 10px 8px; }
-.conv-search { width: 100%; height: 30px; font-size: 12px; }
+.conv-sidebar__search { padding: 0 var(--st-s-2h) var(--st-s-2); }
+.conv-search { width: 100%; height: 30px; font-size: var(--st-fs-xs); }
 .conv-item.hidden { display: none; }
 
 /* Markdown images */
-.md-img { max-width: 100%; border-radius: 6px; display: block; margin: 8px 0; }
+.md-img { max-width: 100%; border-radius: var(--st-r-corner); display: block; margin: var(--st-s-2) 0; }
 
 /* Conversation list timestamp */
-.conv-item__time { display: block; font-size: 11px; opacity: 0.6; }
+.conv-item__time { display: block; font-size: var(--st-fs-2xs); opacity: 0.6; }
 
 /* Markdown task lists */
 .md-tasks { list-style: none; padding-left: 2px; }
-.md-task { display: flex; gap: 6px; align-items: flex-start; }
+.md-task { display: flex; gap: var(--st-s-1h); align-items: flex-start; }
 .md-task.done { opacity: 0.65; }
 
 /* Monitor: reply-feedback panel */
-.feedback-card { margin: 10px; }
-.feedback-list { max-height: 160px; overflow-y: auto; font-size: 12px; }
-.feedback-item { padding: 4px 0; border-bottom: 1px solid var(--st-border, rgba(127,127,127,.2)); }
+.feedback-card { margin: var(--st-s-2h); }
+.feedback-list { max-height: 160px; overflow-y: auto; font-size: var(--st-fs-xs); }
+.feedback-item { padding: var(--st-s-1) 0; border-bottom: 1px solid var(--st-line-soft, rgba(127,127,127,.2)); }
 
 /* Fenced-code syntax-highlight tokens (see QinferMD.highlight). The code panel is dark
    in both themes (--st-code-bg is #1b1f23 / #0a0c0e), so one One-Dark palette serves both. */

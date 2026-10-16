@@ -286,11 +286,16 @@ var QinferMD = {
 /* ---- i18n: zh/en dictionaries + toggle (localStorage qinfer.lang, shared across pages) ---- */
 const I18N = {
   zh: {
-    "brand.tag": "本地推理",
+    "brand.tag": "私有推理",
     "lang.title": "切换语言（中 / EN）",
     "state.connecting": "连接中…",
-    "chat.title": "本地推理引擎",
-    "chat.sub": "模型在本机运行，数据不离开本机。API 密钥在「关于」页设置。",
+    "chat.title": "随便问，都在本机",
+    "chat.sub": "模型完全跑在这台电脑上，你输入的内容不会离开它。",
+    "chat.suggestions": "起步建议",
+    "chat.sug1": "解释一段代码",
+    "chat.sug2": "写一组单元测试",
+    "chat.sug3": "总结一段文字",
+    "chat.sug4": "翻译成中文",
     "chat.sampler": "采样器",
     "chat.seedLabel": "seed（-1 = 随机）",
     "chat.inputPh": "输入消息，Enter 发送，Shift+Enter 换行",
@@ -434,6 +439,34 @@ const I18N = {
     "theme.title": "浅色 / 深色",
     "theme.dark": "深色主题",
     "theme.light": "浅色主题",
+    "settings.appearance": "外观",
+    "settings.theme": "主题",
+    "settings.themeLight": "浅色",
+    "settings.themeDark": "深色",
+    "settings.themeSystem": "跟随系统",
+    "settings.accentColor": "主题色",
+    "settings.accentQwen": "千问紫",
+    "settings.accentVibrant": "活力橙",
+    "settings.accentBlue": "蓝",
+    "settings.accentPurple": "紫",
+    "settings.accentGreen": "绿",
+    "settings.accentRose": "玫红",
+    "settings.accentTeal": "青绿",
+    "settings.accentAmber": "琥珀",
+    "settings.accentIndigo": "靛蓝",
+    "settings.accentCyan": "青蓝",
+    "settings.accentCustom": "自定义",
+    "settings.customColor": "选择自定义颜色",
+    "settings.connection": "连接",
+    "settings.defaultSystemPrompt": "默认系统提示词",
+    "settings.systemPromptPh": "所有新对话的默认系统指令（可留空）",
+    "settings.defaults": "默认生成参数",
+    "settings.defaultsHint": "新建对话或点击重置时使用这些值。",
+    "settings.applyDefaults": "应用到当前对话",
+    "settings.resetDefaults": "恢复出厂默认",
+    "settings.saved": "设置已保存",
+    "settings.defaultsApplied": "默认参数已应用到当前对话",
+    "settings.defaultsReset": "已恢复出厂默认",
     "hw.cpu": "CPU",
     "hw.ram": "内存",
     "hw.igpuFreq": "核显频率",
@@ -455,6 +488,7 @@ const I18N = {
     "tab.monitor": "监控",
     "tab.requests": "请求",
     "tab.about": "关于",
+    "tab.settings": "设置",
     "nav.views": "视图",
     "chat.exportTitleLong": "导出为 Markdown",
     "chat.send": "发送",
@@ -607,11 +641,16 @@ const I18N = {
     "conv.importBadFormat": "导入失败：不是 Q-Infer 导出文件",
   },
   en: {
-    "brand.tag": "Local inference",
+    "brand.tag": "Private inference",
     "lang.title": "Switch language (CN / EN)",
     "state.connecting": "Connecting…",
-    "chat.title": "Local inference engine",
-    "chat.sub": "The model runs locally — your data never leaves this device. Set the API key in the About tab.",
+    "chat.title": "Ask anything, locally.",
+    "chat.sub": "It runs entirely on this machine — what you type never leaves it.",
+    "chat.suggestions": "Starter suggestions",
+    "chat.sug1": "Explain this code",
+    "chat.sug2": "Write unit tests",
+    "chat.sug3": "Summarize this text",
+    "chat.sug4": "Translate to Chinese",
     "chat.sampler": "Sampler",
     "chat.seedLabel": "seed (-1 = random)",
     "chat.inputPh": "Type a message; Enter to send, Shift+Enter for a new line",
@@ -755,6 +794,34 @@ const I18N = {
     "theme.title": "Light / dark theme",
     "theme.dark": "Dark theme",
     "theme.light": "Light theme",
+    "settings.appearance": "Appearance",
+    "settings.theme": "Theme",
+    "settings.themeLight": "Light",
+    "settings.themeDark": "Dark",
+    "settings.themeSystem": "System",
+    "settings.accentColor": "Accent color",
+    "settings.accentQwen": "Qwen",
+    "settings.accentVibrant": "Vibrant",
+    "settings.accentBlue": "Blue",
+    "settings.accentPurple": "Purple",
+    "settings.accentGreen": "Green",
+    "settings.accentRose": "Rose",
+    "settings.accentTeal": "Teal",
+    "settings.accentAmber": "Amber",
+    "settings.accentIndigo": "Indigo",
+    "settings.accentCyan": "Cyan",
+    "settings.accentCustom": "Custom",
+    "settings.customColor": "Pick a custom color",
+    "settings.connection": "Connection",
+    "settings.defaultSystemPrompt": "Default system prompt",
+    "settings.systemPromptPh": "Default instruction for all new conversations (optional)",
+    "settings.defaults": "Default generation parameters",
+    "settings.defaultsHint": "These values are used when you start a new conversation or click Reset.",
+    "settings.applyDefaults": "Apply to current conversation",
+    "settings.resetDefaults": "Reset to factory defaults",
+    "settings.saved": "Settings saved",
+    "settings.defaultsApplied": "Defaults applied to current conversation",
+    "settings.defaultsReset": "Factory defaults restored",
     "hw.cpu": "CPU",
     "hw.ram": "RAM",
     "hw.igpuFreq": "iGPU freq",
@@ -776,6 +843,7 @@ const I18N = {
     "tab.monitor": "Monitor",
     "tab.requests": "Requests",
     "tab.about": "About",
+    "tab.settings": "Settings",
     "nav.views": "Views",
     "chat.exportTitleLong": "Export chat as Markdown",
     "chat.send": "Send",
@@ -1347,10 +1415,371 @@ function setTheme(t) {
   if (ic) ic.setAttribute("href", "/web/sprite.svg#" + (t === "dark" ? "i-sun" : "i-moon"));
   const tg = $("dark-toggle");
   if (tg) tg.setAttribute("aria-checked", String(t === "dark"));
+  // Re-apply accent for the new theme (inline styles override CSS, so we must update them)
+  if (typeof applyAccent === "function") {
+    var s = loadSettings();
+    applyAccent(s.accent);
+  }
 }
 function toggleTheme() {
   setTheme(currentTheme() === "dark" ? "light" : "dark");
   showToast(currentTheme() === "dark" ? tr("theme.dark") : tr("theme.light"), "info");
+}
+
+/* ---- Settings: accent color presets and user preferences ---- */
+var ACCENT_PRESETS = {
+  qwen: {
+    light: { accent:"#615CED", strong:"#4f45d6", hover:"#564ee2", ink:"#ffffff", tint:"#f1f0ff", tintHover:"#e4e2ff", text:"#4a3fd0", glow:"rgba(97,92,237,.30)" },
+    dark:  { accent:"#8b88f7", strong:"#8b88f7", hover:"#a5a3fb", ink:"#16112e", tint:"rgba(139,135,245,.14)", tintHover:"rgba(139,135,245,.22)", text:"#b3b0fa", glow:"rgba(139,135,245,.30)" }
+  },
+  vibrant: {
+    light: { accent:"#ff6b1a", strong:"#e05508", hover:"#f05e0e", ink:"#ffffff", tint:"#fff3eb", tintHover:"#ffe5d0", text:"#c2410c", glow:"rgba(255,107,26,.30)" },
+    dark:  { accent:"#ff8c47", strong:"#ff8c47", hover:"#ffa668", ink:"#2b1200", tint:"rgba(255,140,71,.14)", tintHover:"rgba(255,140,71,.22)", text:"#ffbc8a", glow:"rgba(255,140,71,.30)" }
+  },
+  blue: {
+    light: { accent:"#3b82f6", strong:"#2563eb", hover:"#2d72e8", ink:"#ffffff", tint:"#eff6ff", tintHover:"#dbeafe", text:"#1d4ed8", glow:"rgba(59,130,246,.30)" },
+    dark:  { accent:"#60a5fa", strong:"#60a5fa", hover:"#93c5fd", ink:"#0c1a3d", tint:"rgba(96,165,250,.14)", tintHover:"rgba(96,165,250,.22)", text:"#93c5fd", glow:"rgba(96,165,250,.30)" }
+  },
+  purple: {
+    light: { accent:"#8b5cf6", strong:"#7c3aed", hover:"#8350f0", ink:"#ffffff", tint:"#f5f3ff", tintHover:"#ede9fe", text:"#6d28d9", glow:"rgba(139,92,246,.30)" },
+    dark:  { accent:"#a78bfa", strong:"#a78bfa", hover:"#c4b5fd", ink:"#1a0c3d", tint:"rgba(167,139,250,.14)", tintHover:"rgba(167,139,250,.22)", text:"#c4b5fd", glow:"rgba(167,139,250,.30)" }
+  },
+  green: {
+    light: { accent:"#10b981", strong:"#059669", hover:"#0da876", ink:"#ffffff", tint:"#ecfdf5", tintHover:"#d1fae5", text:"#047857", glow:"rgba(16,185,129,.30)" },
+    dark:  { accent:"#34d399", strong:"#34d399", hover:"#6ee7b7", ink:"#0c2b1a", tint:"rgba(52,211,153,.14)", tintHover:"rgba(52,211,153,.22)", text:"#6ee7b7", glow:"rgba(52,211,153,.30)" }
+  },
+  rose: {
+    light: { accent:"#f43f5e", strong:"#e11d48", hover:"#ec2d54", ink:"#ffffff", tint:"#fff1f2", tintHover:"#ffe4e6", text:"#be123c", glow:"rgba(244,63,94,.30)" },
+    dark:  { accent:"#fb7185", strong:"#fb7185", hover:"#fda4af", ink:"#3d0c15", tint:"rgba(251,113,133,.14)", tintHover:"rgba(251,113,133,.22)", text:"#fda4af", glow:"rgba(251,113,133,.30)" }
+  },
+  teal: {
+    light: { accent:"#14b8a6", strong:"#0d9488", hover:"#11a899", ink:"#ffffff", tint:"#f0fdfa", tintHover:"#ccfbf1", text:"#0f766e", glow:"rgba(20,184,166,.30)" },
+    dark:  { accent:"#2dd4bf", strong:"#2dd4bf", hover:"#5eead4", ink:"#0c2b26", tint:"rgba(45,212,191,.14)", tintHover:"rgba(45,212,191,.22)", text:"#5eead4", glow:"rgba(45,212,191,.30)" }
+  },
+  amber: {
+    light: { accent:"#f59e0b", strong:"#d97706", hover:"#e8910a", ink:"#ffffff", tint:"#fffbeb", tintHover:"#fef3c7", text:"#b45309", glow:"rgba(245,158,11,.30)" },
+    dark:  { accent:"#fbbf24", strong:"#fbbf24", hover:"#fcd34d", ink:"#2b1a0c", tint:"rgba(251,191,36,.14)", tintHover:"rgba(251,191,36,.22)", text:"#fcd34d", glow:"rgba(251,191,36,.30)" }
+  },
+  indigo: {
+    light: { accent:"#6366f1", strong:"#4f46e5", hover:"#5958eb", ink:"#ffffff", tint:"#eef2ff", tintHover:"#e0e7ff", text:"#4338ca", glow:"rgba(99,102,241,.30)" },
+    dark:  { accent:"#818cf8", strong:"#818cf8", hover:"#a5b4fc", ink:"#0c0c3d", tint:"rgba(129,140,248,.14)", tintHover:"rgba(129,140,248,.22)", text:"#a5b4fc", glow:"rgba(129,140,248,.30)" }
+  },
+  cyan: {
+    light: { accent:"#06b6d4", strong:"#0891b2", hover:"#05a5c4", ink:"#ffffff", tint:"#ecfeff", tintHover:"#cffafe", text:"#0e7490", glow:"rgba(6,182,212,.30)" },
+    dark:  { accent:"#22d3ee", strong:"#22d3ee", hover:"#67e8f9", ink:"#0c2b30", tint:"rgba(34,211,238,.14)", tintHover:"rgba(34,211,238,.22)", text:"#67e8f9", glow:"rgba(34,211,238,.30)" }
+  }
+};
+var SETTINGS_DEFAULTS = {
+  theme: "system",
+  accent: "qwen",
+  "sd-temp": "0.8", "sd-top-p": "0.95", "sd-top-k": "40", "sd-min-p": "0.05",
+  "sd-pres-pen": "0", "sd-freq-pen": "0", "sd-rep-pen": "1",
+  "sd-max-tokens": "2048", "sd-seed": "-1", "sd-ctx": "0",
+  "sd-system-prompt": ""
+};
+var SETTINGS_KEYS = ["theme", "accent", "sd-temp", "sd-top-p", "sd-top-k", "sd-min-p",
+  "sd-pres-pen", "sd-freq-pen", "sd-rep-pen", "sd-max-tokens", "sd-seed", "sd-ctx",
+  "sd-system-prompt"];
+
+function loadSettings() {
+  var s = {};
+  try { var raw = localStorage.getItem("qinfer.settings"); if (raw) s = JSON.parse(raw); } catch (e) {}
+  SETTINGS_KEYS.forEach(function (k) { if (s[k] === undefined) s[k] = SETTINGS_DEFAULTS[k]; });
+  // One-time migration: the old default accent ("vibrant" orange) is force-replaced
+  // by the new default (qwen purple). The marker stops a later, deliberate re-pick
+  // of orange from being clobbered on every load.
+  if (s.accent === "vibrant" && !s.accentDefaultMigrated) {
+    s.accent = "qwen";
+    s.accentDefaultMigrated = true;
+    try { localStorage.setItem("qinfer.settings", JSON.stringify(s)); } catch (e) {}
+  }
+  return s;
+}
+function saveSettings(s) {
+  try { localStorage.setItem("qinfer.settings", JSON.stringify(s)); } catch (e) {}
+}
+function applyAccent(name) {
+  var theme = currentTheme();
+  var c;
+  if (name === "custom") {
+    // Generate a full accent palette from a single hex color
+    var hex = loadSettings()["accent-custom"] || "#615CED";
+    c = generateCustomPalette(hex, theme);
+  } else {
+    var preset = ACCENT_PRESETS[name] || ACCENT_PRESETS.qwen;
+    c = preset[theme] || preset.light;
+  }
+  var root = document.documentElement.style;
+  root.setProperty("--st-accent", c.accent);
+  root.setProperty("--st-accent-strong", c.strong);
+  root.setProperty("--st-accent-hover", c.hover);
+  root.setProperty("--st-accent-ink", c.ink);
+  root.setProperty("--st-accent-tint", c.tint);
+  root.setProperty("--st-accent-tint-hover", c.tintHover);
+  root.setProperty("--st-accent-text", c.text);
+  root.setProperty("--st-accent-glow", c.glow);
+}
+// Generate a full accent palette from a single hex color for light or dark theme
+function generateCustomPalette(hex, theme) {
+  var r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  if (theme === "dark") {
+    // Lighten for dark bg
+    var lr = Math.min(255, r + 60), lg = Math.min(255, g + 60), lb = Math.min(255, b + 60);
+    var accent = rgbToHex(lr, lg, lb);
+    return {
+      accent: accent, strong: accent,
+      hover: rgbToHex(Math.min(255, lr+30), Math.min(255, lg+30), Math.min(255, lb+30)),
+      ink: "#1a1a1a",
+      tint: "rgba("+r+","+g+","+b+",.14)",
+      tintHover: "rgba("+r+","+g+","+b+",.22)",
+      text: rgbToHex(Math.min(255, lr+40), Math.min(255, lg+40), Math.min(255, lb+40)),
+      glow: "rgba("+r+","+g+","+b+",.30)"
+    };
+  }
+  // Darken for light bg
+  var dr = Math.max(0, r - 30), dg = Math.max(0, g - 30), db = Math.max(0, b - 30);
+  return {
+    accent: hex,
+    strong: rgbToHex(dr, dg, db),
+    hover: rgbToHex(Math.max(0, r-15), Math.max(0, g-15), Math.max(0, b-15)),
+    ink: "#ffffff",
+    tint: "rgba("+Math.min(255,r+100)+","+Math.min(255,g+100)+","+Math.min(255,b+100)+",.15)",
+    tintHover: "rgba("+Math.min(255,r+80)+","+Math.min(255,g+80)+","+Math.min(255,b+80)+",.25)",
+    text: rgbToHex(Math.max(0, r-60), Math.max(0, g-60), Math.max(0, b-60)),
+    glow: "rgba("+r+","+g+","+b+",.30)"
+  };
+}
+function rgbToHex(r, g, b) {
+  return "#" + [r,g,b].map(function(x) { return Math.round(x).toString(16).padStart(2,"0"); }).join("");
+}
+function applyThemeFromSettings(setting) {
+  var t = setting;
+  if (setting === "system") {
+    t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  setTheme(t);
+  // Re-apply accent for the new theme
+  var s = loadSettings();
+  applyAccent(s.accent);
+}
+function syncSettingsUI(s) {
+  // Theme chips
+  document.querySelectorAll("#setting-theme .st-chip").forEach(function (c) {
+    c.classList.toggle("active", c.dataset.value === s.theme);
+    c.setAttribute("aria-checked", String(c.dataset.value === s.theme));
+  });
+  // Accent chips (preset buttons only, not the custom label)
+  document.querySelectorAll("#setting-accent .st-chip[data-value]").forEach(function (c) {
+    c.classList.toggle("active", c.dataset.value === s.accent);
+    c.setAttribute("aria-checked", String(c.dataset.value === s.accent));
+  });
+  // Custom accent swatch
+  var customSwatch = $("custom-accent-swatch");
+  var customPicker = $("custom-accent-picker");
+  if (s.accent === "custom" && s["accent-custom"] && customSwatch && customPicker) {
+    customSwatch.style.background = s["accent-custom"];
+    customPicker.value = s["accent-custom"];
+  }
+  // Defaults sliders/inputs
+  SETTINGS_KEYS.forEach(function (k) {
+    if (k === "theme" || k === "accent" || k === "accent-custom") return;
+    var el = $(k);
+    if (el) el.value = s[k];
+  });
+  syncSettingsOutputs();
+}
+function syncSettingsOutputs() {
+  var SLIDER_IDS = ["sd-temp", "sd-top-p", "sd-min-p", "sd-pres-pen", "sd-freq-pen", "sd-rep-pen"];
+  SLIDER_IDS.forEach(function (id) {
+    var el = $(id), out = $(id + "-out");
+    if (el && out) {
+      var digits = (id === "sd-min-p" || id === "sd-pres-pen" || id === "sd-freq-pen") ? 2 : 2;
+      out.textContent = Number(el.value).toFixed(digits);
+    }
+  });
+}
+function initSettings() {
+  var s = loadSettings();
+  // Apply theme
+  applyThemeFromSettings(s.theme);
+  // Apply accent
+  applyAccent(s.accent);
+  // Sync UI
+  syncSettingsUI(s);
+
+  // Theme chip clicks
+  document.querySelectorAll("#setting-theme .st-chip").forEach(function (c) {
+    c.addEventListener("click", function () {
+      var s = loadSettings();
+      s.theme = c.dataset.value;
+      saveSettings(s);
+      applyThemeFromSettings(s.theme);
+      syncSettingsUI(s);
+      showToast(tr("settings.saved"), "success");
+    });
+  });
+  // Accent chip clicks (preset buttons only)
+  document.querySelectorAll("#setting-accent .st-chip[data-value]").forEach(function (c) {
+    c.addEventListener("click", function () {
+      var s = loadSettings();
+      s.accent = c.dataset.value;
+      saveSettings(s);
+      applyAccent(s.accent);
+      syncSettingsUI(s);
+      showToast(tr("settings.saved"), "success");
+    });
+  });
+  // Custom color picker
+  var customPicker = $("custom-accent-picker");
+  if (customPicker) {
+    customPicker.addEventListener("input", function () {
+      var s = loadSettings();
+      s.accent = "custom";
+      s["accent-custom"] = customPicker.value;
+      saveSettings(s);
+      applyAccent("custom");
+      var swatch = $("custom-accent-swatch");
+      if (swatch) swatch.style.background = customPicker.value;
+      syncSettingsUI(s);
+    });
+    customPicker.addEventListener("click", function (e) {
+      e.stopPropagation();
+    });
+  }
+  // Defaults slider/input changes
+  SETTINGS_KEYS.forEach(function (k) {
+    if (k === "theme" || k === "accent" || k === "accent-custom") return;
+    var el = $(k);
+    if (!el) return;
+    el.addEventListener("input", function () {
+      var s = loadSettings();
+      s[k] = el.value;
+      saveSettings(s);
+      syncSettingsOutputs();
+    });
+  });
+  // Apply to current conversation
+  var btnApply = $("btn-apply-defaults");
+  if (btnApply) {
+    btnApply.addEventListener("click", function () {
+      var s = loadSettings();
+      // Map settings keys to sampler field IDs
+      var mapping = { "sd-temp":"s-temp", "sd-top-p":"s-top-p", "sd-top-k":"s-top-k", "sd-min-p":"s-min-p",
+        "sd-pres-pen":"s-pres-pen", "sd-freq-pen":"s-freq-pen", "sd-rep-pen":"s-rep-pen",
+        "sd-max-tokens":"s-max-tokens", "sd-seed":"s-seed", "sd-ctx":"s-ctx" };
+      Object.keys(mapping).forEach(function (sk) {
+        var target = $(mapping[sk]);
+        if (target) target.value = s[sk];
+      });
+      // Also apply system prompt default
+      if (s["sd-system-prompt"]) {
+        var sysEl = $("sys-prompt");
+        if (sysEl) sysEl.value = s["sd-system-prompt"];
+      }
+      syncSliderOutputs();
+      saveSampler();
+      showToast(tr("settings.defaultsApplied"), "success");
+    });
+  }
+  // Reset to factory defaults
+  var btnReset = $("btn-reset-defaults");
+  if (btnReset) {
+    btnReset.addEventListener("click", function () {
+      var s = {};
+      SETTINGS_KEYS.forEach(function (k) { s[k] = SETTINGS_DEFAULTS[k]; });
+      saveSettings(s);
+      syncSettingsUI(s);
+      showToast(tr("settings.defaultsReset"), "success");
+    });
+  }
+  // Listen for system theme changes when "system" is selected
+  try {
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
+      var s = loadSettings();
+      if (s.theme === "system") {
+        applyThemeFromSettings("system");
+      }
+    });
+  } catch (e) {}
+
+  // --- Inline panel toggles (sampler & system prompt) ---
+  initInlinePanels();
+  // --- Slider ↔ number input sync ---
+  initSliderNumberSync();
+  // --- Empty-state starter chips fill the composer ---
+  initEmptyChips();
+}
+
+function initInlinePanels() {
+  var btnSampler = $("btn-toggle-sampler");
+  var panelSampler = $("sampler-panel");
+  var btnSys = $("btn-toggle-sys");
+  var panelSys = $("sys-panel");
+  var btnCloseSampler = $("btn-close-sampler");
+  var btnCloseSys = $("btn-close-sys");
+
+  function togglePanel(btn, panel) {
+    if (!panel || !btn) return;
+    var isHidden = panel.classList.contains("hidden");
+    panel.classList.toggle("hidden", !isHidden);
+    btn.classList.toggle("active", isHidden);
+  }
+
+  if (btnSampler) btnSampler.addEventListener("click", function () { togglePanel(btnSampler, panelSampler); });
+  if (btnSys) btnSys.addEventListener("click", function () { togglePanel(btnSys, panelSys); });
+  if (btnCloseSampler) btnCloseSampler.addEventListener("click", function () {
+    if (panelSampler) panelSampler.classList.add("hidden");
+    if (btnSampler) btnSampler.classList.remove("active");
+  });
+  if (btnCloseSys) btnCloseSys.addEventListener("click", function () {
+    if (panelSys) panelSys.classList.add("hidden");
+    if (btnSys) btnSys.classList.remove("active");
+  });
+}
+
+function initSliderNumberSync() {
+  // Sync each slider with its paired number input
+  var pairs = [
+    ["s-temp", "s-temp-num"],
+    ["s-top-p", "s-top-p-num"],
+    ["s-min-p", "s-min-p-num"],
+    ["s-pres-pen", "s-pres-pen-num"],
+    ["s-freq-pen", "s-freq-pen-num"],
+    ["s-rep-pen", "s-rep-pen-num"]
+  ];
+  pairs.forEach(function (pair) {
+    var slider = $(pair[0]), num = $(pair[1]);
+    if (!slider || !num) return;
+    slider.addEventListener("input", function () {
+      num.value = slider.value;
+    });
+    num.addEventListener("input", function () {
+      var v = parseFloat(num.value);
+      if (!isNaN(v)) {
+        v = Math.max(parseFloat(slider.min), Math.min(parseFloat(slider.max), v));
+        slider.value = v;
+      }
+    });
+  });
+}
+
+// Empty-state starter chips: clicking one drops its label into the composer,
+// focuses the input and parks the caret at the end. The label is read at click
+// time, so it follows whichever language is active.
+function initEmptyChips() {
+  var wrap = $("chat-empty-chips");
+  var input = $("chat-input");
+  if (!wrap || !input) return;
+  wrap.addEventListener("click", function (e) {
+    var btn = e.target.closest(".chat-empty__chip");
+    if (!btn) return;
+    var text = (btn.textContent || "").trim();
+    if (!text) return;
+    input.value = text;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.focus();
+    try { input.setSelectionRange(text.length, text.length); } catch (err) {}
+  });
 }
 
 /* ---- Tab switching ---- */
@@ -1364,6 +1793,7 @@ function switchTab(name) {
     p.classList.toggle("hidden", p.id !== "panel-" + name);
   });
   if (name === "about") refreshAbout();
+  if (name === "settings") { var s = loadSettings(); syncSettingsUI(s); }
 }
 
 /* ---- SSE reader: feeds data: frames to onEvent one by one; returns on [DONE] or stream end ---- */
@@ -1536,12 +1966,22 @@ function captureSamplerDefaults() {
   var d = {};
   SAMPLER_FIELDS.forEach(function (id) { if ($(id)) d[id] = $(id).value; });
   d["s-think"] = THINK_LEVELS.indexOf(thinkLevel) >= 0 ? thinkLevel : "xhigh";
+  // Override with user settings defaults if available
+  if (typeof loadSettings === "function") {
+    var s = loadSettings();
+    var mapping = { "sd-temp":"s-temp", "sd-top-p":"s-top-p", "sd-top-k":"s-top-k", "sd-min-p":"s-min-p",
+      "sd-pres-pen":"s-pres-pen", "sd-freq-pen":"s-freq-pen", "sd-rep-pen":"s-rep-pen",
+      "sd-max-tokens":"s-max-tokens", "sd-seed":"s-seed", "sd-ctx":"s-ctx" };
+    Object.keys(mapping).forEach(function (sk) {
+      var target = mapping[sk];
+      if (s[sk] !== undefined) d[target] = s[sk];
+    });
+  }
   samplerDefaults = d;
 }
 // Decimals for the little readout beside a slider.
 function fmtSlider(id, v) {
-  var digits = (id === "s-min-p" || id === "s-pres-pen" || id === "s-freq-pen") ? 2
-    : (id === "s-temp" || id === "s-top-p" || id === "s-rep-pen") ? 2 : 1;
+  var digits = (id === "s-min-p" || id === "s-temp" || id === "s-top-p" || id === "s-rep-pen") ? 2 : 1;
   return Number(v).toFixed(digits);
 }
 function syncSliderOutputs() {
@@ -2675,6 +3115,7 @@ function initCommon() {
     setTheme(currentTheme());   // sync the icon
     th.addEventListener("click", toggleTheme);
   }
+  initSettings();
 }
 
 /* ---- Request-record rendering layer (Monitor tab) ---- */
@@ -3049,8 +3490,6 @@ function initChat() {
       QinferConv.saveSystem(sysEl.value);
     });
   }
-  trackDrawer("sys-drawer");
-  trackDrawer("sampler-drawer");
   const btnHelp = $("btn-help");
   if (btnHelp) btnHelp.addEventListener("click", showHelpDialog);
   // Tool panel
@@ -3836,7 +4275,13 @@ var QinferConv = {
   create: function() {
     var convs = this.loadAll();
     var id = "conv_" + Date.now();
-    var conv = { id: id, title: "", messages: [], system: "", created: Date.now(), updated: Date.now() };
+    // Apply default system prompt from settings if available
+    var defaultSys = "";
+    if (typeof loadSettings === "function") {
+      var s = loadSettings();
+      defaultSys = s["sd-system-prompt"] || "";
+    }
+    var conv = { id: id, title: "", messages: [], system: defaultSys, created: Date.now(), updated: Date.now() };
     convs.unshift(conv);
     this.saveAll(convs);
     this.renderList();
