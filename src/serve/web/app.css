@@ -68,7 +68,7 @@ main{flex:1;min-height:0;display:flex}
    have no hover, so there they are simply always visible. */
 /* Bubble actions stay visible at low contrast so they are discoverable without
    hovering, and rise to full contrast on hover or keyboard focus. */
-.bubble-actions{display:flex;gap:2px;margin-top:var(--st-s-2);opacity:.5;transition:opacity var(--st-dur) var(--st-ease)}
+.bubble-actions{display:flex;gap:2px;margin-top:var(--st-s-2);opacity:.7;transition:opacity var(--st-dur) var(--st-ease)}
 .bubble:hover .bubble-actions,.bubble:focus-within .bubble-actions,.bubble-actions:hover,.bubble-actions:focus-within{opacity:1}
 .bubble-action{width:30px;height:30px;padding:0;background:transparent;border:1px solid transparent;border-radius:var(--st-r-sm);color:var(--st-ink-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background var(--st-dur) var(--st-ease),color var(--st-dur) var(--st-ease)}
 .bubble-action:hover{background:var(--st-surface-2);color:var(--st-ink)}
