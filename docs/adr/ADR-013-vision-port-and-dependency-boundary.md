@@ -49,9 +49,9 @@ iGPU）上编码。实测（2×RTX 5060 Ti + ARL iGPU，sc117 mmproj 907 MB）�
 
 - 编码 192 ms vs CPU（8 线程）1375 ms，**7.0×**；每图省 ~10 CPU 秒（11.08 → 1.35 CPU-s）。
 - 系统内存驻留，**零 RTX VRAM**（iGPU 为 UMA；需 `GGML_VK_ALLOW_SYSMEM_FALLBACK=1`，服务层
-  spawn 前已代设）。
+ spawn 前已代设）。
 - 代价：启动预热 ~49 s（4096 image token，一次性）；Intel-only ICD 由服务层按存在性代设，
-  避免 ~31 s 的 RTX 探测。
+ 避免 ~31 s 的 RTX 探测。
 
 正确性口径：编码输出**不与 CPU 档逐字节全等**（fp16 累加序不同，相对 L2 2.0%），oracle 门
 不适用于该档；按 ADR-009 默认配置口径验收——嵌入级 100% 自重复（sha256 可复现），端到端

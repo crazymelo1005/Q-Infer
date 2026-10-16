@@ -1,104 +1,83 @@
-# 架构概览
+# Architecture overview
 
-本文说明系统由哪几块组成、每块的职责边界在哪、数据怎么流动。逐模块的实现规格见 [design/engine.md](design/engine.md)，模块之间的接口见 [design/interfaces.md](design/interfaces.md)。
+What the system is made of, where each part stops, and what crosses the boundaries. For build and run instructions see [deployment.md](deployment.md); for targets and acceptance scenarios see [requirements.md](requirements.md); the reasoning behind each structural choice is in [`adr/`](adr/README.md).
 
----
+## 1. The premise
 
-## 1. 设计前提
+The weights never fit in 16 GB of VRAM. Everything else follows from scheduling bytes under that shortage. For the primary case the capacity gaps are:
 
-权重永远装不进 16 GB 显存。由此推出的唯一设计主题是：在容量不足的前提下，如何调度字节。
+| Gap | Size | How it is served |
+|-----|------|------------------|
+| 125B expert weights | 33 GB per quantized tier, far above one card | Three-tier storage plus a hotness-ranked expert cache |
+| 51B external n-gram table | 28.8 GB at 4-bit | On-demand row reads behind a bounded row cache ([ADR-007](adr/ADR-007-ngram-table-on-demand-read.md)) |
+| KV for 262K context | Grows with length and concurrency | Resident hot window plus streamed reads, quantized KV |
 
-具体到主案例，三处容量缺口构成全部问题：
-
-| 缺口 | 量级 | 现有引擎的做法 |
-|------|------|---------------|
-| 125B 专家权重 | 远超 16 GB | 三级分层 + 专家热度缓存 |
-| 51B 外挂 n-gram 表 | 28.8 GB（4-bit）至 51 GB（FP8） | 交给操作系统页缓存 |
-| 262K 上下文的 KV | 随长度与并发增长 | 常驻热窗 + 流式读 |
-
-## 2. 分层结构
+## 2. The seam
 
 ```
-+------------------------------------------------------------------+
-| API / 调度层        OpenAI 兼容接口 · 批调度 · 前缀缓存 · 指标      |
-+------------------------------------------------------------------+
-                 |  token 流 / 请求
-+------------------------------------------------------------------+
-| 计划与预测层        专家共现预测 · 投机草稿树 · 精度档选择            |
-|                   （表行索引自 G-04 不通过起改为按需算，见 §6）        |
-+------------------------------------------------------------------+
-                 |  预取请求 / 计算图
-+------------------------------------------------------------------+
-| 三层存储与流调度     VRAM arena · 主机 pinned arena · NVMe          |
-|                   统一页表 · 引用计数 · PCIe 字节预算仲裁            |
-+------------------------------------------------------------------+
-                 |  就绪的专家 / KV / 表行
-+------------------------------------------------------------------+
-| 异构执行引擎        GPU：稠密部分 + 命中专家                        |
-|                   CPU：未命中专家（就地计算）                       |
-|                   双 KV 池 · 投机验证                              |
-+------------------------------------------------------------------+
+   client (OpenAI / Anthropic SDK, browser console)
+                     |
+   +-----------------v----------------------------------+
+   | Q-Infer server  src/serve                          |
+   |   HTTP surface, slots, sessions, prefix cache      |
+   |   telemetry, request records, web console          |
+   |   media fetch + image encoding (vision port)       |
+   +-----------------+----------------------------------+
+                     |  line protocol over stdin/stdout
+   +-----------------v----------------------------------+
+   | engine process  strata/ (default) or the in-tree   |
+   |                 in-house / native backends         |
+   |   tokens, expert tiers, KV, MTP draft, verify      |
+   +-----------------+----------------------------------+
+                     |
+   VRAM (1-2 GPUs)  |  pinned host RAM  |  NVMe mmap
 ```
 
-## 3. 模块职责与边界
+The server owns request semantics; the engine owns computation. The boundary is deliberately a process boundary, so the engine can be replaced without touching the API, the console, or the cache layers ([ADR-016](adr/ADR-016-vendored-strata-backend.md), [ADR-017](adr/ADR-017-serve-engine-seam.md)). `--backend` selects which engine answers; nothing else changes.
 
-| 模块 | 职责 | 明确不负责 |
-|------|------|-----------|
-| API / 调度层 | 请求接入、批调度、前缀复用、指标输出 | 不做容量管理 |
-| 计划与预测层 | 计算下一步的预取需求：专家概率、投机草稿、精度档（表行自 G-04 不通过起不再预取，索引按需算，见 §6） | 不执行搬运，不做淘汰 |
-| 三层存储与流调度 | 把逻辑块映射到介质、维护统一页表、按字节预算仲裁搬运 | 不做计算，不做预测 |
-| 异构执行引擎 | GPU 与 CPU 并行计算、KV 池管理、投机验证 | 不决定搬什么 |
+## 3. Server layer (`src/serve`)
 
-两处边界需要强调：
+| Component | Responsibility | Explicitly not its job |
+|-----------|----------------|----------------------|
+| `server`, `facade` | HTTP routing, auth, OpenAI and Anthropic request shapes, streaming | Tokenization decisions, capacity |
+| `scheduler`, `sampler` | Slot allocation, queueing, decoding parameters, tool-call and thinking-block framing | Engine internals |
+| `prompt`, `prompt_cache` | Chat template application, token-prefix cache with exact-match LRU | KV layout on device |
+| `records`, `telemetry`, `prometheus` | Request history, live device and memory telemetry, metrics in two encodings | Alerting |
+| `media_fetch`, `backend_strata` vision hooks | Image attachment fetching and the encoder process ([ADR-013](adr/ADR-013-vision-port-and-dependency-boundary.md)) | Video, audio |
+| `web/` | The console: chat, monitor, inspector | A build pipeline; it is plain assets served from disk |
 
-- 预测与执行分离。计划层只产出需求，是否满足由存储层按预算裁决；预算不足时计划层的请求被丢弃并记账，不额外插入同步点。
-- 淘汰与预测分离。缓存的替换策略属于存储层，预测只提供输入。
+## 4. Engine drivers (`src/engine`)
 
-## 4. 四条数据流
+The line protocol the default engine speaks, the slot handshake for batched windows, and the vision encoder process. Protocol behaviour is pinned by a recorded transcript (`tests/data/strata_transcript_gen.txt`) so an upstream change fails a test rather than a user.
 
-| 流 | 方向 | 触发者 | 占用带宽 | 优化手段 |
-|----|------|--------|---------|---------|
-| 权重流 | NVMe / RAM 到 VRAM | 专家缓存未命中 | PCIe | 预测 + 预算化 + 分块 |
-| 专家流 | RAM 到 CPU 内核 | 路由未命中显存 | 内存总线 | 量化内核 + 与 GPU 并行 |
-| KV 流 | RAM 与 VRAM 之间 | 上下文超出常驻窗口 | PCIe | 常驻热窗 + 块级预取 |
-| 记忆表流 | NVMe / RAM 到 VRAM | n-gram 查表 | PCIe | 按需读 + 有界行缓存 |
+## 5. In-tree compute (`src/storage`, `src/experts`, `src/ple`, `src/dense`, `src/kv`, `src/kernels`)
 
-## 5. 三类 PCIe 流量
+The `inhouse` backend: the unified page table and arenas, the bounded n-gram row cache, the PCIe byte-budget arbiter, the format-dispatched expert feed-forward, the router, one MoE layer wired end to end, and the step loop with KV windowing. Its quantized kernels and table/expert paths were run against the real shards and cross-checked with independent implementations; the device-side forward and a real MTP draft head are unfinished, which is why it is not the default.
 
-过 PCIe 的是权重流、KV 流、记忆表流三类，它们竞争同一条链路，因此由同一步的字节预算统一仲裁：
+The kernel set is also what the vision port and the measurement tools draw from, so it stays in the build even while the default engine is the Strata one.
 
-1. 本步必需的 KV 换入（正确性）
-2. 本步必需的表行（正确性）
-3. 预测的专家（按收益除以字节排序）
+## 6. Data flows
 
-专家流不在此列：未命中专家在 CPU 侧就地计算，只走内存总线。
+| Flow | Direction | Triggered by | Bus | Mechanism |
+|------|-----------|--------------|-----|-----------|
+| Expert weights | NVMe / RAM to VRAM | Expert-cache miss | PCIe | Ranked placement, resident pinned copy |
+| Unhit experts | RAM to CPU kernels | Router rows the cache does not hold | Memory bus | Compute in place, never staged back ([ADR-002](adr/ADR-002-compute-unhit-experts-in-place.md)) |
+| KV | RAM / VRAM both ways | Context beyond the resident window | PCIe | Hot window, streamed reads, quantized KV |
+| Table rows | NVMe / RAM to VRAM | n-gram lookup | PCIe | On-demand reads, bounded row cache |
 
-预算化是设计里唯一未被上游占据的机制（见 [design/proposals.md](design/proposals.md) 的 P-01）。G-04 已于 2026-10-09 不通过，表行一侧的预取被砍（[ADR-007](design/adr/ADR-007-ngram-table-on-demand-read.md)），表行只余本步必需的按需读；预算化的对象收缩为权重、KV 与必需表行三类，其成立改由 G-10（单步时长）、G-13（表行 IO 放大）与 P-01 自身的门禁判定。
+Dual cards use a per-layer split, not per-layer-synchronized tensor parallelism, and the two cards pipeline their verify windows ([ADR-004](adr/ADR-004-consumer-dual-gpu-no-tensor-parallel.md)). Host memory is the shared resource; nothing is duplicated per card unless the operator asks for a second expert tier.
 
-## 6. 预测的两种性质
+## 7. Frozen decisions
 
-两条预测路径的性质不同，可靠性不同级，预算策略也不同：
-
-| 路径 | 性质 | 预算策略 | 依据 |
-|------|------|---------|------|
-| 记忆表行索引 | 确定性：由上一 token 唯一决定 | 按必需分配 | 模型把表放在第 2 层，是为让读取与第 1 层计算重叠；但该确定性不带来可利用的相邻性或近邻复用（G-04 不通过），故只按需读 |
-| 专家共现 | 概率性：会话层面的统计稳定性 | 有余额才投 | 收益有天花板，须先过门禁 G-09 |
-
-## 7. 单卡与双卡
-
-代码与数据格式只有一套。卡数只改变机器画像与分配策略，不改变代码路径。
-
-- 单卡：本设计的硬下限。
-- 双卡：显存翻倍带来命中率提升，预取带宽与算力翻倍。禁止使用每层同步的张量并行，改用按层切分、专家并行或双实例数据并行（见 ADR-004）。
-- 主机内存是共享资源，由统一页表管理，双卡与双实例不各自复制专家与表。
-
-## 8. 已冻结的决策
-
-| 主题 | 决策 | 记录 |
-|------|------|------|
-| 三层存储与专家缓存 | 采用分层存储而非权重全量常驻 | [ADR-001](design/adr/ADR-001-tiered-storage-and-expert-cache.md) |
-| 未命中专家的处理 | CPU 就地计算，不搬回显存 | [ADR-002](design/adr/ADR-002-compute-unhit-experts-in-place.md) |
-| n-gram 表访问 | 按需读加有界行缓存（ADR-003 的显式预取与双缓冲已被 G-04 否定） | [ADR-007](design/adr/ADR-007-ngram-table-on-demand-read.md)（取代 [ADR-003](design/adr/ADR-003-ngram-table-explicit-prefetch.md)） |
-| 双卡并行方式 | 禁用每层同步的张量并行 | [ADR-004](design/adr/ADR-004-consumer-dual-gpu-no-tensor-parallel.md) |
-| 核显与 NPU 定位 | 条件性协处理器，不参与专家主计算 | [ADR-005](design/adr/ADR-005-igpu-npu-as-coprocessor.md) |
-| 精度策略 | NVFP4 权重、FP8 KV、索引器独立精度档 | [ADR-006](design/adr/ADR-006-precision-policy-nvfp4-fp8-kv.md) |
+| Topic | Decision | Record |
+|-------|----------|--------|
+| Storage | Tiered, not fully resident | [ADR-001](adr/ADR-001-tiered-storage-and-expert-cache.md) |
+| Unhit experts | Computed in place on CPU | [ADR-002](adr/ADR-002-compute-unhit-experts-in-place.md) |
+| n-gram table | On-demand reads; the prefetcher was cut by measurement | [ADR-007](adr/ADR-007-ngram-table-on-demand-read.md) |
+| Dual GPU | Layer split and pipelining; no tensor parallel | [ADR-004](adr/ADR-004-consumer-dual-gpu-no-tensor-parallel.md) |
+| Compute group | Device plus queue plus pool plus capability table is the unit of backend wiring | [ADR-011](adr/ADR-011-compute-group-abstraction.md) |
+| Precision | Declared-format router reads, quantized KV, per-tensor accuracy policy | [ADR-006](adr/ADR-006-precision-policy-nvfp4-fp8-kv.md), [ADR-010](adr/ADR-010-router-precision-declared-format.md) |
+| Correctness | Distribution-level acceptance, bit-exact where a kernel gate exists | [ADR-009](adr/ADR-009-correctness-acceptance-criteria.md) |
+| Backend | Engine behind a process boundary, default to the Strata sources | [ADR-016](adr/ADR-016-vendored-strata-backend.md), [ADR-018](adr/ADR-018-default-backend-strata.md) |
+| iGPU | Vision encoder only | [ADR-019](adr/ADR-019-igpu-not-for-experts.md), [ADR-022](adr/ADR-022-igpu-cannot-take-cpu-decode-share.md) |
+| Engine version line | Track upstream as an explicit decision, pinned ggml | [ADR-023](adr/ADR-023-strata-engine-upgrade-01441.md) |

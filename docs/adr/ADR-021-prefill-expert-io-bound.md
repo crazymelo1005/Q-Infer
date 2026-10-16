@@ -27,7 +27,7 @@ MMQ 开与关的差异约 1%（噪声内），13K 提示甚至新旧几乎相同
 
 ## 决策
 
-1. 不再把 prefill 的 3K 差距归因于 MMQ tile，修正 [README](../../../README.md) 与项目记忆的表述。
+1. 不再把 prefill 的 3K 差距归因于 MMQ tile，修正 [README](../../README.md) 与项目记忆的表述。
 2. 不为 prefill 换用分支 llama.cpp：收益约 1%，却引入「引擎构建依赖一个非 pin 的 llama.cpp 分支」的维护成本（每次升引擎都要重验），不划算。
 3. prefill 的真实杠杆是专家 I/O，不是算术——提高专家缓存命中率（用满 VRAM）、提升 PCIe 搬运效率、降低每 token 的专家 miss。这三项都在引擎侧/厂商侧，超出本仓库可单方面改动的范围。
 

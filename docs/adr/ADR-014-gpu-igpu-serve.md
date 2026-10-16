@@ -14,12 +14,12 @@
 
 1. 启动分工求解器（纯函数）。启动序列固定为：解析参数 → 硬件探测 → 分工求解 → 组装组与候选表 → 装载模型 → 服务。求解器输入 = 启动参数（`--gpu` / `--igpu-frac` / `--kv-resident`）+ 机器画像，输出 = 分配表（dense 层分布、KV 位置、每卡专家槽位、核显占比、CPU 兜底）。纯函数形态与 `memory_plan` 同风格、可单测。求解顺序：dense 装得下就单卡（`split_skip_if_fits` 等效）、装不下按 `cuda_owner_of` 层切分；KV 先全卡上、超显存回流主机；每卡专家槽位 = 显存扣 dense + KV 后的最大值（先削专家、再削 KV、连地板都装不下拒绝）；核显占比由 `--igpu-frac` 给、默认保守启用；CPU 组恒在候选表末位兜底。不做启动时反复 benchmark 的自动调优（profile 需要几十次推理才有统计意义，就绪时间不可接受）。
 2. 阶段化迁移，每阶段独立可验收（门禁全绿：常规构建零行为变化、设备路径判据满足、真权重端到端出词）：
-   - 阶段 A：GDN + QSA 稠密段上卡（已完成）。
-   - 阶段 B：KV cache 上卡（已完成：QSA 各层 KV 页 + 聚集 + attend 全在设备；`--kv-resident N` 反向阈值，0 = 全常驻、越界页逐出并可从主机权威副本准入；判据 8K 夹具每步 attn 段主机 4.9 ms 对设备 3.9 ms 且输出逐位相同，真机 0 与 4 两种模式的生成流完全相同）。
-   - 阶段 B：KV cache 上卡（`KvHostStore` → 显存；`--kv-resident` 反向语义）。
-   - 阶段 C：核显未命中专家（Vulkan GEMV + `--igpu-frac` + BusShareLimiter）。
-   - 阶段 D：head/GR/共享专家上卡 + 图捕获 + `--trim-stage-weights` 双卡权重裁剪。
-   - 阶段之间的依赖：B 需要 A 的 QSA 整层设备出口；C 需要 A 的未命中专家候选表接线；D 在 B/C 之后定型稠密全链。
+ - 阶段 A：GDN + QSA 稠密段上卡（已完成）。
+ - 阶段 B：KV cache 上卡（已完成：QSA 各层 KV 页 + 聚集 + attend 全在设备；`--kv-resident N` 反向阈值，0 = 全常驻、越界页逐出并可从主机权威副本准入；判据 8K 夹具每步 attn 段主机 4.9 ms 对设备 3.9 ms 且输出逐位相同，真机 0 与 4 两种模式的生成流完全相同）。
+ - 阶段 B：KV cache 上卡（`KvHostStore` → 显存；`--kv-resident` 反向语义）。
+ - 阶段 C：核显未命中专家（Vulkan GEMV + `--igpu-frac` + BusShareLimiter）。
+ - 阶段 D：head/GR/共享专家上卡 + 图捕获 + `--trim-stage-weights` 双卡权重裁剪。
+ - 阶段之间的依赖：B 需要 A 的 QSA 整层设备出口；C 需要 A 的未命中专家候选表接线；D 在 B/C 之后定型稠密全链。
 3. dense 走同步整层入口，不进作业队列（阶段 A 的落法）。dense 段每 token 必算、步内只有一个汇合点（interfaces §8.4），把它做成组抽象的异步 job 反而多一次归并。落法是函数指针结构 `DenseExec`（`run_gdn` / `run_qsa` 两个整层入口）：`StepConfig.dense_exec` 由调用方（facade）在 `--gpu` 时填入 CUDA 侧 `dense_exec_cuda()`（只有 `QINFER_ENABLE_CUDA=ON` 的构建有这个符号），`run_block_layer` 在给定时按层类型分派到 `*_cuda` 整层入口，否则全走主机 `run_gdn_layer` / `run_qsa_layer`——主机构建恒空、零行为变化。`--gpu` 语义 = 指定哪些 CUDA 设备（`auto` = 全部可见卡，`0,1` = nvidia-smi 索引列表）；无 CUDA 的构建给 `--gpu` 明确拒绝启动，不静默回退。
 4. dense 档覆盖以「合成模型也能跑」为下限。阶段 A 补齐了 Q8_0 权重档的设备内核（合成/测试模型的稠密权重正是该档；真模型的 dense 投影是 IQ4_XS / IQ3_S / Q6_K）——`--gpu` 在任何档位上都不得 500，覆盖不到的档明确报错而不是猜。
 
@@ -46,4 +46,4 @@
 
 ## 相关
 
-[ADR-004-consumer-dual-gpu-no-tensor-parallel.md](ADR-004-consumer-dual-gpu-no-tensor-parallel.md)（按层切分）、[ADR-005-igpu-npu-as-coprocessor.md](ADR-005-igpu-npu-as-coprocessor.md)（核显能力判据）、[ADR-008-implementation-stack-and-kernel-reuse.md](ADR-008-implementation-stack-and-kernel-reuse.md)（零依赖 / CUDA 之后）、[ADR-009-correctness-acceptance-criteria.md](ADR-009-correctness-acceptance-criteria.md)（分布级判据）、[ADR-011-compute-group-abstraction.md](ADR-011-compute-group-abstraction.md)（组边界与单汇合点）、[`../engine.md`](../engine.md) §6（异构执行与阶段 A 实测）、[`../interfaces.md`](../interfaces.md) §8（提交面与 CUDA 组落法）
+[ADR-004-consumer-dual-gpu-no-tensor-parallel.md](ADR-004-consumer-dual-gpu-no-tensor-parallel.md)（按层切分）、[ADR-005-igpu-npu-as-coprocessor.md](ADR-005-igpu-npu-as-coprocessor.md)（核显能力判据）、[ADR-008-implementation-stack-and-kernel-reuse.md](ADR-008-implementation-stack-and-kernel-reuse.md)（零依赖 / CUDA 之后）、[ADR-009-correctness-acceptance-criteria.md](ADR-009-correctness-acceptance-criteria.md)（分布级判据）、[ADR-011-compute-group-abstraction.md](ADR-011-compute-group-abstraction.md)（组边界与单汇合点）、`../engine.md` §6（异构执行与阶段 A 实测）、`../interfaces.md` §8（提交面与 CUDA 组落法）

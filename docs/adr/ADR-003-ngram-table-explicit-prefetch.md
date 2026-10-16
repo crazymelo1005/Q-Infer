@@ -9,7 +9,7 @@
 
 Qwen3.8-Flash-Next 带一张 51B 的 n-gram 记忆表（FP8 约 51 GB，4-bit 约 28.8 GB），远超显存。模型作者把它放在第 2 层，是因为第 t 步要查的行由第 t-1 步已生成的 token 决定，行索引可以提前一步算出。这是模型自带的串行转并行设计。
 
-现状：上游引擎把它放在 SSD，每 token 经操作系统页缓存读若干小行，没有专用预取器（[research/01-strata-engine.md](../../research/01-strata-engine.md) §3）。模型把提前量交给了引擎，引擎没有使用。
+现状：上游引擎把它放在 SSD，每 token 经操作系统页缓存读若干小行，没有专用预取器（research/01-strata-engine.md §3）。模型把提前量交给了引擎，引擎没有使用。
 
 ## 决策
 
@@ -21,7 +21,7 @@ Qwen3.8-Flash-Next 带一张 51B 的 n-gram 记忆表（FP8 约 51 GB，4-bit �
 4. 批量聚合。同步内所有序列的所有查表请求合并为尽量少的连续大块读。
 5. 缺行必须阻塞等待。表行是精确输入，不允许取旧值或跳过的有界近似，因此预取必须至少提前一步完成。
 
-预填期的路径另见 [engine.md](../engine.md) §4。
+预填期的路径另见 engine.md §4。
 
 ## 备选方案
 
@@ -52,9 +52,9 @@ Qwen3.8-Flash-Next 带一张 51B 的 n-gram 记忆表（FP8 约 51 GB，4-bit �
 
 本 ADR 为条件性接受。
 
-- G-04 通过：保留该子系统，进入实施顺序第 6 项（见 [engine.md](../engine.md) §17）。
-- G-04 不通过：砍掉该子系统，退守 [engine.md](../engine.md) §5 的专家缓存，并把负结果写入 [risks.md](../risks.md)。
+- G-04 通过：保留该子系统，进入实施顺序第 6 项（见 engine.md §17）。
+- G-04 不通过：砍掉该子系统，退守 engine.md §5 的专家缓存，并把负结果写入 risks.md。
 
 ## 相关
 
-ADR-001（三层存储）、ADR-002（PCIe 预算由其竞争）、[engine.md](../engine.md) §4 与 §3.2、[research/02-qwen3.8-flash-next.md](../../research/02-qwen3.8-flash-next.md)（n-gram 架构）、[research/references.md](../../research/references.md)（S-01、S-02、S-25）
+ADR-001（三层存储）、ADR-002（PCIe 预算由其竞争）、engine.md §4 与 §3.2、research/02-qwen3.8-flash-next.md（n-gram 架构）、research/references.md（S-01、S-02、S-25）

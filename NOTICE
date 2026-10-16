@@ -12,7 +12,7 @@ Provenance
 
 - Tag: `v0.1.44.1`
 - Commit: `9791ea335ba2`
-- Vendored: 2026-10-16（原 v0.1.43.1 入库于 2026-10-13，见 ADR-023）
+- Vendored: 2026-10-16（原 v0.1.43.1 入库于 2026-10-13，见 [ADR-023](docs/adr/ADR-023-strata-engine-upgrade-01441.md)）
 - Location: `strata/`
 - The vendored tree is **unmodified**. Any future edit is a deliberate divergence and
   must be recorded here and in the decision record below.
@@ -54,8 +54,8 @@ The vendored engine is configured and built by `tools/build_engine.sh` into
 `build-engine/strata`, a separate binary with its own heavy CUDA toolchain
 dependency. Q-Infer's serving binary never links it; it talks to the engine as a
 subprocess. That process boundary is what keeps our "zero runtime dependencies"
-rule intact — see `docs/design/adr/ADR-016-vendored-strata-backend.md`, and
-`docs/design/adr/ADR-008-*` for the dependency rule itself.
+rule intact — see `docs/adr/[ADR-016](docs/adr/ADR-016-vendored-strata-backend.md)-vendored-strata-backend.md`, and
+`docs/adr/[ADR-008](docs/adr/ADR-008-implementation-stack-and-kernel-reuse.md)-*` for the dependency rule itself.
 
 Q-Infer's own code is MIT (c) 2026 crazymelo1005, which is compatible with the
 upstream terms above.
@@ -90,11 +90,11 @@ That encoder links llama.cpp, which is NOT in this repository. `tools/build_visi
 commit 3cf03257f219afbe7334045ff7c6a06ac68c627d (llama.cpp, MIT) from a local checkout with
 `git archive` into the git-ignored `build-vision/llama.cpp/`. It is never downloaded and never
 vendored, and the built encoder is spawned by the serving layer rather than linked into
-`qinfer-server`, so the zero-runtime-dependency rule still holds (ADR-013, ADR-008).
+`qinfer-server`, so the zero-runtime-dependency rule still holds ([ADR-013](docs/adr/ADR-013-vision-port-and-dependency-boundary.md), [ADR-008](docs/adr/ADR-008-implementation-stack-and-kernel-reuse.md)).
 
 ----------
 
-iGPU Expert Pool Shaders (ADR-020)
+iGPU Expert Pool Shaders ([ADR-020](docs/adr/ADR-020-strata-igpu-pool.md))
 -----------------------------------
 
 The Vulkan compute shaders for the Strata iGPU expert pool (`strata_q2_0_gemv.comp`,
@@ -104,4 +104,4 @@ using the Vulkan 1.0 compute API.
 
 These shaders are compiled offline with glslangValidator and embedded as byte arrays
 in `spv_data.hpp`. The Vulkan runtime is loaded via dlopen at runtime, requiring no
-link-time dependency on libvulkan (ADR-008, ADR-020).
+link-time dependency on libvulkan ([ADR-008](docs/adr/ADR-008-implementation-stack-and-kernel-reuse.md), [ADR-020](docs/adr/ADR-020-strata-igpu-pool.md)).

@@ -52,4 +52,4 @@ vLLM 的官方 recipe 已证实：索引器的 KV 也需要单独量化（`--att
 
 ## 相关
 
-ADR-001（体积与常驻）、[engine.md](../engine.md) §7 / §9 / §16、[research/04-acceleration-and-memory.md](../../research/04-acceleration-and-memory.md)（四轴框架、TurboQuant）
+ADR-001（体积与常驻）、engine.md §7 / §9 / §16、research/04-acceleration-and-memory.md（四轴框架、TurboQuant）

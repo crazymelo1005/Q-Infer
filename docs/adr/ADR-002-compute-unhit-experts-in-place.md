@@ -34,9 +34,9 @@
 
 ## 与本项目的关联
 
-- 分流比例由自动标定（[engine.md](../engine.md) §10）+ 在线自适应决定，而不是固定值。
+- 分流比例由自动标定（engine.md §10）+ 在线自适应决定，而不是固定值。
 - 「就地算还是搬回」取决于 G-07 实测：若 CPU 路径是算力瓶颈，则核显可加入（ADR-005）。
 
 ## 相关
 
-ADR-001、ADR-005、[research/01-strata-engine.md](../../research/01-strata-engine.md) §5
+ADR-001、ADR-005、research/01-strata-engine.md §5

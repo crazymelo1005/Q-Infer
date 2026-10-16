@@ -39,4 +39,4 @@
 
 ## 相关
 
-[ADR-008](ADR-008-implementation-stack-and-kernel-reuse.md)（零运行时依赖与 CUDA 之后的实现口径）、[ADR-014](ADR-014-gpu-igpu-serve.md)（硬件接入的处置）、[`../engine.md`](../engine.md) §18（后端落法）、[`../interfaces.md`](../interfaces.md) §8.8（驱动接缝）。来源与许可见 [`../../../NOTICE`](../../../NOTICE)。
+[ADR-008](ADR-008-implementation-stack-and-kernel-reuse.md)（零运行时依赖与 CUDA 之后的实现口径）、[ADR-014](ADR-014-gpu-igpu-serve.md)（硬件接入的处置）、`../engine.md` §18（后端落法）、`../interfaces.md` §8.8（驱动接缝）。来源与许可见 [`../../../NOTICE`](../../NOTICE)。

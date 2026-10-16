@@ -7,11 +7,11 @@
 
 ## 背景
 
-[engine.md](../engine.md) §17 序 2 的验收写的是「同档困惑度须与参考实现一致」。G-14 实测（环境2，2026-10-09）表明这条按字面无法执行：
+engine.md §17 序 2 的验收写的是「同档困惑度须与参考实现一致」。G-14 实测（环境2，2026-10-09）表明这条按字面无法执行：
 
-1. 参考引擎跨运行不逐位一致：同配置两次 fp16 生成的贪心序列在第 40 个 token 首次分歧；只有加上 `--adapt-every 0 --pcie-frac 0` 才逐位相同（512/512，见 [research/01](../../research/01-strata-engine.md) §4.1）。
+1. 参考引擎跨运行不逐位一致：同配置两次 fp16 生成的贪心序列在第 40 个 token 首次分歧；只有加上 `--adapt-every 0 --pcie-frac 0` 才逐位相同（512/512，见 research/01 §4.1）。
 2. 参考实现的困惑度取不到：原生（IQ）pack 下 `--dump-logits` 产出 0 字节文件（源码注释亦如此说明），没有可比对象。
-3. 本设计的归约路径本身就与上游不同：结果由显存、CPU、核显三路累加归并（[engine.md](../engine.md) §16），要求默认真实配置逐位一致，等于把设计逼回上游的归约顺序。
+3. 本设计的归约路径本身就与上游不同：结果由显存、CPU、核显三路累加归并（engine.md §16），要求默认真实配置逐位一致，等于把设计逼回上游的归约顺序。
 
 ## 决策
 
@@ -40,4 +40,4 @@
 
 ## 相关
 
-[ADR-008](ADR-008-implementation-stack-and-kernel-reuse.md)（实现栈）、[engine.md](../engine.md) §16 与 §17、[gates.md](../gates.md) 的 G-14、[research/01](../../research/01-strata-engine.md) §4.1
+[ADR-008](ADR-008-implementation-stack-and-kernel-reuse.md)（实现栈）、engine.md §16 与 §17、gates.md 的 G-14、research/01 §4.1

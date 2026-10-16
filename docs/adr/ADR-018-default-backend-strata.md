@@ -8,7 +8,7 @@
 
 [ADR-017](ADR-017-serve-engine-seam.md) 决策 3 首版保守地把 `--backend` 默认值定为 `inhouse`，并写明「P2 端到端绿后切 `strata` 为默认」。该切换时机已到：同提示同参数下 `--backend strata` 与直接驱动引擎的参考输出逐字节相同（ADR-017 后果），聊天模板对参考端 golden 10/10 逐字节相同，且引擎启动期的诊断已能到达服务 stderr。
 
-本决策只改一个默认值，不改接口，故按 [CONTRIBUTING](../../../CONTRIBUTING.md) 的「ADR 不可修订、改变决策须新开 ADR」另立一条，不改 ADR-017 原文。
+本决策只改一个默认值，不改接口，故按 [CONTRIBUTING](../../CONTRIBUTING.md) 的「ADR 不可修订、改变决策须新开 ADR」另立一条，不改 ADR-017 原文。
 
 ## 决策
 
@@ -36,4 +36,4 @@
 
 ## 相关
 
-[ADR-017](ADR-017-serve-engine-seam.md)（接缝与两个后端，本 ADR 改其默认值一项）、[ADR-016](ADR-016-vendored-strata-backend.md)（厂商化引擎作后端）、[`../interfaces.md`](../interfaces.md) §8.8、[`../engine.md`](../engine.md) §18。
+[ADR-017](ADR-017-serve-engine-seam.md)（接缝与两个后端，本 ADR 改其默认值一项）、[ADR-016](ADR-016-vendored-strata-backend.md)（厂商化引擎作后端）、`../interfaces.md` §8.8、`../engine.md` §18。

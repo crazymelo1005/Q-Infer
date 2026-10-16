@@ -7,13 +7,13 @@
 
 ## 背景
 
-[ADR-005](ADR-005-igpu-npu-as-coprocessor.md) 决定核显条件性参与，即「把它当第二组算力而不是独立的带宽来源」；G-07 已实测为算力瓶颈，该前提满足。接口此前落在 [interfaces.md](../interfaces.md) 第 8 节的最小形态上：作业（一层的一批未命中专家）与工人（`available` / `submit` / `wait`），并明写「这里不引入设备概念——worker 的语义是『算这批专家的人』，CPU 与核显同形」。
+[ADR-005](ADR-005-igpu-npu-as-coprocessor.md) 决定核显条件性参与，即「把它当第二组算力而不是独立的带宽来源」；G-07 已实测为算力瓶颈，该前提满足。接口此前落在 interfaces.md 第 8 节的最小形态上：作业（一层的一批未命中专家）与工人（`available` / `submit` / `wait`），并明写「这里不引入设备概念——worker 的语义是『算这批专家的人』，CPU 与核显同形」。
 
 那个形态够表达「谁算这批专家」，但表达不出三组后端之间的实际差异，而这些差异要么已实测、要么已确认：
 
 - 内存所在层不同：CUDA 组在显存里，CPU 组在主机内存里，核显组与 CPU 共用 DDR。
 - 可重叠性不同：CUDA 组有队列可异步重叠，CPU 组同步跑完。
-- 可用的指令不同：核显在 192 项扩展里没有 `VK_KHR_shader_integer_dot_product`（环境2，[engine.md](../engine.md) §13），即码本矩阵乘取不到整数点积。
+- 可用的指令不同：核显在 192 项扩展里没有 `VK_KHR_shader_integer_dot_product`（环境2，engine.md §13），即码本矩阵乘取不到整数点积。
 - 可用性不同：核显没有计算运行时，CUDA 组尚未开工，CPU 组恒可用。
 
 设备侧那半开工前，这些差异需要一个落脚处；否则调度层的形状会被「单一后端同构」这个假设定死，ADR-005 的结论（两组算力同时用）在自己的接口里无处表达。
@@ -22,10 +22,10 @@
 
 1. 引擎面向后端的最小单位是计算组：一组 = 设备 + 队列 + 内存池 + 能力表 +（主机侧组才有的）DDR 总线份额限流器。CPU、核显、每张 CUDA 卡各是一组，CUDA 卡按卡成实例（与 [ADR-004](ADR-004-consumer-dual-gpu-no-tensor-parallel.md) 的按层切分一致）。
 2. 组声明三件事：内存所在层（显存 / 主机 pinned / 共享 DDR）、它争用的那份总线的份额上限、以及能力表（该组有可用内核的档集合——选择器据它筛掉算不了这一批的组；有无整数点积类指令——组自己的内核据它选实现）。分派只读这些声明，不读组的名字或类型。
-3. 一组只记一种账：走 PCIe 字节的组受 [interfaces.md](../interfaces.md) 第 3 节的字节预算仲裁器约束，走共享 DDR 的组受第 8 节的总线份额限流器约束（份额 0 即不启用）。两个限制点不合并。
+3. 一组只记一种账：走 PCIe 字节的组受 interfaces.md 第 3 节的字节预算仲裁器约束，走共享 DDR 的组受第 8 节的总线份额限流器约束（份额 0 即不启用）。两个限制点不合并。
 4. 组的提交面仍是作业与工人（interfaces §8.2）：组收一层一批的未命中专家，`wait()` 只在同一步的汇合点调用。
 5. 组不可用即不进候选；运行中失败按 interfaces §8.5 重派给 CPU 组。CPU 组恒可用、是兜底组，故「同时用多组」与「退回兜底组」走同一条路径。
-6. 归约顺序不变：按专家 id 全序（interfaces §8.4 与 [engine.md](../engine.md) §16）。组的边界（哪几个专家落在哪一组上）不进入求和顺序。
+6. 归约顺序不变：按专家 id 全序（interfaces §8.4 与 engine.md §16）。组的边界（哪几个专家落在哪一组上）不进入求和顺序。
 
 ## 备选方案
 
@@ -49,8 +49,8 @@
 待办
 
 - 设备侧那半的下一步是 CUDA 组：按每张卡自己的档位与显存填它那份能力表。
-- 组的配额与 [engine.md](../engine.md) §7 第 4 条的「槽位弹性」是同一个待定项：槽位数在 KV 常驻窗口与专家数量之间配平，落到接口上就是组的内存池配额。
+- 组的配额与 engine.md §7 第 4 条的「槽位弹性」是同一个待定项：槽位数在 KV 常驻窗口与专家数量之间配平，落到接口上就是组的内存池配额。
 
 ## 相关
 
-[ADR-004](ADR-004-consumer-dual-gpu-no-tensor-parallel.md)（按层切分）、[ADR-005](ADR-005-igpu-npu-as-coprocessor.md)（核显与 NPU 作为条件性协处理器）、[interfaces.md](../interfaces.md) 第 8 节、[engine.md](../engine.md) §13、[proposals.md](../proposals.md) 的 P-04、[risks.md](../risks.md) 的 R-08。
+[ADR-004](ADR-004-consumer-dual-gpu-no-tensor-parallel.md)（按层切分）、[ADR-005](ADR-005-igpu-npu-as-coprocessor.md)（核显与 NPU 作为条件性协处理器）、interfaces.md 第 8 节、engine.md §13、proposals.md 的 P-04、risks.md 的 R-08。

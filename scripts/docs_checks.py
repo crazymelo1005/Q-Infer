@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""仓库规范自检。用法：python3 scripts/docs_checks.py
+"""Repository documentation gate. Usage: python3 scripts/docs_checks.py
 
-只依赖标准库。任一检查失败即以非零码退出，供 CI 与本地使用。
-CONTRIBUTING.md 豁免词句类检查：它必须引用被禁用的写法才能定义规则。
+Standard library only. Any failing check exits non-zero, for CI and locally.
+CONTRIBUTING.md is exempt from the wording checks: it has to quote the patterns it bans.
 """
 
 from __future__ import annotations
@@ -13,25 +13,30 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 RULE_QUOTING_DOCS = {"CONTRIBUTING.md"}
+SKIP_DIRS = {".git", "build", "build-cuda", "build-engine", "build-vision", "build-vision-vk", "strata"}
 
 EMOJI = re.compile("[\U0001F7E2\U0001F535\U0001F534\U0001F7E1\U0001F7E0\u2705\U0001F50E\u26A0]")
 BOLD = re.compile(r"\*\*[^*\n]+\*\*")
 NESTED_LINK = re.compile(r"\[\[[^\]\[]+\]\([^)\s]+\)\]\([^)\s]+\)")
 LINK = re.compile(r"\]\(([^)\s]+)\)")
 FIRST_PERSON = re.compile("我们|我原|我写|我列|我判")
-EDIT_HISTORY = re.compile("原 \\d\\.\\d 版|已改写|落地状态|评审告知|复核补注|不改决策")
+EDIT_HISTORY = re.compile(r"原 \d\.\d 版|已改写|落地状态|评审告知|复核补注|不改决策")
 VERSION_HEADER = re.compile(r"^\*\*版本\*\*|^版本[：:]")
 DATE_HEADER = re.compile(r"^\*\*日期\*\*|^日期[：:]")
+ADR_ID = re.compile(r"\bADR-(\d{3})\b")
+
+# The design-phase corpus was retired; only the decision records may still cite it, as a
+# pointer to the evidence as it stood when the decision was taken.
+RETIRED = re.compile(r"(?:docs/)?(?:design|research)/(?:engine|interfaces|gates|risks|proposals|references|0\d[-\w.]*)\.md")
+ADR_DIR = ROOT / "docs/adr"
 
 BOLD_MAX_PER_100 = 10
 
 
 def md_files() -> list[Path]:
     return sorted(
-        p
-        for p in ROOT.rglob("*.md")
-        if ".git" not in p.parts
-        and not any(part.startswith("build-") for part in p.parts)
+        p for p in ROOT.rglob("*.md")
+        if ".git" not in p.parts and not any(part in SKIP_DIRS for part in p.parts)
     )
 
 
@@ -81,46 +86,35 @@ def check_style(files: list[Path]) -> list[str]:
                 problems.append(f"{name}:{i} 编辑史或自指元评论")
             if VERSION_HEADER.search(line):
                 problems.append(f"{name}:{i} 文件级版本头")
-            if DATE_HEADER.search(line) and "/adr/" not in name:
+            if DATE_HEADER.search(line) and "/adr/" in f"/{name}/":
+                pass
+            elif DATE_HEADER.search(line):
                 problems.append(f"{name}:{i} 文件级日期头")
     return problems
 
 
-def ids_in(text: str, prefix: str) -> set[str]:
-    return {m.group(0) for m in re.finditer(rf"\b{prefix}-\d{{2}}\b", text)}
-
-
-def check_registries(files: list[Path]) -> list[str]:
+def check_retired_references(files: list[Path]) -> list[str]:
     problems = []
-    registries = {
-        "S": ROOT / "docs/research/references.md",
-        "G": ROOT / "docs/design/gates.md",
-        "R": ROOT / "docs/design/risks.md",
-        "P": ROOT / "docs/design/proposals.md",
-    }
-    for prefix, registry in registries.items():
-        registered = ids_in(registry.read_text(encoding="utf-8"), prefix)
-        if not registered:
-            problems.append(f"{rel(registry)} 未登记任何 {prefix}-NN")
+    for path in files:
+        if path.parent == ADR_DIR:
             continue
-        numbers = sorted(int(i.split("-")[1]) for i in registered)
-        gaps = [n for n in range(numbers[0], numbers[-1] + 1) if n not in numbers]
-        if gaps:
-            problems.append(f"{prefix}-NN 编号跳号: {gaps}")
+        for i, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
+            if RETIRED.search(line):
+                problems.append(f"{rel(path)}:{i} 引用了已退役的设计/台账文档")
+    return problems
 
-        used: set[str] = set()
-        for path in files:
-            if path == registry:
-                continue
-            used |= ids_in(path.read_text(encoding="utf-8"), prefix)
-        unknown = sorted(used - registered)
-        if unknown:
-            problems.append(f"{prefix}-NN 引用但未登记: {unknown}")
 
-        if prefix == "S":
-            unused = sorted(registered - used)
-            if unused:
-                problems.append(f"S-N 已登记但正文未使用: {unused}")
+def check_adr_index() -> list[str]:
+    problems = []
+    index = ADR_DIR / "README.md"
+    if not index.exists():
+        return [f"{rel(index)} 缺失"]
+    indexed = set(re.findall(r"\[ADR-(\d{3})\]\(", index.read_text(encoding="utf-8")))
+    on_disk = {p.name[:7].removeprefix("ADR-") for p in ADR_DIR.glob("ADR-*.md")}
+    for missing in sorted(on_disk - indexed):
+        problems.append(f"ADR-{missing} 存在但未被 {rel(index)} 索引")
+    for ghost in sorted(indexed - on_disk):
+        problems.append(f"{rel(index)} 索引了 ADR-{ghost}，但文件不存在")
     return problems
 
 
@@ -130,9 +124,10 @@ def main() -> int:
     for label, check in (
         ("链接", check_links),
         ("风格", check_style),
-        ("登记", check_registries),
+        ("退役文档", check_retired_references),
+        ("ADR 索引", check_adr_index),
     ):
-        found = check(files)
+        found = check(files) if check is not check_adr_index else check()
         if found:
             problems.append(f"--- {label} ---")
             problems.extend(found)

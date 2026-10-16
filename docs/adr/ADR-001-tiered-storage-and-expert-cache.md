@@ -41,8 +41,8 @@
 - 性能对命中率高度敏感。参考引擎在环境2 双卡期的实测命中率为 0.935 至 0.975（专家槽位 11,967，占用 16,416 MiB），工作集切换时会波动。
 - CPU 侧算力成为新的潜在上限，本平台无 AVX-512 与 AMX。
 
-主机内存余量紧张是本决策最大的外部风险，见 [risks.md](../risks.md) 的 R-07 与 [gates.md](../gates.md) 的 G-11。
+主机内存余量紧张是本决策最大的外部风险，见 risks.md 的 R-07 与 gates.md 的 G-11。
 
 ## 相关
 
-ADR-002（未命中的处理）、ADR-003（记忆表）、[research/01-strata-engine.md](../../research/01-strata-engine.md)
+ADR-002（未命中的处理）、ADR-003（记忆表）、research/01-strata-engine.md

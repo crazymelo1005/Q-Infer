@@ -88,4 +88,4 @@
 
 ## 相关
 
-[ADR-005](ADR-005-igpu-npu-as-coprocessor.md)（核显条件性方案与 G-07 门禁，本 ADR 关闭其第二节）、[ADR-014](ADR-014-gpu-igpu-serve.md)（阶段 C/D 与分工求解器）、[ADR-016](ADR-016-vendored-strata-backend.md) 与 [ADR-017](ADR-017-serve-engine-seam.md)（厂商化引擎与 `PoolFn` 所在的进程边界）、[ADR-009](ADR-009-correctness-acceptance-criteria.md)（P3a 逐位判据）、G-07 与 R-08（[`../gates.md`](../gates.md)、[`../risks.md`](../risks.md)）。
+[ADR-005](ADR-005-igpu-npu-as-coprocessor.md)（核显条件性方案与 G-07 门禁，本 ADR 关闭其第二节）、[ADR-014](ADR-014-gpu-igpu-serve.md)（阶段 C/D 与分工求解器）、[ADR-016](ADR-016-vendored-strata-backend.md) 与 [ADR-017](ADR-017-serve-engine-seam.md)（厂商化引擎与 `PoolFn` 所在的进程边界）、[ADR-009](ADR-009-correctness-acceptance-criteria.md)（P3a 逐位判据）、G-07 与 R-08（`../gates.md`、`../risks.md`）。

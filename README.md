@@ -1,170 +1,133 @@
-# Q-Infer（擎）
+# Q-Infer
 
-在消费级 GPU 上运行超大稀疏 MoE 模型的推理引擎设计与研究。目标形态是 16 GB 显存的单卡或双卡消费级平台，主案例为 Qwen3.8-Flash-Next（125B 主参数 + 51B 外挂 n-gram 表 + 4B MTP，原生 262K 上下文）。
+An OpenAI-compatible inference server for very large sparse-MoE models on consumer GPUs. It runs Qwen3.8-Flash-Next (125B main parameters, a 51B external n-gram table, a 4B MTP head, native 262K context) on one 16 GB card, or on two, with the weights that do not fit in VRAM served from host memory and NVMe.
 
-仓库处于设计与实现并行阶段：`docs/` 是设计与事实台账，`src/` 是引擎实现。主机侧骨架已落地并在 CI 里构建与测试；GPU 侧与单请求端到端闭环尚未开始。
+Q-Infer is the product layer: the HTTP API, slot and session management, the token-prefix cache, telemetry, the web console, and the multimodal image encoder. The number crunching happens in an engine behind a process boundary - by default the Strata engine whose sources are carried in this repository under `strata/` and built by `tools/build_engine.sh` ([ADR-016](docs/adr/ADR-016-vendored-strata-backend.md), [ADR-018](docs/adr/ADR-018-default-backend-strata.md)). Two self-written backends remain in the tree and stay selectable.
 
-命名：Q-Infer。「Q」兼指 Qwen（主案例）与 Quantized（量化）；「擎」取「擎起」——用 16 GB 擎起 125B。
+Naming: "Q" stands for both Qwen (the primary case) and Quantized; the Chinese name 擎 means "to lift", which is the premise - lift 125B with 16 GB.
 
-## 适用范围
+## Quick start
 
-| 适用 | 不适用 |
-|------|--------|
-| 单机、单卡或双卡消费级 GPU | 服务端高并发吞吐 |
-| 权重装不进显存的超大稀疏 MoE | 模型能整份常驻显存时（分层与预取均失效） |
-| 超长上下文（262K 及以上） | 多机、分布式推理 |
-| 以外挂表的确定性访问换取容量 | 训练、微调、数据管线 |
-| | 通用多模型多后端平台 |
+```bash
+cmake -S . -B build && cmake --build build -j            # server: build/qinfer-server
+./tools/build_engine.sh                                   # engine: build-engine/strata
+./tools/build_vision.sh                                   # optional: image encoder
 
-## 要满足什么
-
-| 指标 | 目标 | 口径 |
-|------|------|------|
-| decode 吞吐 | 相对参考引擎 ≥1.5× | 同机、同量化档、同任务集、同并发 |
-| TTFT / prefill | ≥1.3× | 同上 |
-| 显存占用 | 不劣化 | 不得以增加常驻换取速度 |
-| 输出质量 | 逐 token 分布不变 | 量化误差有界且可测 |
-
-所有倍数指标的分母是环境2 的实测基线，不是上游公布的估算值。验收场景包含「262K 上下文 × 高比特量化档」。
-
-完整的需求、非目标与验收条件见 [requirements.md](docs/requirements.md)。
-
-## 架构一图
-
-```
-API / 调度层        OpenAI 兼容接口 · 批调度 · 前缀缓存 · 指标
-        |
-计划与预测层        表行索引预计算 · 专家共现预测 · 投机草稿树 · 精度档选择
-        |
-三层存储与流调度     VRAM · 主机 pinned · NVMe  + 统一页表 + PCIe 字节预算
-        |
-异构执行引擎        GPU 稠密与命中专家 · CPU 未命中专家 · 双 KV 池 · 投机验证
+./build/qinfer-server --backend strata \
+  --engine-exe ./build-engine/strata \
+  --model <model>-00001-of-00002.gguf \
+  --engine-arg --pack --engine-arg <pack-dir> \
+  --engine-arg --ple-gguf --engine-arg <model>-00002-of-00002.gguf \
+  --engine-arg --expert-profile --engine-arg <expert-profile.bin> \
+  --engine-arg --resident-experts \
+  --slots 4 --port 8080
 ```
 
-四条数据流：权重、专家、KV、记忆表。其中过 PCIe 的是权重、KV、记忆表三类，由同一步的字节预算统一仲裁；未命中专家走内存总线就地计算，不搬回显存。
+`curl http://127.0.0.1:8080/health` reports `loaded: true` once the engine is warm. The console is at `/`. The annotated command, the memory budget it assumes, and the knobs that were measured rather than guessed are in [docs/deployment.md](docs/deployment.md).
 
-模块职责与边界见 [overview.md](docs/overview.md)，逐模块规格见 [design/engine.md](docs/design/engine.md)。
+## Scope
 
-## 当前状态
+| In scope | Out of scope |
+|----------|--------------|
+| One machine, one or two consumer GPUs | Server-grade concurrent throughput |
+| MoE weights that never fit in VRAM | Models that fit entirely in VRAM |
+| Contexts of 262K and above | Multi-node or distributed serving |
+| Trading deterministic table reads for capacity | Training, fine-tuning, data pipelines |
+| Low concurrency (2-8 live requests) | A general multi-model, multi-backend platform |
 
-已完成：问题界定、竞品核查、架构设计、九条架构决策记录、门禁实测（13 条已测、G-11 得部分、G-14 部分未判定）、实施顺序序 0 的目标基线（单卡 decode 稳态 64.44、双卡 85.96 至 89.33 tok/s，见 [requirements §3](docs/requirements.md)）与序 1 的自动标定（机器画像，见 [research/01](docs/research/01-strata-engine.md) §10.2）。
+The Intel iGPU has one job: the multimodal vision encoder. It does not take part in inference compute ([ADR-019](docs/adr/ADR-019-igpu-not-for-experts.md), [ADR-022](docs/adr/ADR-022-igpu-cannot-take-cpu-decode-share.md)).
 
-序 2 的主机侧骨架已成形，CI 里构建并跑 65 套测试：三层存储与页表、有界行缓存、PCIe 字节预算仲裁；表行一侧的索引哈希、IQ4_NL 反量化与整条读取路径（`ple/row_path`）；专家一侧的格式分派表、三矩阵前馈（IQ2_XS / IQ2_S / IQ2_XXS / Q2_0 / IQ4_NL 五档内核）、路由门控与一层 MoE 串联（`experts/`）；生成一侧的步循环与 KV 窗口；服务一侧的 HTTP 双域、遥测、请求记录与前端（`src/serve`）。两条路径都已在真模型（环境2 上的两档分片）上跑通并对照过独立实现：表行 16 个头的 L1 与 Python oracle 全等、专家前馈与双精度参考一致、路由的专家 id 与引擎自身的主机参考全等。服务层（序 7 的 M1 切片）对外提供 OpenAI 与 Anthropic 兼容的推理接口与监控页，见 `docs/design/adr/ADR-012-http-transport-and-serving-stack.md`。
+## Backends
 
-其中 G-04 不通过：记忆表行在去重后无顺序性、亦无近邻复用，故表行预取子系统已砍，退守按需读加有界行缓存（[ADR-007](docs/design/adr/ADR-007-ngram-table-on-demand-read.md)）。G-07 判定未命中专家路径为算力瓶颈，核显分担的前提满足。
+| `--backend` | What runs | Status |
+|-------------|-----------|--------|
+| `strata` | The engine sources under `strata/`, driven over their line protocol | Default; the path measured against the acceptance targets |
+| `inhouse` | The tiered-offload engine in this repository (`storage`, `experts`, `ple`, `dense`, `kv`) | Host-side paths complete and oracle-verified against independent implementations; device-side half incomplete |
+| `native` | The self-written native engine (`src/engine`, `src/serve/native_session.cpp`) | Chunked prefill and session persistence work; output quality not yet accepted |
 
-运行时现状（环境2，真权重 sc117 IQ2_XS，2026-10-15 实测）：默认后端是参考引擎（[ADR-018](docs/design/adr/ADR-018-default-backend-strata.md)），`qinfer-server --backend strata --engine-exe build-engine/strata` 起进程边界，双卡 `--gpu 0,1 --layer-split auto` + `--mtp`/`--spec 4`/`--pipeline-windows 2`/`--pool-workers 15` 实测 **decode 100 至 136 tok/s、冷提示 prefill 约 950–1050 tok/s**（3305-token 题）。核显（iGPU）经 `--igpu off|dense|pool` 开关，默认 `off`：iGPU 稠密投影在单卡小专家缓存下看似小幅正收益（300-token 提示 178.8→187.5 tok/s），但**在真双卡配置下实测反而拖慢 prefill 约 28%**——2319-token 提示，`off` 读入 3384 ms（685.2 tok/s），`dense` 4677 ms（495.8 tok/s）；核显上的稠密计算与 GPU 串行，且专家路径越快这部分占比越低。故维持显式 opt-in，`--igpu dense` 可再评估。`pool` 不可用（0.36 tok/s），见 [ADR-019](docs/design/adr/ADR-019-igpu-not-for-experts.md)/[ADR-020](docs/design/adr/ADR-020-strata-igpu-pool.md) 与 [NOTICE](NOTICE)。prefill 距 3K 目标确认为 **专家 I/O 受限**（[ADR-021](docs/design/adr/ADR-021-prefill-expert-io-bound.md)）：拆包对拍显示约 68% 时间花在宿主侧专家流式搬运（13199-token 提示 36.6 s 中 25.2 s），而把 Q2_0 的 MMQ tile 补齐（改用 Strata 自带的 llama.cpp 分支重建，`no tile for Q2_0` 告警消失、MMQ 生效）实测只有 ~1% 差异（355→360 tok/s）。因此 3K 的差距在专家缓存命中率与 PCIe 搬运效率，不在 GEMM 算术。
+Switching backends changes no other layer: the boundary is a process and dependency boundary, not a compile-time one ([ADR-017](docs/adr/ADR-017-serve-engine-seam.md)).
 
-下一步：序 2 的验收标准是「单请求正确跑通」。主机侧大半已闭环——门控残差、步循环、KV 窗口与换入换出、PLE、内存池配平（`docs/design/engine.md §17 序 2`）；尚缺设备侧那半（批式前向与 KV 的设备实现）与 MTP 真草稿头。服务层（序 7）的 M1 切片已随本仓库落地：OpenAI 与 Anthropic 兼容的 HTTP 推理域、遥测与三页前端 + 请求检查页（`docs/design/engine.md §12.1`）；/metrics 的 conversation_cache 已由服务层 token 前缀缓存填实（精确匹配 LRU，`--conversation-cache N`，命中计入 totals.reused），Prometheus text 端口也已落地（同一 `/metrics` 按 Accept/`?format=prometheus` 内容协商，vLLM 家族名 + `qinfer:` 前缀家族）。此外还有未实现的专家档（部署那份的 IQ1_M 3 层、另一档的 IQ3_S / IQ3_XXS 等）、共享专家与专家缓存。门禁方面 G-14 仍未判定。代码版本标签 `v<主>.<次>.<修订>` 按 `CONTRIBUTING §6.2` 的约定留到「单请求跑通」之后，故尚无代码版本标签，也没有 Release（现有 15 个标签都是设计里程碑与实测快照）。
+## HTTP surface
 
-门禁指必须先测量的假设，测量不通过即砍掉对应子系统并记录负结果，不得保留。清单与测量方法见 [design/gates.md](docs/design/gates.md)。
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /v1/chat/completions`, `POST /v1/completions` | OpenAI-compatible inference, streaming and tool calls |
+| `POST /v1/messages`, `POST /v1/messages/count_tokens` | Anthropic-compatible inference |
+| `GET /v1/models`, `GET /v1/status` | Model card, live slots |
+| `GET /health` | Readiness plus device and memory telemetry |
+| `GET /metrics` | JSON snapshot, or Prometheus text via `Accept` / `?format=prometheus` |
+| `GET /api/requests`, `POST /api/feedback` | Request records and human feedback for the console |
+| `GET /`, `/web/*` | Web console: chat, monitor, inspector |
 
-## 文档导航
+## Measured performance
 
-| 想了解 | 去哪读 |
-|--------|--------|
-| 定位与范围 | 本文件 |
-| 架构概览 | [overview.md](docs/overview.md) |
-| 需求、指标与验收 | [requirements.md](docs/requirements.md) |
-| 引擎规格 | [design/engine.md](docs/design/engine.md) |
-| 模块接口 | [design/interfaces.md](docs/design/interfaces.md) |
-| 待测门禁与测量方法 | [design/gates.md](docs/design/gates.md) |
-| 风险登记 | [design/risks.md](docs/design/risks.md) |
-| 候选方向（未验证，非规格） | [design/proposals.md](docs/design/proposals.md) |
-| 决策记录 | [`docs/design/adr/`](docs/design/adr/) |
-| 事实台账 | [`docs/research/`](docs/research/) |
-| 全部出处 | [research/references.md](docs/research/references.md) |
-| 术语 | [glossary.md](docs/glossary.md) |
-| 硬件规格 | [hardware.md](docs/hardware.md) |
-| 文档地图 | [docs/README.md](docs/README.md) |
-| 写作与提交约定 | [CONTRIBUTING.md](CONTRIBUTING.md) |
+One box: Intel 285K, 61 GB RAM, 2 x RTX 5060 Ti 16 GB, IQ2_XS shards, cold prompts.
 
-## 仓库结构
+| Config | Engine | Prefill | Decode |
+|--------|--------|---------|--------|
+| 1 GPU, `--resident-experts` | 0.1.44.1 | 1,904 tok/s at 21K; 1,861 at 131K | 94-101 tok/s (300-token prose) |
+| 2 GPUs, layer split + MTP + pipelined windows | 0.1.43.1 | ~1,600 tok/s at 29K | 120-143 tok/s |
+| Expert streaming through the OS page cache | 0.1.43.1 | ~700 tok/s | - |
+
+Absolute numbers move across restarts by more than the noise floor of any single reading, so they are reported as regimes: each figure carries its prompt length, card count and engine version, and only paired same-prompt readings are used for comparison. Prefill is expert-I/O bound rather than GEMM bound, and the tuning surface has been swept item by item - both conclusions carry their measurements in [ADR-021](docs/adr/ADR-021-prefill-expert-io-bound.md) and [ADR-023](docs/adr/ADR-023-strata-engine-upgrade-01441.md).
+
+## Layout
 
 ```
 .
-├── README.md
-├── CONTRIBUTING.md
-├── LICENSE
-├── CMakeLists.txt                     构建入口（C++20）
-├── src/                               引擎实现（服务/调度/内核）
-├── strata/                            纳入本仓库的 Strata 引擎源码；由 tools/build_engine.sh 编成 build-engine/strata
-├── third_party/httplib/               唯一第三方单头依赖（cpp-httplib v0.18.6）
-├── tools/                             构建脚本（build_engine.sh、build_vision.sh）
-├── tests/                             回归测试（ctest）：单元源 + integration/serve/ + frontend/ + data/（夹具/oracle）
-├── scripts/docs_checks.py             规范自检（CI 与本地共用）
-├── measure/                           测量工具与原始结果
-├── .github/workflows/                 docs-check.yml（文档自检）· build.yml（构建与测试）
-└── docs/
-    ├── README.md             文档地图
-    ├── overview.md           架构概览
-    ├── requirements.md       需求与验收
-    ├── glossary.md           术语（唯一口径）
-    ├── hardware.md           硬件规格
-    ├── design/
-    │   ├── engine.md         引擎规格
-    │   ├── interfaces.md     模块接口
-    │   ├── gates.md          门禁与测量方法
-    │   ├── risks.md          风险登记
-    │   ├── proposals.md      候选方向
-    │   └── adr/              架构决策记录
-    └── research/
-        ├── 01-strata-engine.md
-        ├── 02-qwen3.8-flash-next.md
-        ├── 03-qwen4-trends.md
-        ├── 04-acceleration-and-memory.md
-        ├── 05-engine-landscape.md
-        └── references.md     出处总表
+├── src/                    the product: serve, engine drivers, in-house kernels and storage tiers
+├── strata/                 the Strata engine sources carried in this repo (provenance: NOTICE)
+├── deps/httplib/           the single header dependency shipped with the server
+├── tools/                  build_engine.sh, build_vision.sh, the vision port
+├── tests/                  ctest suites, fixtures, recorded engine transcripts, frontend tests
+├── measure/                measurement tools and oracle generators (their output is reproducible)
+├── scripts/docs_checks.py  the documentation gate, used by CI and locally
+├── docs/                   operator and user documentation, plus docs/adr/ decision records
+└── .github/workflows/      docs-check.yml, build.yml
 ```
 
-## 上游参考
+## Documentation
 
-设计建立在以下已有工作的核查之上。各引擎的完整出处见 [research/references.md](docs/research/references.md)。
+| Read | For |
+|------|-----|
+| [docs/overview.md](docs/overview.md) | How the pieces fit together and where the boundaries sit |
+| [docs/deployment.md](docs/deployment.md) | Build, run, memory budget, measured tuning knobs, measurement hygiene |
+| [docs/requirements.md](docs/requirements.md) | Targets, acceptance scenarios, non-goals |
+| [docs/adr/](docs/adr/README.md) | Decision records: what was chosen, measured, or dropped |
+| [docs/hardware.md](docs/hardware.md) | The two test environments |
+| [docs/glossary.md](docs/glossary.md) | Terminology, one meaning per term |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Writing, numbering, commit and CI conventions |
+| [NOTICE](NOTICE) | Provenance and licences of the sources carried in this repo |
 
-| 项目 | 定位 | 与本项目的关系 |
-|------|------|---------------|
-| Strata | 消费级分层卸载引擎 | 参考范本：专家三级分层、未命中就地计算、内建 MTP |
-| vLLM / SGLang | 服务端推理引擎 | 前提是权重常驻显存，在本场景不成立；其 n-gram 表卸载路径已实现表行异步预取 |
-| llama.cpp / KTransformers | 层级与专家级 offload | 同方向，但无专家命中率概念；两套目标环境均无 AVX-512 / AMX，内核需重算 |
-| NInfer | Blackwell 原生 FP4 稠密引擎 | 无卸载、不支持多卡，在本场景不适用；其精度路径可借鉴 |
-| KVMem | KV 上下文虚拟化 | 同类 16 GB 卡上实现 256K 近无损，是本项目 KV 侧的对照基线 |
+## Build and test
 
-Qwen3.8-Flash-Next 的官方 vLLM 部署配方：<https://recipes.vllm.ai/Qwen/Qwen3.8-Flash-Next>
+```bash
+cmake -S . -B build && cmake --build build -j
+ctest --test-dir build --output-on-failure      # 101 registered suites
+python3 scripts/docs_checks.py
+```
 
-## 贡献
+CUDA is optional: the CPU-only configuration builds and passes the same suites. `tools/build_engine.sh` rebuilds from a clean copy of `strata/` and stops if that tree differs from the committed one; its ggml dependency is materialised from one pinned commit by the script itself.
 
-见 [CONTRIBUTING.md](CONTRIBUTING.md)。当前最需要的贡献是事实核验（把推算换成实测）与门禁测量。
+## Contributing
 
-提交前可在本地运行规范自检：`python3 scripts/docs_checks.py`（CI 使用同一份判据）。
+Start with [CONTRIBUTING.md](CONTRIBUTING.md). The contributions that move this project most are measurements that overturn an assumption, and negative results recorded where others can find them.
 
-## 许可
+License: MIT, see [LICENSE](LICENSE). The engine sources under `strata/` and the vision port keep their own copyright headers; provenance and the trade-offs made there are in [NOTICE](NOTICE).
 
-采用 MIT，全文见 [LICENSE](LICENSE)。`strata` 为厂商化引入的参考引擎源码（MIT © 2026 Niko1221 and the Strata contributors），来源、取舍与厂商化决策见 [NOTICE](NOTICE) 与 [design/adr/ADR-016](docs/design/adr/ADR-016-vendored-strata-backend.md)。
-
-## 引用
+## Citation
 
 ```
-Q-Infer: 消费级 GPU 上的超大稀疏 MoE 推理引擎设计.
+Q-Infer: serving very large sparse-MoE models on consumer GPUs.
 https://github.com/crazymelo1005/Q-Infer
 ```
 
 ---
 
-## English summary
+## 中文摘要
 
-Q-Infer is a project in the design-and-implementation phase: research and architecture for running very large sparse-MoE models on consumer GPUs with 16 GB of VRAM (single or dual card). The primary case study is Qwen3.8-Flash-Next — 125B main parameters plus a 51B external n-gram table and a 4B MTP head, with a native 262K context.
+Q-Infer 在消费级 GPU 上跑超大稀疏 MoE 模型，主案例是 Qwen3.8-Flash-Next（125B 主参数 + 51B 外挂 n-gram 表 + 4B MTP，原生 262K 上下文）。产品层是本仓库自研的服务与前端：OpenAI / Anthropic 兼容接口、槽位与会话管理、token 前缀缓存、遥测、请求检查页、图像多模态编码；计算由进程边界的引擎承担，默认用纳入本仓库的 Strata 引擎源码（`strata/`，由 `tools/build_engine.sh` 构建），另可选自研的 `inhouse` 与 `native` 后端。
 
-The premise is that the weights never fit in VRAM, so the engine is built around tiered offload of expert weights, an external n-gram table read on demand behind a bounded row cache, and long-context KV management. It targets single-machine, low-concurrency use (2–8 concurrent requests), not server-grade throughput, and not multi-node deployment.
+范围限定为单机单卡或双卡、2 至 8 路并发、权重装不进显存的场景；不做多机分布式，也不做服务端高并发。核显只承担多模态编码器，不参与推理计算（[ADR-019](docs/adr/ADR-019-igpu-not-for-experts.md)）。实测口径（引擎 0.1.44.1，`--resident-experts`，冷提示）：单卡 prefill 约 1,900 tok/s（21K 与 131K 提示）、decode 94 至 101 tok/s；双卡分层加 MTP 与流水线窗口 decode 120 至 143 tok/s。跨重启的绝对值不可比，只有同题成对读数可用于比较，因此每个数字都写明提示长度、卡数与引擎版本。
 
-- Requirements and acceptance criteria: [requirements.md](docs/requirements.md)
-- Architecture overview: [overview.md](docs/overview.md)
-- Engine specification: [design/engine.md](docs/design/engine.md)
-- Gates that must be measured before implementation: [design/gates.md](docs/design/gates.md)
-- Decision records: [`docs/design/adr/`](docs/design/adr/)
-- Research ledger and references: [`docs/research/`](docs/research/)
-
-The host-side engine skeleton is implemented under `src/` and is built and tested in CI, including the quantized-kernel set, the expert path (format dispatch, gated FFN, router, one MoE layer), the n-gram table-row path, the step loop with KV windowing, and the serve layer (OpenAI/Anthropic HTTP endpoints, telemetry, request records, and the web frontend); the table-row and expert paths have been run against the real model shards and cross-checked against independent implementations.
-
-The default runtime backend is the reference engine (vendored source under `strata/`, built by `tools/build_engine.sh`), driven over a process boundary. On the dual-card test box it measures ~100-136 tok/s decode and ~950-1050 tok/s cold prefill (3305-token prompt). The Intel iGPU is behind an `--igpu off|dense|pool` switch and defaults off. iGPU dense looks like a small win in a single-GPU, small-expert-cache A/B (300-token prompt 178.8 -> 187.5 tok/s), but at the real dual-card config it costs ~28% of prefill: a 2319-token prompt reads in 3384 ms (685.2 tok/s) with it off vs 4677 ms (495.8 tok/s) with it on, because the dense work on the iGPU serializes against the GPUs and the dense share keeps shrinking as the expert path gets faster. It stays an explicit opt-in (`--igpu dense`); `pool` is not usable. `--trim-stage-weights` measured +8.6-15% prefill and is the recommended default. The gap to the 3K prefill target is expert-I/O bound, not a missing q2_0 MMQ tile — see [ADR-021](docs/design/adr/ADR-021-prefill-expert-io-bound.md). There is still no code-version tag or Release.
-
-License: MIT — see [LICENSE](LICENSE).
+架构取舍、实测读数与被砍掉的子系统见 [`docs/adr/`](docs/adr/README.md)，构建与部署细节见 [docs/deployment.md](docs/deployment.md)。

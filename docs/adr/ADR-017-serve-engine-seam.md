@@ -40,4 +40,4 @@
 
 ## 相关
 
-[ADR-008](ADR-008-implementation-stack-and-kernel-reuse.md)（零运行时依赖与 CUDA 之后的口径）、[ADR-016](ADR-016-vendored-strata-backend.md)（厂商化引擎作后端的决策与真机观测）、[`../interfaces.md`](../interfaces.md) §8.8（驱动与后端接缝）、[`../engine.md`](../engine.md) §18（后端落法）。
+[ADR-008](ADR-008-implementation-stack-and-kernel-reuse.md)（零运行时依赖与 CUDA 之后的口径）、[ADR-016](ADR-016-vendored-strata-backend.md)（厂商化引擎作后端的决策与真机观测）、`../interfaces.md` §8.8（驱动与后端接缝）、`../engine.md` §18（后端落法）。
