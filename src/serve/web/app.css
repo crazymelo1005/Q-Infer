@@ -545,6 +545,9 @@ main{flex:1;min-height:0;display:flex}
 .st-chip-group{display:flex;flex-wrap:wrap;gap:var(--st-s-2)}
 .accent-chip{display:inline-flex;align-items:center;gap:var(--st-s-2)}
 .accent-swatch{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--st-line);flex:none}
+/* Profile bar: the named generation-parameter picker plus its actions. */
+.profile-bar{display:flex;align-items:center;gap:var(--st-s-2)}
+.profile-select{flex:1;min-width:0;height:34px;padding-top:0;padding-bottom:0}
 .settings-actions{display:flex;flex-wrap:wrap;gap:var(--st-s-3);margin-top:var(--st-s-5);padding-top:var(--st-s-4);border-top:1px solid var(--st-line-soft)}
 
 /* ---- Inline panels (sampler & system prompt, toggled from composer bar) ---- */

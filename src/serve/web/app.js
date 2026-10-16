@@ -462,6 +462,19 @@ const I18N = {
     "settings.systemPromptPh": "所有新对话的默认系统指令（可留空）",
     "settings.defaults": "默认生成参数",
     "settings.defaultsHint": "新建对话或点击重置时使用这些值。",
+    "settings.profiles": "生成参数配置",
+    "settings.profileDefault": "默认",
+    "settings.profileName": "配置",
+    "settings.profileCopySuffix": "副本",
+    "settings.profileNew": "新建配置",
+    "settings.profileDuplicate": "复制配置",
+    "settings.profileRename": "重命名",
+    "settings.profileDelete": "删除配置",
+    "settings.profileRenamePrompt": "配置名称",
+    "settings.profileDeleteConfirm": "删除配置「{name}」？",
+    "settings.profileAdded": "已新建配置",
+    "settings.profileDuplicated": "已复制配置",
+    "settings.profileDeleted": "已删除配置",
     "settings.applyDefaults": "应用到当前对话",
     "settings.resetDefaults": "恢复出厂默认",
     "settings.saved": "设置已保存",
@@ -817,6 +830,19 @@ const I18N = {
     "settings.systemPromptPh": "Default instruction for all new conversations (optional)",
     "settings.defaults": "Default generation parameters",
     "settings.defaultsHint": "These values are used when you start a new conversation or click Reset.",
+    "settings.profiles": "Profiles",
+    "settings.profileDefault": "Default",
+    "settings.profileName": "Profile",
+    "settings.profileCopySuffix": "copy",
+    "settings.profileNew": "New profile",
+    "settings.profileDuplicate": "Duplicate profile",
+    "settings.profileRename": "Rename profile",
+    "settings.profileDelete": "Delete profile",
+    "settings.profileRenamePrompt": "Profile name",
+    "settings.profileDeleteConfirm": "Delete profile \"{name}\"?",
+    "settings.profileAdded": "Profile created",
+    "settings.profileDuplicated": "Profile duplicated",
+    "settings.profileDeleted": "Profile deleted",
     "settings.applyDefaults": "Apply to current conversation",
     "settings.resetDefaults": "Reset to factory defaults",
     "settings.saved": "Settings saved",
@@ -1481,6 +1507,53 @@ var SETTINGS_KEYS = ["theme", "accent", "sd-temp", "sd-top-p", "sd-top-k", "sd-m
   "sd-pres-pen", "sd-freq-pen", "sd-rep-pen", "sd-max-tokens", "sd-seed", "sd-ctx",
   "sd-system-prompt"];
 
+/* ---- Generation-parameter profiles ----------------------------------------
+   A profile is a named bundle of the numeric sampling parameters. The active
+   profile is mirrored into the flat "sd-*" keys on every load, so every
+   existing consumer (new-conversation defaults, apply-to-conversation, reset)
+   keeps reading exactly the keys it always did. The profile list is the single
+   source of truth; the flat keys are a derived view of the active profile. */
+var PROFILE_PARAM_KEYS = ["sd-temp", "sd-top-p", "sd-top-k", "sd-min-p",
+  "sd-pres-pen", "sd-freq-pen", "sd-rep-pen", "sd-max-tokens", "sd-seed", "sd-ctx"];
+
+function profileDefaultName() {
+  try { return tr("settings.profileDefault") || "Default"; } catch (e) { return "Default"; }
+}
+function newProfileId() {
+  return "p_" + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+}
+function profileParamsFrom(s) {
+  var p = {};
+  PROFILE_PARAM_KEYS.forEach(function (k) { p[k] = (s[k] !== undefined) ? s[k] : SETTINGS_DEFAULTS[k]; });
+  return p;
+}
+// Make sure a non-empty profile list exists, migrating the flat values on first run.
+function ensureProfiles(s) {
+  if (!Array.isArray(s.profiles) || s.profiles.length === 0) {
+    s.profiles = [{ id: "p_default", name: profileDefaultName(), params: profileParamsFrom(s) }];
+    s.activeProfile = s.profiles[0].id;
+  }
+  if (!s.profiles.some(function (p) { return p.id === s.activeProfile; })) {
+    s.activeProfile = s.profiles[0].id;
+  }
+  return s.profiles;
+}
+function activeProfile(s) {
+  ensureProfiles(s);
+  return s.profiles.filter(function (p) { return p.id === s.activeProfile; })[0] || s.profiles[0];
+}
+// Copy the active profile's parameters onto the flat keys.
+function mirrorActiveProfile(s) {
+  var p = activeProfile(s);
+  PROFILE_PARAM_KEYS.forEach(function (k) { if (p.params[k] !== undefined) s[k] = p.params[k]; });
+}
+// Write one parameter to the active profile and to the flat mirror, then persist.
+function setProfileParam(s, key, value) {
+  activeProfile(s).params[key] = value;
+  s[key] = value;
+  saveSettings(s);
+}
+
 function loadSettings() {
   var s = {};
   try { var raw = localStorage.getItem("qinfer.settings"); if (raw) s = JSON.parse(raw); } catch (e) {}
@@ -1493,6 +1566,12 @@ function loadSettings() {
     s.accentDefaultMigrated = true;
     try { localStorage.setItem("qinfer.settings", JSON.stringify(s)); } catch (e) {}
   }
+  // Profiles: create the first one from the flat values on upgrade, then mirror
+  // the active profile back onto the flat keys.
+  var hadProfiles = Array.isArray(s.profiles) && s.profiles.length > 0;
+  ensureProfiles(s);
+  mirrorActiveProfile(s);
+  if (!hadProfiles) { try { localStorage.setItem("qinfer.settings", JSON.stringify(s)); } catch (e) {} }
   return s;
 }
 function saveSettings(s) {
@@ -1586,6 +1665,18 @@ function syncSettingsUI(s) {
     var el = $(k);
     if (el) el.value = s[k];
   });
+  syncDefaultsGrid(s);
+}
+// Push a parameter value into both its slider and its number twin.
+function setDefaultsField(k, v) {
+  var el = $(k), num = $(k + "-num");
+  if (el) el.value = v;
+  if (num) num.value = v;
+}
+function syncDefaultsGrid(s) {
+  PROFILE_PARAM_KEYS.forEach(function (k) {
+    setDefaultsField(k, (s[k] !== undefined) ? s[k] : SETTINGS_DEFAULTS[k]);
+  });
   syncSettingsOutputs();
 }
 function syncSettingsOutputs() {
@@ -1646,18 +1737,31 @@ function initSettings() {
       e.stopPropagation();
     });
   }
-  // Defaults slider/input changes
-  SETTINGS_KEYS.forEach(function (k) {
-    if (k === "theme" || k === "accent" || k === "accent-custom") return;
-    var el = $(k);
-    if (!el) return;
-    el.addEventListener("input", function () {
+  // Defaults: parameter edits land on the active profile (and the flat mirror).
+  // seed and ctx have no slider twin but persist through the same path.
+  PROFILE_PARAM_KEYS.forEach(function (k) {
+    var el = $(k), num = $(k + "-num");
+    if (el) el.addEventListener("input", function () {
       var s = loadSettings();
-      s[k] = el.value;
-      saveSettings(s);
-      syncSettingsOutputs();
+      setProfileParam(s, k, el.value);
+      if (num) num.value = el.value;
+    });
+    if (num) num.addEventListener("input", function () {
+      var v = clampToRange(el, num.value);
+      if (v === null) return;
+      var s = loadSettings();
+      setProfileParam(s, k, String(v));
+      if (el) el.value = v;
     });
   });
+  // The default system prompt stays a single global value, not per profile.
+  var sysDef = $("sd-system-prompt");
+  if (sysDef) sysDef.addEventListener("input", function () {
+    var s = loadSettings();
+    s["sd-system-prompt"] = sysDef.value;
+    saveSettings(s);
+  });
+  initProfiles();
   // Apply to current conversation
   var btnApply = $("btn-apply-defaults");
   if (btnApply) {
@@ -1681,12 +1785,13 @@ function initSettings() {
       showToast(tr("settings.defaultsApplied"), "success");
     });
   }
-  // Reset to factory defaults
+  // Reset the active profile back to factory parameters
   var btnReset = $("btn-reset-defaults");
   if (btnReset) {
     btnReset.addEventListener("click", function () {
-      var s = {};
-      SETTINGS_KEYS.forEach(function (k) { s[k] = SETTINGS_DEFAULTS[k]; });
+      var s = loadSettings();
+      activeProfile(s).params = profileParamsFrom(SETTINGS_DEFAULTS);
+      mirrorActiveProfile(s);
       saveSettings(s);
       syncSettingsUI(s);
       showToast(tr("settings.defaultsReset"), "success");
@@ -1737,28 +1842,33 @@ function initInlinePanels() {
   });
 }
 
+// Clamp a raw input to the range of a paired slider; null when not numeric.
+function clampToRange(rangeEl, raw) {
+  var v = parseFloat(raw);
+  if (isNaN(v)) return null;
+  if (!rangeEl) return v;
+  var mn = parseFloat(rangeEl.min), mx = parseFloat(rangeEl.max);
+  if (!isNaN(mn) && v < mn) v = mn;
+  if (!isNaN(mx) && v > mx) v = mx;
+  return v;
+}
 function initSliderNumberSync() {
-  // Sync each slider with its paired number input
+  // Pair each slider with its number twin: dragging fills the number, typing
+  // clamps into the slider. Shared by the chat sampler and the settings profiles.
   var pairs = [
-    ["s-temp", "s-temp-num"],
-    ["s-top-p", "s-top-p-num"],
-    ["s-min-p", "s-min-p-num"],
-    ["s-pres-pen", "s-pres-pen-num"],
-    ["s-freq-pen", "s-freq-pen-num"],
-    ["s-rep-pen", "s-rep-pen-num"]
+    ["s-temp", "s-temp-num"], ["s-top-p", "s-top-p-num"], ["s-min-p", "s-min-p-num"],
+    ["s-pres-pen", "s-pres-pen-num"], ["s-freq-pen", "s-freq-pen-num"], ["s-rep-pen", "s-rep-pen-num"],
+    ["sd-temp", "sd-temp-num"], ["sd-top-p", "sd-top-p-num"], ["sd-top-k", "sd-top-k-num"],
+    ["sd-min-p", "sd-min-p-num"], ["sd-pres-pen", "sd-pres-pen-num"], ["sd-freq-pen", "sd-freq-pen-num"],
+    ["sd-rep-pen", "sd-rep-pen-num"], ["sd-max-tokens", "sd-max-tokens-num"]
   ];
   pairs.forEach(function (pair) {
     var slider = $(pair[0]), num = $(pair[1]);
     if (!slider || !num) return;
-    slider.addEventListener("input", function () {
-      num.value = slider.value;
-    });
+    slider.addEventListener("input", function () { num.value = slider.value; });
     num.addEventListener("input", function () {
-      var v = parseFloat(num.value);
-      if (!isNaN(v)) {
-        v = Math.max(parseFloat(slider.min), Math.min(parseFloat(slider.max), v));
-        slider.value = v;
-      }
+      var v = clampToRange(slider, num.value);
+      if (v !== null) slider.value = v;
     });
   });
 }
@@ -1779,6 +1889,90 @@ function initEmptyChips() {
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.focus();
     try { input.setSelectionRange(text.length, text.length); } catch (err) {}
+  });
+}
+
+// ---- Generation-parameter profiles: the select + add/duplicate/rename/delete --
+function renderProfileSelect(s) {
+  var sel = $("profile-select");
+  if (!sel) return;
+  sel.innerHTML = "";
+  s.profiles.forEach(function (p) {
+    var o = document.createElement("option");
+    o.value = p.id;
+    o.textContent = p.name;
+    if (p.id === s.activeProfile) o.selected = true;
+    sel.appendChild(o);
+  });
+  var del = $("btn-profile-del");
+  if (del) del.disabled = s.profiles.length <= 1;
+}
+function switchActiveProfile(id) {
+  var s = loadSettings();
+  s.activeProfile = id;
+  mirrorActiveProfile(s);
+  saveSettings(s);
+  renderProfileSelect(s);
+  syncSettingsUI(s);
+}
+function initProfiles() {
+  var sel = $("profile-select");
+  if (!sel) return;
+  var s0 = loadSettings();
+  ensureProfiles(s0);
+  renderProfileSelect(s0);
+  syncDefaultsGrid(s0);
+
+  sel.addEventListener("change", function () { switchActiveProfile(sel.value); });
+
+  var mk = $("btn-profile-new");
+  if (mk) mk.addEventListener("click", function () {
+    var s = loadSettings();
+    s.profiles.push({ id: newProfileId(), name: tr("settings.profileName") + " " + (s.profiles.length + 1), params: profileParamsFrom(SETTINGS_DEFAULTS) });
+    s.activeProfile = s.profiles[s.profiles.length - 1].id;
+    mirrorActiveProfile(s);
+    saveSettings(s);
+    renderProfileSelect(s);
+    syncSettingsUI(s);
+    showToast(tr("settings.profileAdded"), "success");
+  });
+  var dup = $("btn-profile-dup");
+  if (dup) dup.addEventListener("click", function () {
+    var s = loadSettings();
+    var cur = activeProfile(s);
+    s.profiles.push({ id: newProfileId(), name: cur.name + " " + tr("settings.profileCopySuffix"), params: JSON.parse(JSON.stringify(cur.params)) });
+    s.activeProfile = s.profiles[s.profiles.length - 1].id;
+    mirrorActiveProfile(s);
+    saveSettings(s);
+    renderProfileSelect(s);
+    syncSettingsUI(s);
+    showToast(tr("settings.profileDuplicated"), "success");
+  });
+  var ren = $("btn-profile-rename");
+  if (ren) ren.addEventListener("click", function () {
+    var s = loadSettings();
+    var cur = activeProfile(s);
+    var name = window.prompt(tr("settings.profileRenamePrompt"), cur.name);
+    if (name === null) return;
+    name = name.trim();
+    if (!name) return;
+    cur.name = name;
+    saveSettings(s);
+    renderProfileSelect(s);
+  });
+  var del = $("btn-profile-del");
+  if (del) del.addEventListener("click", function () {
+    var s = loadSettings();
+    if (s.profiles.length <= 1) return;
+    var cur = activeProfile(s);
+    if (!window.confirm(tr("settings.profileDeleteConfirm").replace("{name}", cur.name))) return;
+    s.profiles = s.profiles.filter(function (p) { return p.id !== cur.id; });
+    if (s.activeProfile === cur.id) s.activeProfile = s.profiles[0].id;
+    mirrorActiveProfile(s);
+    saveSettings(s);
+    renderProfileSelect(s);
+    syncSettingsUI(s);
+    showToast(tr("settings.profileDeleted"), "success");
   });
 }
 

@@ -575,45 +575,59 @@
                       placeholder="Default instruction for all new conversations (optional)" data-i18n-ph="settings.systemPromptPh"></textarea>
           </div>
         </div>
+        <div class="settings-row">
+          <label data-i18n="settings.profiles">Profiles</label>
+          <div class="profile-bar">
+            <select id="profile-select" class="input profile-select" data-i18n-aria="settings.profiles" aria-label="Profiles"></select>
+            <button class="st-btn st-btn--secondary st-btn--icon st-btn--sm" id="btn-profile-new" type="button" data-i18n-title="settings.profileNew">
+              <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-new-chat"/></svg></button>
+            <button class="st-btn st-btn--secondary st-btn--icon st-btn--sm" id="btn-profile-dup" type="button" data-i18n-title="settings.profileDuplicate">
+              <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-copy"/></svg></button>
+            <button class="st-btn st-btn--secondary st-btn--icon st-btn--sm" id="btn-profile-rename" type="button" data-i18n-title="settings.profileRename">
+              <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-edit"/></svg></button>
+            <button class="st-btn st-btn--secondary st-btn--icon st-btn--sm" id="btn-profile-del" type="button" data-i18n-title="settings.profileDelete">
+              <svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-trash"/></svg></button>
+          </div>
+        </div>
         <div class="drawer-grid" id="settings-defaults-grid">
           <div class="field field--slider">
-            <label class="st-label" for="sd-temp"><span data-i18n="chat.temperature">Temperature</span> <output id="sd-temp-out">0.80</output></label>
-            <input id="sd-temp" class="slider" type="range" min="0" max="2" step="0.05" value="0.8">
+            <label class="st-label" for="sd-temp" data-i18n="chat.temperature">Temperature</label>
+            <div class="slider-row"><input id="sd-temp" class="slider" type="range" min="0" max="2" step="0.05" value="0.8"><input id="sd-temp-num" class="slider-num input" type="number" min="0" max="2" step="0.05" value="0.8"></div>
           </div>
           <div class="field field--slider">
-            <label class="st-label" for="sd-top-p"><span data-i18n="chat.topP">Top-p</span> <output id="sd-top-p-out">0.95</output></label>
-            <input id="sd-top-p" class="slider" type="range" min="0.05" max="1" step="0.01" value="0.95">
+            <label class="st-label" for="sd-top-p" data-i18n="chat.topP">Top-p</label>
+            <div class="slider-row"><input id="sd-top-p" class="slider" type="range" min="0.05" max="1" step="0.01" value="0.95"><input id="sd-top-p-num" class="slider-num input" type="number" min="0.05" max="1" step="0.01" value="0.95"></div>
+          </div>
+          <div class="field field--slider">
+            <label class="st-label" for="sd-top-k" data-i18n="chat.topK">Top-k</label>
+            <div class="slider-row"><input id="sd-top-k" class="slider" type="range" min="0" max="1000" step="1" value="40"><input id="sd-top-k-num" class="slider-num input" type="number" min="0" max="1000" step="1" value="40"></div>
+          </div>
+          <div class="field field--slider">
+            <label class="st-label" for="sd-min-p" data-i18n="chat.minP">Min-p</label>
+            <div class="slider-row"><input id="sd-min-p" class="slider" type="range" min="0" max="1" step="0.01" value="0.05"><input id="sd-min-p-num" class="slider-num input" type="number" min="0" max="1" step="0.01" value="0.05"></div>
+          </div>
+          <div class="field field--slider">
+            <label class="st-label" for="sd-pres-pen" data-i18n="chat.presPen">Presence pen.</label>
+            <div class="slider-row"><input id="sd-pres-pen" class="slider" type="range" min="0" max="2" step="0.1" value="0"><input id="sd-pres-pen-num" class="slider-num input" type="number" min="0" max="2" step="0.1" value="0"></div>
+          </div>
+          <div class="field field--slider">
+            <label class="st-label" for="sd-freq-pen" data-i18n="chat.freqPen">Frequency pen.</label>
+            <div class="slider-row"><input id="sd-freq-pen" class="slider" type="range" min="0" max="2" step="0.1" value="0"><input id="sd-freq-pen-num" class="slider-num input" type="number" min="0" max="2" step="0.1" value="0"></div>
+          </div>
+          <div class="field field--slider">
+            <label class="st-label" for="sd-rep-pen" data-i18n="chat.repPen">Repeat pen.</label>
+            <div class="slider-row"><input id="sd-rep-pen" class="slider" type="range" min="1" max="2" step="0.05" value="1"><input id="sd-rep-pen-num" class="slider-num input" type="number" min="1" max="2" step="0.05" value="1"></div>
+          </div>
+          <div class="field field--slider">
+            <label class="st-label" for="sd-max-tokens" data-i18n="chat.maxTokens">Max tokens</label>
+            <div class="slider-row"><input id="sd-max-tokens" class="slider" type="range" min="1" max="32768" step="1" value="2048"><input id="sd-max-tokens-num" class="slider-num input" type="number" min="1" max="32768" step="1" value="2048"></div>
           </div>
           <div class="field">
-            <label class="st-label" for="sd-top-k"><span data-i18n="chat.topK">Top-k</span></label>
-            <input id="sd-top-k" class="input" type="number" min="0" max="1000" step="1" value="40">
-          </div>
-          <div class="field field--slider">
-            <label class="st-label" for="sd-min-p"><span data-i18n="chat.minP">Min-p</span> <output id="sd-min-p-out">0.05</output></label>
-            <input id="sd-min-p" class="slider" type="range" min="0" max="1" step="0.01" value="0.05">
-          </div>
-          <div class="field field--slider">
-            <label class="st-label" for="sd-pres-pen"><span data-i18n="chat.presPen">Presence pen.</span> <output id="sd-pres-pen-out">0.00</output></label>
-            <input id="sd-pres-pen" class="slider" type="range" min="0" max="2" step="0.1" value="0">
-          </div>
-          <div class="field field--slider">
-            <label class="st-label" for="sd-freq-pen"><span data-i18n="chat.freqPen">Frequency pen.</span> <output id="sd-freq-pen-out">0.00</output></label>
-            <input id="sd-freq-pen" class="slider" type="range" min="0" max="2" step="0.1" value="0">
-          </div>
-          <div class="field field--slider">
-            <label class="st-label" for="sd-rep-pen"><span data-i18n="chat.repPen">Repeat pen.</span> <output id="sd-rep-pen-out">1.00</output></label>
-            <input id="sd-rep-pen" class="slider" type="range" min="1" max="2" step="0.05" value="1">
-          </div>
-          <div class="field">
-            <label class="st-label" for="sd-max-tokens"><span data-i18n="chat.maxTokens">Max tokens</span></label>
-            <input id="sd-max-tokens" class="input" type="number" min="1" max="32768" step="1" value="2048">
-          </div>
-          <div class="field">
-            <label class="st-label" for="sd-seed"><span data-i18n="chat.seedLabel">Seed</span></label>
+            <label class="st-label" for="sd-seed" data-i18n="chat.seedLabel">Seed</label>
             <input id="sd-seed" class="input" type="number" step="1" value="-1">
           </div>
           <div class="field">
-            <label class="st-label" for="sd-ctx"><span data-i18n="chat.contextLen">Context length</span></label>
+            <label class="st-label" for="sd-ctx" data-i18n="chat.contextLen">Context length</label>
             <select id="sd-ctx" class="input">
               <option value="0" data-i18n="chat.ctxAuto">Auto</option>
               <option value="4096">4K</option>
