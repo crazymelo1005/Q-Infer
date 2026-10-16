@@ -177,6 +177,10 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     const std::string mmproj_given = a.count("--mmproj") ? a["--mmproj"] : std::string{};
     if (a.count("--vision-binary")) c.vision_binary = a["--vision-binary"];
     if (!resolve_vision(vision_req, c.model_path, mmproj_given, c.mmproj_path, err)) return {};
+    // --preset auto|en-code|cjk|off and --draft-vocab FILE: see apply_preset below. Validated here,
+    // applied after the engine args are assembled, printed by main as one line.
+    if (a.count("--preset")) c.preset = a["--preset"];
+    if (a.count("--draft-vocab")) c.draft_vocab = a["--draft-vocab"];
     // --vision-gpu on|off: pass --gpu to the vision child (ggml-vulkan build -> the Intel iGPU).
     // Default ON since 2026-10-15 (quality A/B at ADR-009's distribution level passed); pass
     // off to select the CPU encoder explicitly.
@@ -216,6 +220,9 @@ ServeConfig parse_flags(int argc, char** argv, std::string& err) {
     // The expert tier the engine runs with, when the operator named none (2026-10-16). See
     // server.hpp's apply_expert_tier_default for the measurement behind the default.
     apply_expert_tier_default(c.backend, c.engine_args);
+    // The use-case bundle: fills in what a measurement says is better for the use (server.hpp's
+    // apply_preset); the operator's own flags always win, and preset_note says what it did.
+    if (!apply_preset(c, c.preset_note, err)) return {};
     // For the Strata backend, parse --gpu from engine_args so telemetry can monitor only the GPUs
     // the engine actually uses (matching Strata's own monitoring convention). Without this, telemetry
     // would show all visible GPUs regardless of what the engine subprocess is using.
@@ -289,7 +296,8 @@ int main(int argc, char** argv) {
                              "[--ple-budget-bytes N] [--kv-slots N] [--kv-resident N] "
                              "[--conversation-cache N] [--backend inhouse|strata|native] "
                              "[--engine-exe P] [--engine-arg A]... "
-                             "[--vision auto|on|off] [--mmproj P] [--vision-gpu on|off]\n"
+                             "[--vision auto|on|off] [--mmproj P] [--vision-gpu on|off] "
+                             "[--preset auto|en-code|cjk|off] [--draft-vocab FILE]\n"
                              "        --threads N is the HTTP thread pool; --compute-threads N is the "
                              "inference thread pool (default: half the physical cores, capped at 8; "
                              "1 or negative = single-threaded); --lang selects the startup-log language "
@@ -299,7 +307,10 @@ int main(int argc, char** argv) {
                              "in-house engine, or --backend native for the self-written native engine); "
                              "--vision auto (default) runs the image encoder when --mmproj is given or an "
                              "mmproj*.gguf sits beside --model, on the Intel iGPU unless --vision-gpu off; "
-                             "an expert tier the operator did not name defaults to --resident-experts\n");
+                             "an expert tier the operator did not name defaults to --resident-experts; "
+                             "--preset fills in what we measured as better for the use (en-code swaps in the "
+                             "English/code draft vocabulary, +7% decode on English; cjk keeps the engine's "
+                             "CJK-inclusive default), and always yields to an explicit flag\n");
         return 2;
     }
     // --reject-after: integration-test-only knob for deterministic 503s (reject every
@@ -313,6 +324,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 #endif
+    if (!cfg.preset_note.empty())   // --preset: one line saying what it set (or why it skipped)
+        std::fprintf(stderr, "qinfer-server: preset: %s\n", cfg.preset_note.c_str());
     if (cfg.backend == "strata" && (cfg.gpu_auto || !cfg.gpu_devices.empty())) {
         std::fprintf(stderr,
                      "--gpu applies to the in-house and native backends only; pass --backend inhouse "

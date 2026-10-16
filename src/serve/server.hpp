@@ -96,6 +96,11 @@ struct ServeConfig {
     // end-task level. --vision-gpu off selects the CPU encoder for machines without the
     // Vulkan build; if the iGPU binary fails to start, the server falls back to the CPU one.
     bool vision_gpu = true;
+    // --preset auto|en-code|cjk|off: the use-case bundle below (see apply_preset). Operator flags
+    // always win; the preset only fills in what a measurement says is better for this use.
+    std::string preset = "auto";
+    std::string draft_vocab;           // --draft-vocab FILE: explicit MTP draft-token subset
+    std::string preset_note;           // filled by apply_preset; main prints it as one startup line
 };
 
 // The encoder binary that --vision-gpu selects by default: the ggml-vulkan build when the
@@ -165,6 +170,49 @@ inline bool resolve_vision(VisionRequest req, const std::string& model_path, con
         err = "--vision on: no --mmproj given and no mmproj*.gguf beside " + model_path;
         return false;
     }
+    return true;
+}
+
+// ---- the use-case preset (2026-10-16). The vendor's pattern is a table of bitwise speed switches
+// ---- keyed on the GPU arch (arch_defaults.cpp) that only its AMD builds consult; this is the same
+// ---- idea keyed on what we measured on this hardware, with every entry naming its measurement and
+// ---- with the operator's own flags always winning.
+//
+//   auto     the neutral defaults and nothing else -- the expert tier (apply_expert_tier_default)
+//            and the vision encoder on the iGPU (vision_gpu). Every run already gets these.
+//   en-code  auto + the English/code draft vocabulary (--mtp-draft-vocab). Measured on a 300-token
+//            English generation: decode 91.2 tok/s against 85.9 and 84.5 with the engine's shipped
+//            CJK-inclusive default (+7.4%; draft acceptance 77.8% against 72.0/72.4%), and the
+//            draft head drops 137.9 -> 52.6 MiB, which the expert cache takes back (+60 slots).
+//   cjk      auto only, said out loud: the engine's own default draft vocabulary covers every
+//            Chinese, Japanese and Korean token (106,299 ids), and en-code costs Chinese answers
+//            about 25% (62.9 against 83.9/83.1 tok/s, acceptance 34.7%). Pick this when Chinese
+//            dominates.
+//   off      no preset at all; whatever the operator passed.
+inline bool apply_preset(ServeConfig& cfg, std::string& note, std::string& err) {
+    if (cfg.preset.empty() || cfg.preset == "off") return true;
+    if (cfg.preset != "auto" && cfg.preset != "en-code" && cfg.preset != "cjk") {
+        err = "--preset needs auto, en-code, cjk, or off, got \"" + cfg.preset + "\"";
+        return false;
+    }
+    note = cfg.preset;
+    if (cfg.preset != "en-code") return true;
+    std::string vocab = cfg.draft_vocab;
+    if (vocab.empty()) {
+        const std::filesystem::path p(cfg.model_path);
+        const std::filesystem::path dir = p.has_parent_path() ? p.parent_path() : std::filesystem::path(".");
+        const std::string cand = (dir / "draft_vocab_en.bin").string();
+        std::error_code ec;
+        if (std::filesystem::is_regular_file(cand, ec)) vocab = cand;
+    }
+    if (vocab.empty()) {
+        note += ": draft_vocab_en.bin not found beside --model and no --draft-vocab given; keeping the "
+                "engine's CJK-inclusive default (copy the file next to the model, or pass --draft-vocab)";
+        return true;
+    }
+    cfg.engine_args.push_back("--mtp-draft-vocab");
+    cfg.engine_args.push_back(vocab);
+    note += ": mtp-draft-vocab " + vocab;
     return true;
 }
 

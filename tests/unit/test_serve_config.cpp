@@ -93,5 +93,51 @@ int main() {
         CHECK(resolve_vision(VisionRequest::Auto, "/no/such/dir/m.gguf", "", mmproj, err) && mmproj.empty());
         CHECK(resolve_vision(VisionRequest::On, "/no/such/dir/m.gguf", "", mmproj, err) == false);
     }
+    // 8. --preset：auto/cjk/off 不动 engine_args，只留一行说明；en-code 解析词表并追加
+    //    --mtp-draft-vocab；解析不到就降级并说明原因；未知名报错。
+    {
+        std::filesystem::path dir = std::filesystem::temp_directory_path() / "qinfer-preset-test";
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        std::filesystem::create_directories(dir, ec);
+        const std::string model = (dir / "model.gguf").string();
+
+        ServeConfig c;
+        c.model_path = model;
+        std::string note, err;
+        c.preset = "auto";
+        CHECK(apply_preset(c, note, err) && note == "auto" && c.engine_args.empty());
+
+        // en-code without the file beside the model: degrade, say why, add nothing
+        c.engine_args.clear(); note.clear();
+        c.preset = "en-code";
+        CHECK(apply_preset(c, note, err) && c.engine_args.empty());
+        CHECK(note.find("not found") != std::string::npos);
+
+        // with the file there: one pair of args, in order
+        std::ofstream((dir / "draft_vocab_en.bin").string(), std::ios::binary) << "x";
+        c.engine_args.clear(); note.clear();
+        CHECK(apply_preset(c, note, err) && c.engine_args.size() == 2);
+        CHECK(c.engine_args[0] == "--mtp-draft-vocab");
+        CHECK(c.engine_args[1] == (dir / "draft_vocab_en.bin").string());
+
+        // an explicit --draft-vocab wins over the lookup
+        c.engine_args.clear(); note.clear();
+        c.draft_vocab = "/x/explicit.bin";
+        CHECK(apply_preset(c, note, err) && c.engine_args.size() == 2 && c.engine_args[1] == "/x/explicit.bin");
+
+        // cjk / off: no args
+        c.engine_args.clear(); note.clear(); c.draft_vocab.clear();
+        c.preset = "cjk";
+        CHECK(apply_preset(c, note, err) && c.engine_args.empty() && note == "cjk");
+        note.clear();
+        c.preset = "off";
+        CHECK(apply_preset(c, note, err) && note.empty() && c.engine_args.empty());
+
+        // an unknown name is an error
+        c.preset = "fast";
+        CHECK(apply_preset(c, note, err) == false && !err.empty());
+        std::filesystem::remove_all(dir, ec);
+    }
     return 0;
 }
