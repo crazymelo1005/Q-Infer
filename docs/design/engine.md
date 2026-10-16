@@ -459,9 +459,9 @@ G-14 已经测得：四档 KV 的 decode 吞吐几乎相同（±2%），即该�
 
 计算后端有两条并存：自研引擎与厂商化的 Strata 引擎（[ADR-016](adr/ADR-016-vendored-strata-backend.md)）。后者以子进程形态接入，本仓库只通过 stdin/stdout 行协议驱动它，故它自带的重型 CUDA 栈不进本仓库的链接面（ADR-008）。
 
-- 入库与构建：`third_party/strata`（tag v0.1.43.1，MIT）冻结入库；`tools/build_engine.sh` 编出 `build-engine/strata`，只在构建目录的副本上做，不改入库源码。
+- 入库与构建：`strata/`（tag v0.1.44.1，MIT，见 [ADR-023](adr/ADR-023-strata-engine-upgrade-01441.md)）冻结入库；`tools/build_engine.sh` 编出 `build-engine/strata`，只在构建目录的副本上做，不改入库源码，并自行物化钉版 ggml（commit `3cf0325`，与视觉编码器同源）。
 - 驱动层 `src/engine`：`engine_protocol` 造命令（`GEN` / `BGEN` / `BSTOP` / `STOP` / `QUIT` / `VRAM`）与解析事件行（`READY` / `INFO` / `T` / `PP` / `RESUME` / `DONE` / `BADM` / `BT` / `BDONE` / `ERR` / `FATAL` 等）；`engine_process` 起进程与按行 IO；`engine_driver` 负责握手（读至 `READY`，带超时）、单请求生成（回调回 `false` 即写 `STOP` 取消）、批槽位（`acquire_slot` / `generate_batch` / `cancel_slot`）与重启（`stop_and_recover`）。
-- 协议字面量以真实引擎转录为唯一口径：`tests/data/strata_transcript_gen.txt`（引擎 0.1.43.1）。`DONE` 为 15 字段；真机的批处理会先出一个单请求首词元再 `BADM`，与驱动的简化模型有差，见 ADR-016 后果。
+- 协议字面量以真实引擎转录为唯一口径：`tests/data/strata_transcript_gen.txt`（录自引擎 0.1.43.1；当前引擎钉 v0.1.44.1，ADR-023 端到端复验确认驱动依赖的协议行未变）。`DONE` 为 15 字段；真机的批处理会先出一个单请求首词元再 `BADM`，与驱动的简化模型有差，见 ADR-016 后果。
 - 服务层接线（[ADR-017](adr/ADR-017-serve-engine-seam.md)）：`Serve` 只依赖纯虚接口 `Backend`（`src/serve/facade.hpp`）；`Engine` 与 `StrataBackend`（`src/serve/backend_strata.hpp`）各实现它。`--backend inhouse|strata` 选择实现，默认 `strata`（[ADR-018](adr/ADR-018-default-backend-strata.md)：P2 验收后切换；缺 `--engine-exe` 即拒绝启动并指明两条出路）；`strata` 下 main 只把同一个 GGUF 的元数据（词表/模板/显示名）读出来移入后端，权重由引擎自己带，引擎靠 `--engine-exe` / `--engine-arg` 起。`qinfer_engine` 起链进 `qinfer_serve`（只依赖标准库与 pthreads，ADR-008 不破）。真机 A/B 待跑，缺口与已知差异见 ADR-017 后果。
 
 ## 附录 A 数据交换优化清单

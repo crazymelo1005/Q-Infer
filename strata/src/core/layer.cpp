@@ -1,6 +1,7 @@
 
 // src/core/layer.cpp - the GDN layer, composed.  See the header for the operation order and its traps.
 #include "strata/core/layer.hpp"
+#include "strata/core/native_dense.hpp"
 #include "strata/core/native_head.hpp"
 #include "strata/kernels/bf16_bits.hpp"
 #include "strata/kernels/bf16_gemv.hpp"
@@ -18,7 +19,6 @@
 #include "strata/kernels/native_mmvq.hpp"
 #include "strata/kernels/native_moe.hpp"
 #include "strata/kernels/native_gdn.hpp"
-#include "strata/kernels/igpu/igpu_dense_projector.hpp"
 #include "strata/kernels/native_gdn_preprocess.hpp"
 #include "strata/kernels/native_router.hpp"
 #include "strata/kernels/native_qsa.hpp"
@@ -142,64 +142,6 @@ void project_bf16(const float* x, const uint16_t* x_bf16, const uint16_t* weight
 /// picks.  Producing only the one it thinks it needs is how the assumption gets baked in again.
 bool gemv_quantized(const WeightRef& w, const Planes& p, const strata::kernels::SForm& f, const uint8_t* x80, const uint8_t* xq8k,                    float* y, int64_t n_in, int64_t n_out, const std::string& name, void* stream,                    std::string& err, const float* x_f32 = nullptr, bool x_q8_1_ready = false) {
     using namespace strata::kernels;
-
-    // iGPU dense projection path: when igpu_data is set, route to iGPU instead of CUDA GPU.
-    // A size gate: the iGPU route costs a heap alloc + a scalar activation quantize + three
-    // PCIe uploads + a blocking Vulkan dispatch + a full-output PCIe download PER CALL, which
-    // only amortizes on large projections. Measured on the sc117 IQ2_XS pairing, prefill fell
-    // 703 -> 546 tok/s with the gate off; gating the small ones back to the GPU recovers it to
-    // 598 (still short of 703, so a batched GEMM is the real fix). Tune with STRATA_IGPU_MIN_FLOPS.
-    static const long long kIgpuMinFlops = [] {
-        const char* e = std::getenv("STRATA_IGPU_MIN_FLOPS");
-        return e != nullptr ? std::atoll(e) : 4000000LL;
-    }();
-    if (w.igpu_data != nullptr && x_f32 != nullptr &&
-        static_cast<long long>(n_in) * static_cast<long long>(n_out) >= kIgpuMinFlops) {
-        auto* proj = igpu::igpu_dense_projector();
-        if (proj != nullptr && proj->available()) {
-            // Use Strata's Q8_1 quantization (proper fp16 conversion)
-            // The native_q8_1 scratch is already allocated per-weight, but we need a temporary one here
-            const std::size_t q8_1_bytes = igpu::native_q8_1_bytes((int)n_in);
-            std::vector<uint8_t> q8_1_buf(q8_1_bytes);
-
-            // Quantize on CPU (no CUDA stream needed for CPU quantization)
-            // Note: This is a simplified CPU quantization; for production, use the CUDA kernel
-            const int n_blocks = (int)n_in / 32;
-            uint8_t* q8_codes = q8_1_buf.data();
-            uint16_t* q8_scales = reinterpret_cast<uint16_t*>(q8_codes + n_in);
-            uint16_t* q8_sums = q8_scales + n_blocks;
-
-            for (int b = 0; b < n_blocks; ++b) {
-                const float* block = x_f32 + b * 32;
-                float amax = 0.0f;
-                float sum = 0.0f;
-                for (int j = 0; j < 32; ++j) {
-                    amax = std::max(amax, std::fabs(block[j]));
-                    sum += block[j];
-                }
-                const float d = amax / 127.0f;
-                const float id = d != 0.0f ? 1.0f / d : 0.0f;
-
-                // Convert to fp16 using Strata's helper
-                q8_scales[b] = igpu::f32_to_f16(d);
-                q8_sums[b] = igpu::f32_to_f16(sum);
-
-                for (int j = 0; j < 32; ++j) {
-                    q8_codes[b * 32 + j] = (uint8_t)(int8_t)std::lround(block[j] * id);
-                }
-            }
-
-            // Execute on iGPU
-            std::string igpu_err;
-            if (proj->run(w.igpu_data, q8_1_buf.data(), y, (int)n_in, (int)n_out, igpu_err)) {
-                return true;
-            }
-            // Fall through to GPU path on iGPU failure
-            std::fprintf(stderr, "strata igpu dense: run %s failed: %s (falling back to GPU)\n",
-                         name.c_str(), igpu_err.c_str());
-        }
-    }
-
     if (w.native_data) {
         if (!x_f32 || !w.native_q8_1 || !stream || n_in != w.ne0 || n_out != w.ne1) {
             err = name + ": native projection requires matching FP32 input and session scratch";
@@ -561,9 +503,7 @@ bool moe_layer(const WeightTable& tables, const ModelGeometry& g, int64_t layer,
 if (!moe_route(tables, g, layer, k, b, x, stream, err, db)) return false;    return moe_finish(tables, g, layer, k, b, x, parts, out, stream, err);}
 // ================================ the QSA mixer ================================
 namespace {using strata::kernels::QsaIndexerBuffers;using strata::kernels::QsaShapes;
-/// The geometry the QSA kernels want, from the one place that defines it.  `ModelGeometry` carries the widths
-/// the LAYOUT needs; `QsaShapes` adds `n_rot`, `idx_block` and `idx_top_k`, which are kernel contracts.
-QsaShapes qsa_shapes(const ModelGeometry& g) {    QsaShapes s = strata::kernels::qsa_real_shapes();    s.n_head = g.n_head;    s.n_head_kv = g.n_head_kv;    s.head_dim = g.head_dim;    s.idx_n_head = g.idx_q_heads;    s.idx_dim = g.idx_key_dim;    return s;}
+// `qsa_shapes(g)` (layout.hpp): the geometry the QSA kernels want, every field from the model's geometry
 uint64_t align_up16(uint64_t n) { return (n + 15) & ~15ull; }
 /// One cursor over an arena, so every region is 16-byte aligned without a list of hand-added offsets.
 struct Cursor {    uint8_t* p;    uint64_t used = 0;    template <typename T>    T* take(uint64_t count) {        T* r = (T*) (p + used);        used = align_up16(used + count * sizeof(T));        return r;    }    uint8_t* take_bytes(uint64_t n) {        uint8_t* r = p + used;        used = align_up16(used + n);        return r;    }};
@@ -1467,12 +1407,12 @@ st_begin(layer, 0, stream);
     if (fused) {
         strata::kernels::FusedGrArgs fa;
         fa.R = R; fa.R_out = R; fa.apply = pending_ffn; fa.bo_prev = bb.block_out; fa.inj_prev = bb.inject2;
-        fa.w_norm = (const float*) w_norm[0]->data; fa.w_down = (const uint16_t*) w_down[0]->data;
-        fa.w_up = (const uint16_t*) w_up[0]->data; fa.w_inject = (const uint16_t*) w_inject[0]->data;
+        fa.w_norm = (const float*) w_norm[0]->data; fa.w_down = NativeDense::hc_bf16_view(*w_down[0], stream, 0, 1);
+        fa.w_up = NativeDense::hc_bf16_view(*w_up[0], stream, 1, 1); fa.w_inject = (const uint16_t*) w_inject[0]->data;
         fa.eps = RMS_EPS; fa.lo = bb.gr.lo; fa.rs = bb.gr_rs; fa.inject_out = bb.inject; fa.mixed = bb.mixed;
         strata::kernels::fused_gr_read(fa, stream);
     } else {
-    gr_read(R, (const float*) w_norm[0]->data, (const uint16_t*) w_down[0]->data,            (const uint16_t*) w_up[0]->data, (const uint16_t*) w_inject[0]->data, RMS_EPS, gs, bb.gr, bb.mixed,            bb.inject, stream);
+    gr_read(R, (const float*) w_norm[0]->data, NativeDense::hc_bf16_view(*w_down[0], stream, 0, 1),            NativeDense::hc_bf16_view(*w_up[0], stream, 1, 1), (const uint16_t*) w_inject[0]->data, RMS_EPS, gs, bb.gr, bb.mixed,            bb.inject, stream);
     }
     st_end(layer, 0, stream);    dump_half(bb, g, layer, bb.inject, 2 * g.n_embd, g.hc, stream);        }
     if (run1) {
@@ -1490,12 +1430,12 @@ st_begin(layer, 3, stream);
     if (fused) {
         strata::kernels::FusedGrArgs fa;
         fa.R = R; fa.R_out = R; fa.apply = true; fa.bo_prev = bb.block_out; fa.inj_prev = bb.inject;
-        fa.w_norm = (const float*) w_norm[1]->data; fa.w_down = (const uint16_t*) w_down[1]->data;
-        fa.w_up = (const uint16_t*) w_up[1]->data; fa.w_inject = (const uint16_t*) w_inject[1]->data;
+        fa.w_norm = (const float*) w_norm[1]->data; fa.w_down = NativeDense::hc_bf16_view(*w_down[1], stream, 0, 1);
+        fa.w_up = NativeDense::hc_bf16_view(*w_up[1], stream, 1, 1); fa.w_inject = (const uint16_t*) w_inject[1]->data;
         fa.eps = RMS_EPS; fa.lo = bb.gr.lo; fa.rs = bb.gr_rs; fa.inject_out = bb.inject2; fa.mixed = bb.mixed;
         strata::kernels::fused_gr_read(fa, stream);
     } else {
-    gr_read(R, (const float*) w_norm[1]->data, (const uint16_t*) w_down[1]->data,            (const uint16_t*) w_up[1]->data, (const uint16_t*) w_inject[1]->data, RMS_EPS, gs, bb.gr, bb.mixed,            bb.inject, stream);
+    gr_read(R, (const float*) w_norm[1]->data, NativeDense::hc_bf16_view(*w_down[1], stream, 0, 1),            NativeDense::hc_bf16_view(*w_up[1], stream, 1, 1), (const uint16_t*) w_inject[1]->data, RMS_EPS, gs, bb.gr, bb.mixed,            bb.inject, stream);
     }
     st_end(layer, 3, stream);        }
     if (run4) {

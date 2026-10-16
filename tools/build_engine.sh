@@ -8,7 +8,7 @@
 #
 # WHY THE TREE IS COPIED BEFORE CONFIGURING
 # strata/ is vendored WITHOUT upstream's tests/ and bench/ (see NOTICE) and is
-# frozen byte-for-byte at v0.1.43.1, so nothing here ever edits it. But its CUDA section
+# frozen byte-for-byte at v0.1.44.1, so nothing here ever edits it. But its CUDA section
 # registers the target `dma_batch_parity` from `tests/core/dma_batch_parity.cu` with no
 # STRATA_BUILD_TESTS guard, and CMake resolves every add_executable at configure time — so a
 # partial tree cannot configure, even when we only ask for the `strata` target. We therefore
@@ -21,13 +21,21 @@
 # (never fetched — this machine builds offline).
 #
 # Env overrides:
-#   STRATA_GGML_DIR  (required) path to a llama.cpp checkout to take ggml from
+#   STRATA_GGML_DIR  a llama.cpp checkout to take ggml from, default = the pinned commit
+#                    below, materialized into $BUILD/llama.cpp (the same source the vision
+#                    build already pins; see tools/build_vision.sh)
+#   LLAMA_SRC        the checkout holding that commit, default $HOME/projects/ref_repos/llama.cpp
 #   NVCC             cuda compiler, default /usr/local/cuda/bin/nvcc
 #   JOBS             parallel build jobs, default 8 (24-core box; leave headroom)
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-: "${STRATA_GGML_DIR:?set STRATA_GGML_DIR to a llama.cpp checkout}"
+: "${LLAMA_SRC:=$HOME/projects/ref_repos/llama.cpp}"
+# The ggml the vendored engine pins (third_party/ggml/VERSION.txt upstream), the same commit
+# tools/build_vision.sh uses. Pinning it matters: the vendored CUDA adapter compiles against
+# ggml's block/param structs, and an older checkout fails with "too many initializer values"
+# (that was papered over with a local edit in the v0.1.43.1 tree).
+PIN=3cf03257f219afbe7334045ff7c6a06ac68c627d
 
 VENDOR="$REPO/strata"
 BUILD="$REPO/build-engine"
@@ -58,6 +66,22 @@ cat > "$PLACEHOLDER" <<'EOF'
 #error "tests/core/dma_batch_parity.cu is a configure-time placeholder from tools/build_engine.sh; build the 'strata' target, or vendor upstream's real test source"
 EOF
 
+# Materialize the pinned ggml (read-only: git archive; never fetched, checked out or edited).
+GGML="${STRATA_GGML_DIR:-$BUILD/llama.cpp}"
+if [ "$GGML" = "$BUILD/llama.cpp" ] && [ ! -d "$GGML/ggml" ]; then
+  [ -d "$LLAMA_SRC/.git" ] || {
+    echo "error: no llama.cpp checkout at $LLAMA_SRC (set LLAMA_SRC, or STRATA_GGML_DIR to an existing one)" >&2
+    exit 1
+  }
+  git -C "$LLAMA_SRC" cat-file -e "${PIN}^{commit}" 2>/dev/null || {
+    echo "error: $LLAMA_SRC does not hold commit $PIN; fetch it there first (this machine builds offline)" >&2
+    exit 1
+  }
+  echo "materializing llama.cpp $PIN from $LLAMA_SRC into $GGML"
+  mkdir -p "$GGML"
+  git -C "$LLAMA_SRC" archive --format=tar "$PIN" | tar -x -C "$GGML"
+fi
+
 cmake -G Ninja -S "$SRC" -B "$BUILD" \
   -DCMAKE_BUILD_TYPE=Release \
   -DSTRATA_ENABLE_CUDA=ON \
@@ -65,7 +89,7 @@ cmake -G Ninja -S "$SRC" -B "$BUILD" \
   -DSTRATA_NATIVE_EXPERTS=ON \
   -DCMAKE_CUDA_ARCHITECTURES=120 \
   -DCMAKE_CUDA_COMPILER="${NVCC:-/usr/local/cuda/bin/nvcc}" \
-  -DSTRATA_GGML_DIR="$STRATA_GGML_DIR"
+  -DSTRATA_GGML_DIR="${STRATA_GGML_DIR:-$BUILD/llama.cpp}"
 
 cmake --build "$BUILD" --target strata -j "${JOBS:-8}"
 

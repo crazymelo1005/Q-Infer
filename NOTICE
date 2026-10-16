@@ -10,10 +10,10 @@ This repository vendors part of **Strata**, an MIT-licensed MoE inference engine
 Provenance
 ----------
 
-- Tag: `v0.1.43.1`
-- Commit: `a0116b2782a5b82622358c04a06496485d12b2d6`
-- Vendored: 2026-10-13
-- Location: `third_party/strata/`
+- Tag: `v0.1.44.1`
+- Commit: `9791ea335ba2`
+- Vendored: 2026-10-16（原 v0.1.43.1 入库于 2026-10-13，见 ADR-023）
+- Location: `strata/`
 - The vendored tree is **unmodified**. Any future edit is a deliberate divergence and
   must be recorded here and in the decision record below.
 

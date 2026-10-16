@@ -1,6 +1,6 @@
 # ADR-020：Strata iGPU 专家池——未命中专家加速
 
-**状态**：Accepted（2026-10-14）
+**状态**：Superseded（2026-10-16，被 [ADR-023](ADR-023-strata-engine-upgrade-01441.md) 取代：引擎升到 v0.1.44.1 时撤销了本 ADR 的 igpu 池集成；核显只做多模态编码器）
 
 ---
 
