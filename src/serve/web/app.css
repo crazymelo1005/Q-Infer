@@ -66,16 +66,18 @@ main{flex:1;min-height:0;display:flex}
 /* Bubble actions: ghost icons that appear on hover, and — because a control that
    only exists on hover is unreachable by keyboard — on focus too. Touch devices
    have no hover, so there they are simply always visible. */
-.bubble-actions{display:flex;gap:2px;margin-top:var(--st-s-2);opacity:0;transition:opacity 0.2s;pointer-events:none}
-.bubble:hover .bubble-actions,.bubble:focus-within .bubble-actions,.bubble-actions:hover{opacity:1;pointer-events:auto}
+/* Bubble actions stay visible at low contrast so they are discoverable without
+   hovering, and rise to full contrast on hover or keyboard focus. */
+.bubble-actions{display:flex;gap:2px;margin-top:var(--st-s-2);opacity:.5;transition:opacity var(--st-dur) var(--st-ease)}
+.bubble:hover .bubble-actions,.bubble:focus-within .bubble-actions,.bubble-actions:hover,.bubble-actions:focus-within{opacity:1}
 .bubble-action{width:30px;height:30px;padding:0;background:transparent;border:1px solid transparent;border-radius:var(--st-r-sm);color:var(--st-ink-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background var(--st-dur) var(--st-ease),color var(--st-dur) var(--st-ease)}
 .bubble-action:hover{background:var(--st-surface-2);color:var(--st-ink)}
 .bubble-action:focus-visible{outline:2px solid var(--st-focus);outline-offset:1px}
 .bubble-action.active{background:var(--st-accent-tint);color:var(--st-accent-text)}
-.bubble.user .bubble-action{color:var(--st-accent-ink);opacity:.72}
-.bubble.user .bubble-action:hover{background:rgba(255,255,255,.18);color:var(--st-accent-ink);opacity:1}
-.bubble.user .bubble-action.active{background:rgba(255,255,255,.28);color:var(--st-accent-ink);opacity:1}
-@media (hover:none){.bubble-actions{opacity:1;pointer-events:auto}}
+.bubble.user .bubble-action{color:var(--st-accent-ink)}
+.bubble.user .bubble-action:hover{background:rgba(255,255,255,.18);color:var(--st-accent-ink)}
+.bubble.user .bubble-action.active{background:rgba(255,255,255,.28);color:var(--st-accent-ink)}
+@media (hover:none){.bubble-actions{opacity:1}}
 
 /* Conversation sidebar */
 .conv-sidebar{width:280px;flex-shrink:0;background:var(--st-surface);border-right:1px solid var(--st-line);display:flex;flex-direction:column;overflow:hidden;transition:width 0.2s,margin-left 0.2s}

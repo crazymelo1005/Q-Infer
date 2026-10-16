@@ -2191,15 +2191,15 @@ function addMsg(role, text, attachList, ts) {
     actions.className = "bubble-actions";
     actions.innerHTML = '<button class="bubble-action" data-action="copy" title="' + tr("chat.copy") + '" aria-label="' + tr("chat.copy") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-copy"/></svg></button>' +
       '<button class="bubble-action" data-action="regenerate" title="' + tr("chat.regenerate") + '" aria-label="' + tr("chat.regenerate") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-refresh"/></svg></button>' +
-      '<button class="bubble-action" data-action="thumbup" title="' + tr("chat.good") + '" aria-label="' + tr("chat.good") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-check"/></svg></button>' +
-      '<button class="bubble-action" data-action="thumbdown" title="' + tr("chat.bad") + '" aria-label="' + tr("chat.bad") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-error"/></svg></button>';
+      '<button class="bubble-action" data-action="thumbup" title="' + tr("chat.good") + '" aria-label="' + tr("chat.good") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-thumb-up"/></svg></button>' +
+      '<button class="bubble-action" data-action="thumbdown" title="' + tr("chat.bad") + '" aria-label="' + tr("chat.bad") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-thumb-down"/></svg></button>';
     el.appendChild(actions);
   } else if (role === "user") {
     var uactions = document.createElement("div");
     uactions.className = "bubble-actions";
     uactions.innerHTML = '<button class="bubble-action" data-action="copy" title="' + tr("chat.copy") + '" aria-label="' + tr("chat.copy") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-copy"/></svg></button>' +
       '<button class="bubble-action" data-action="edit" title="' + tr("chat.edit") + '" aria-label="' + tr("chat.edit") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-edit"/></svg></button>' +
-      '<button class="bubble-action" data-action="branch" title="' + tr("conv.branch") + '" aria-label="' + tr("conv.branch") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-new-chat"/></svg></button>';
+      '<button class="bubble-action" data-action="branch" title="' + tr("conv.branch") + '" aria-label="' + tr("conv.branch") + '"><svg class="st-icon st-icon--sm"><use href="/web/sprite.svg#i-branch"/></svg></button>';
     el.appendChild(uactions);
   }
   $("msg-list").appendChild(el);
