@@ -55,9 +55,9 @@ add_library(qinfer_serve
 )
 target_include_directories(qinfer_serve PUBLIC src)
 target_link_libraries(qinfer_serve PUBLIC qinfer_text qinfer_dense qinfer_ple qinfer_storage qinfer_kernels qinfer_engine)
-# third_party/httplib/httplib.h = cpp-httplib v0.18.6（整份入库，SHA-256 见提交说明）。
+# deps/httplib/httplib.h = cpp-httplib v0.18.6，随库的单头依赖（出处与许可见 NOTICE，SHA-256 见提交说明）。
 # 「裁剪」落实为不定义 CPPHTTPLIB_OPENSSL_SUPPORT 与 CPPHTTPLIB_ZLIB_SUPPORT；线程池由入口按槽位配置。
-target_include_directories(qinfer_serve PUBLIC third_party/httplib)
+target_include_directories(qinfer_serve PUBLIC deps/httplib)
 
 # M1 服务入口（T9）：HTTP 接线层 + 集成脚本（同库下继续加源，可执行单挂 main.cpp）。
 # 可执行名沿用产品名 qinfer-server（run.sh 与 main.cpp 的用法说明都按连字符引用）。
